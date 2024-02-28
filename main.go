@@ -5,7 +5,6 @@ import (
     "log"
     "os"
     "time"
-    "context"
     "net/http"
 )
 
@@ -67,17 +66,31 @@ func main() {
     {
         ticker := time.NewTicker(24 * time.Hour)
         defer ticker.Stop()
-        var ctx context.Context
         go func() {
             for {
                 <-ticker.C
-                fails, err := updatePaths(db, ctx, tokenizer)
+                fails, err := updatePaths(db, tokenizer)
                 if err != nil {
                     log.Println(err)
                 } else {
                     for _, f := range fails {
                         log.Println(f)
                     }
+                }
+            }
+        }()
+    }
+
+    // Adding another per-day job that updates the paths.
+    {
+        ticker := time.NewTicker(24 * time.Hour)
+        defer ticker.Stop()
+        go func() {
+            for {
+                <-ticker.C
+                err := backupDatabase(db, dbpath + ".backup")
+                if err != nil {
+                    log.Println(err)
                 }
             }
         }()

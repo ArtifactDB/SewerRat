@@ -89,7 +89,7 @@ func newRegisterFinishHandler(db *sql.DB, scratch string, tokenizer *unicodeToke
             return
         }
 
-        failures, err := addDirectory(db, r.Context(), regpath, tokenizer)
+        failures, err := addDirectory(db, regpath, tokenizer)
         if err != nil {
             dumpJsonResponse(w, http.StatusInternalServerError, map[string]string{ "status": "ERROR", "reason": fmt.Sprintf("failed to index directory; %v", err) })
             return

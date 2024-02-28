@@ -4,8 +4,8 @@ import (
     "os"
     "fmt"
     "time"
-    "context"
     "sync"
+    "errors"
     "encoding/json"
     "path/filepath"
     "io/fs"
@@ -100,7 +100,7 @@ func (i *insertStatements) Close() error {
 
 /**********************************************************************/
 
-func addDirectory(db *sql.DB, ctx context.Context, directory string, tokenizer *unicodeTokenizer) ([]string, error) {
+func addDirectory(db *sql.DB, directory string, tokenizer *unicodeTokenizer) ([]string, error) {
     all_failures := []string{}
 
     paths := []string{}
@@ -164,7 +164,7 @@ func addDirectory(db *sql.DB, ctx context.Context, directory string, tokenizer *
     }
 
     {
-        tx, err := db.BeginTx(ctx, nil)
+        tx, err := db.Begin()
         if err != nil {
             return nil, fmt.Errorf("failed to prepare a database transaction; %w", err)
         }
@@ -326,7 +326,7 @@ func deleteDirectory(db *sql.DB, directory string) error {
 
 /**********************************************************************/
 
-func updatePaths(db *sql.DB, ctx context.Context, tokenizer* unicodeTokenizer) ([]string, error) {
+func updatePaths(db *sql.DB, tokenizer* unicodeTokenizer) ([]string, error) {
     update_paths := []string{}
     update_users := []string{}
     update_times := []int64{}
@@ -403,15 +403,15 @@ func updatePaths(db *sql.DB, ctx context.Context, tokenizer* unicodeTokenizer) (
         wg.Wait()
     }
 
-    // Second pass, setting up a transaction.
     all_failures := []string{}
     {
-        tx, err := db.BeginTx(ctx, nil)
+        tx, err := db.Begin()
         if err != nil {
             return nil, fmt.Errorf("failed to prepare a database transaction; %w", err)
         }
         defer tx.Rollback()
 
+        // Removing all the out-dated paths.
         delstmt, err := tx.Prepare("DELETE FROM paths WHERE path = ?")
         if err != nil {
             return nil, fmt.Errorf("failed to prepare the delete transaction; %w", err)
@@ -425,6 +425,7 @@ func updatePaths(db *sql.DB, ctx context.Context, tokenizer* unicodeTokenizer) (
             }
         }
 
+        // Updating the existing files.
         pustmt, err := tx.Prepare("UPDATE paths SET user = ?, timestamp = ?, metadata = ? WHERE path = ?")
         if err != nil {
             return nil, fmt.Errorf("failed to prepare path update statement; %w", err)
@@ -472,4 +473,44 @@ func updatePaths(db *sql.DB, ctx context.Context, tokenizer* unicodeTokenizer) (
     }
 
     return all_failures, nil
+}
+
+/**********************************************************************/
+
+func backupDatabase(db *sql.DB, path string) error {
+    var existing bool
+    _, err := os.Stat(path)
+    if err == nil {
+        existing = true
+        err = os.Rename(path, path + ".backup")
+        if err != nil {
+            return fmt.Errorf("failed to move the backup database; %w", err) 
+        }
+    } else if errors.Is(err, os.ErrNotExist) {
+        existing = false 
+    } else {
+        return fmt.Errorf("failed to inspect the backup database; %w", err) 
+    }
+
+    _, err = db.Exec("VACUUM INTO ?", path)
+    if err != nil {
+        all_errors := []error{ fmt.Errorf("failed to create a backup database; %w", path, err) }
+        if existing {
+            // Move the backup of the backup back to its previous location.
+            err = os.Rename(path + ".backup", path)
+            if err != nil {
+                all_errors = append(all_errors, fmt.Errorf("failed to restore the old backup database; %w", err))
+            }
+        }
+        return errors.Join(all_errors...)
+    }
+
+    if existing {
+        err := os.Remove(path + ".backup")
+        if err != nil {
+            return fmt.Errorf("failed to remove the backup of the backup database; %w", err) 
+        }
+    }
+
+    return nil
 }
