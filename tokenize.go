@@ -35,7 +35,7 @@ func newUnicodeTokenizer(allow_wildcards bool) (*unicodeTokenizer, error) {
 func (u *unicodeTokenizer) Tokenize(x string) ([]string, error) {
     y, _, err := transform.String(u.Stripper, x)
     if err != nil {
-        return nil, fmt.Errorf("failed to strip diacritics from %q; %w", x, err)
+        return nil, fmt.Errorf("failed to strip diacritics; %w", err)
     }
 
     y = strings.ToLower(y)
