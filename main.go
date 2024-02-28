@@ -21,6 +21,11 @@ import (
 
     "crypto/rand"
     "database/sql"
+
+	"unicode"
+	"golang.org/x/text/transform"
+	"golang.org/x/text/unicode/norm"
+	"golang.org/x/text/runes"
 )
 
 /**********************************************************************/
@@ -43,9 +48,9 @@ CREATE TABLE directories(did INTEGER PRIMARY KEY, directory TEXT NOT NULL, user 
 CREATE INDEX index_dir_user ON directories(user, timestamp)
 CREATE INDEX index_dir_timestamp ON directories(timestamp, user)
 
-CREATE TABLE paths(pid INTEGER PRIMARY KEY, did INTEGER, path TEXT NOT NULL, timestamp INTEGER NOT NULL, metadata BLOB, FOREIGN KEY(did) REFERENCES directories(did) ON DELETE CASCADE)
-CREATE INDEX index_paths_user ON paths(user, timestamp)
-CREATE INDEX index_paths_timestamp ON paths(timestamp, user)
+CREATE TABLE paths(pid INTEGER PRIMARY KEY, did INTEGER, path TEXT NOT NULL, metadata BLOB, FOREIGN KEY(did) REFERENCES directories(did) ON DELETE CASCADE)
+CREATE INDEX index_paths_did ON paths(did, path)
+CREATE INDEX index_paths_path ON paths(path)
 
 CREATE TABLE tokens(tid INTEGER PRIMARY KEY, token TEXT NOT NULL UNIQUE)
 CREATE INDEX index_tokens ON tokens(token)
@@ -63,6 +68,21 @@ CREATE INDEX index_links ON links(tid, fid)
     }
 
     return nil
+}
+
+type unicodeTokenizer struct {
+    Stripper transform.Transformer
+    Splitter *regexp.Regexp
+}
+
+func newUnicodeTokenizer(allow_wildcards bool) {
+    comp, err := regexp.Compile("[^\\p{L}\\p{N}\\p{Co}-]")
+    return unicodeTokenizer {
+	    Stripper: transform.Chain(norm.NFD, runes.Remove(runes.In(unicode.Mn)), norm.NFC),
+        Splitter: regexp.Compile(
+        output, _, e := transform.String(t, s)
+
+    }
 }
 
 func addDirectory(db sql.DB, ctx context.Content, directory string, user string) error {
@@ -90,14 +110,15 @@ func addDirectory(db sql.DB, ctx context.Content, directory string, user string)
         return fmt.Errorf("failed to delete existing entry for %q; %w", dir, err)
     }
 
-    var id int
-    err = tx.QueryRow("INSERT INTO directories(directory, user, timestamp) VALUES(?, ?, ?) RETURNING vid", directory, user, time.Now().Unix()).Scan(&id)
+    var did int
+    err = tx.QueryRow("INSERT INTO directories(directory, user, timestamp) VALUES(?, ?, ?) RETURNING vid", directory, user, time.Now().Unix()).Scan(&did)
     if err != nil {
         return fmt.Errorf("failed to insert new entry for %q; %w", dir, err)
     }
 
     // Looping through and parsing each document.
     contents := make([]interface{}, len(gathered))
+    payload := make([]
     failures := make([]error, len(gathered))
     var wg sync.WaitGroup
     wg.Add(len(gathered))
@@ -118,13 +139,74 @@ func addDirectory(db sql.DB, ctx context.Content, directory string, user string)
                 return
             }
 
+            payload[i] = contents
             contents[i] = vals
         }(i, f)
     }
+    wg.Wait()
+
+    // Adding each document to the pile. We do this in serial because I don't think transactions are thread-safe.
+    messages := []string{}
+    for i, f := range contents {
+        if failures[i] != nil {
+            messages = append(messages, failures[i].Error())
+            continue
+        }
+
+        var pid int
+        err := tx.QueryRow("INSERT INTO paths(did, path, metadata) VALUES(?, ?, ?) RETURNING pid", did, f, payload[i]).Scan(&pid)
+        if err != nil {
+            messages = append(messages, fmt.Sprintf("failed to insert %q into the database", f))
+        }
+
+        tokenizeMetadata(tx, contents[i], pid, "")
+    }
 }
 
-func addDirectory(tx sql.Tx, contents interface{}) error {
+func tokenizeMetadata(tx sql.Tx, contents interface{}, pid int, field string) {
+    switch v := contents.(type) {
+    case []interface{}:
+        for i, w := range v {
+            tokenizeMetadata(tx, w, pid, field)
+        }
+    case map[string]interface{}:
+        for k, w := range v {
+            tokenizeMetadata(tx, w, pid, (field == "" ? k : field + "." + k))
+        }
+    case string:
+        components, err := tokenizeString(v)
+        if err != nil {
+            log.Printf("failed to tokenize %q; %v", v, err)
+            return
+        }
 
+        for _, t := range tokens {
+            err := tx.Exec("INSERT OR IGNORE INTO tokens(token) VALUES(?)", t)
+            if err != nil {
+                log.Printf("failed to insert token %q; %v", t, err)
+                continue
+            }
+
+            err = tx.Exec("INSERT OR IGNORE INTO fields(field) VALUES(?)", field)
+            if err != nil {
+                log.Printf("failed to insert field %q; %v", field, err)
+                continue
+            }
+
+            err = tx.Exec("INSERT INTO links(pid, fid, tid) VALUES(?, (SELECT fid FROM fields WHERE field = ?), (SELECT tid FROM tokens WHERE token = ?))", pid, field, t)
+            if err != nil {
+                log.Printf("failed to insert link for field %q to token %q; %v", field, t, err)
+                continue
+            }
+        }
+    }
+}
+
+func tokenizeString(x string) ([]string, error) {
+
+    x = norm.NFKD.String(x)
+    x = 
+    x = strings.ToLower(x)
 
 
 }
