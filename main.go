@@ -81,11 +81,12 @@ func main() {
         }()
     }
 
-    // Adding another per-day job that updates the paths.
+    // Adding another per-day job that does the backup.
     {
         ticker := time.NewTicker(24 * time.Hour)
         defer ticker.Stop()
         go func() {
+            time.Sleep(time.Hour * 12) // start at a different cycle from the path updates.
             for {
                 <-ticker.C
                 err := backupDatabase(db, dbpath + ".backup")
