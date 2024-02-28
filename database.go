@@ -55,18 +55,12 @@ CREATE INDEX index_links ON links(tid, fid)
 // within metadata documents.  Note that we need to do this for each
 // transaction so it's not worth doing for the per-directory inserts.
 type insertStatements struct {
-    Path *sql.Stmt
     Token *sql.Stmt
     Field *sql.Stmt
     Link *sql.Stmt
 }
 
 func newInsertStatements(tx *sql.Tx) (*insertStatements, error) {
-    p, err := tx.Prepare("INSERT INTO paths(path, user, timestamp, metadata) VALUES(?, ?, ?, ?) RETURNING pid")
-    if err != nil {
-        return nil, fmt.Errorf("failed to prepare path insertion statement; %w", err)
-    }
-
     t, err := tx.Prepare("INSERT OR IGNORE INTO tokens(token) VALUES(?)")
     if err != nil {
         return nil, fmt.Errorf("failed to prepare token insertion statement; %w", err)
@@ -82,21 +76,11 @@ func newInsertStatements(tx *sql.Tx) (*insertStatements, error) {
         return nil, fmt.Errorf("failed to prepare link insertion statement; %w", err)
     }
 
-    return &insertStatements {
-        Path: p,
-        Token: t,
-        Field: f,
-        Link: l,
-    }, nil
+    return &insertStatements { Token: t, Field: f, Link: l }, nil
 }
 
 func (i *insertStatements) Close() error {
-    err := i.Path.Close()
-    if err != nil {
-        return fmt.Errorf("failed to close path insertion statement; %w", err)
-    }
-
-    err = i.Token.Close()
+    err := i.Token.Close()
     if err != nil {
         return fmt.Errorf("failed to close token insertion statement; %w", err)
     }
@@ -119,99 +103,113 @@ func (i *insertStatements) Close() error {
 func addDirectory(db *sql.DB, ctx context.Context, directory string, tokenizer *unicodeTokenizer) ([]string, error) {
     all_failures := []string{}
 
-    gathered := []string{}
+    paths := []string{}
     filepath.WalkDir(directory, func(path string, d fs.DirEntry, err error) error {
         // Just skip any directories that we can't access.
         if err != nil {
             all_failures = append(all_failures, fmt.Sprintf("failed to walk %q; %v", path, err))
         } else if !d.IsDir() && filepath.Base(d.Name()) == "_metadata.json" {
-            gathered = append(gathered, d.Name())
+            paths = append(paths, d.Name())
         }
         return nil
     })
 
-    tx, err := db.BeginTx(ctx, nil)
-    if err != nil {
-        return nil, fmt.Errorf("failed to prepare a database transaction; %w", err)
-    }
-    defer tx.Rollback()
+    // Parsing documents in parallel.
+    contents := make([]interface{}, len(paths))
+    users := make([]string, len(paths))
+    times := make([]time.Time, len(paths))
+    payload := make([][]byte, len(paths))
+    failures := make([]error, len(paths))
 
-    err = deleteDirectory(db, directory)
-    if err != nil {
-        return nil, fmt.Errorf("failed to delete existing records for %q; %w", directory, err)
-    }
+    {
+        var wg sync.WaitGroup
+        wg.Add(len(paths))
 
-    prepped, err := newInsertStatements(tx)
-    if err != nil {
-        return nil, fmt.Errorf("failed to create prepared insertion statements for %q; %w", directory, err)
-    }
-    defer prepped.Close()
+        for i, f := range paths {
+            go func(i int, f string) {
+                defer wg.Done()
 
-    // Looping through and parsing each document using multiple goroutines.
-    contents := make([]interface{}, len(gathered))
-    users := make([]string, len(gathered))
-    times := make([]time.Time, len(gathered))
-    payload := make([][]byte, len(gathered))
-    failures := make([]error, len(gathered))
-    var wg sync.WaitGroup
-    wg.Add(len(gathered))
+                raw, err := os.ReadFile(f)
+                if err != nil {
+                    failures[i] = fmt.Errorf("failed to read %q; %w", f, err)
+                    return
+                }
 
-    for i, f := range gathered {
-        go func(i int, f string) {
-            defer wg.Done()
+                var vals interface{}
+                err = json.Unmarshal(raw, &vals)
+                if err != nil {
+                    failures[i] = fmt.Errorf("failed to parse %q; %w", f, err)
+                    return
+                }
 
-            raw, err := os.ReadFile(f)
-            if err != nil {
-                failures[i] = fmt.Errorf("failed to read %q; %w", f, err)
-                return
-            }
+                info, err := os.Stat(f)
+                if err != nil {
+                    failures[i] = fmt.Errorf("failed to stat %q; %w", f, err)
+                    return
+                }
 
-            var vals interface{}
-            err = json.Unmarshal(raw, &vals)
-            if err != nil {
-                failures[i] = fmt.Errorf("failed to parse %q; %w", f, err)
-                return
-            }
+                username, err := identifyUser(info)
+                if err != nil {
+                    failures[i] = fmt.Errorf("failed to determine author of %q; %w", f, err)
+                }
 
-            info, err := os.Stat(f)
-            if err != nil {
-                failures[i] = fmt.Errorf("failed to stat %q; %w", f, err)
-                return
-            }
-
-            username, err := identifyUser(info)
-            if err != nil {
-                failures[i] = fmt.Errorf("failed to determine author of %q; %w", f, err)
-            }
-
-            users[i] = username
-            times[i] = info.ModTime()
-            payload[i] = raw
-            contents[i] = vals
-        }(i, f)
-    }
-    wg.Wait()
-
-    // Adding each document to the pile. We do this in serial because I don't think transactions are thread-safe.
-    for i, f := range contents {
-        if failures[i] != nil {
-            all_failures = append(all_failures, failures[i].Error())
-            continue
+                users[i] = username
+                times[i] = info.ModTime()
+                payload[i] = raw
+                contents[i] = vals
+            }(i, f)
         }
 
-        var pid int
-        err := prepped.Path.QueryRow(f, users[i], times[i].Unix(), payload[i]).Scan(&pid)
+        wg.Wait()
+    }
+
+    {
+        tx, err := db.BeginTx(ctx, nil)
         if err != nil {
-            all_failures = append(all_failures, fmt.Sprintf("failed to insert %q into the database; %v", f, err))
-            continue
+            return nil, fmt.Errorf("failed to prepare a database transaction; %w", err)
+        }
+        defer tx.Rollback()
+
+        // Delete all previously registered paths with the directory's prefix for a fresh start;
+        // otherwise there's no way to easily get rid of old paths that are no longer here.
+        err = deleteDirectory(db, directory)
+        if err != nil {
+            return nil, fmt.Errorf("failed to delete existing records for %q; %w", directory, err)
         }
 
-        tokenizeMetadata(tx, contents[i], gathered[i], pid, "", prepped, tokenizer, all_failures)
-    }
+        prepped, err := newInsertStatements(tx)
+        if err != nil {
+            return nil, fmt.Errorf("failed to create prepared insertion statements for %q; %w", directory, err)
+        }
+        defer prepped.Close()
 
-    err = tx.Commit()
-    if err != nil {
-        return nil, fmt.Errorf("failed to commit the transaction for %q; %w", directory, err)
+        // Adding each document to the pile. We do this in serial because I don't think transactions are thread-safe.
+        pstmt, err := tx.Prepare("INSERT INTO paths(path, user, timestamp, metadata) VALUES(?, ?, ?, ?) RETURNING pid")
+        if err != nil {
+            return nil, fmt.Errorf("failed to prepare path insertion statement; %w", err)
+        }
+        defer pstmt.Close()
+
+        for i, f := range contents {
+            if failures[i] != nil {
+                all_failures = append(all_failures, failures[i].Error())
+                continue
+            }
+
+            var pid int
+            err := pstmt.QueryRow(f, users[i], times[i].Unix(), payload[i]).Scan(&pid)
+            if err != nil {
+                all_failures = append(all_failures, fmt.Sprintf("failed to insert %q into the database; %v", f, err))
+                continue
+            }
+
+            tokenizeMetadata(tx, contents[i], paths[i], pid, "", prepped, tokenizer, all_failures)
+        }
+
+        err = tx.Commit()
+        if err != nil {
+            return nil, fmt.Errorf("failed to commit the transaction for %q; %w", directory, err)
+        }
     }
 
     return all_failures, nil
@@ -278,7 +276,7 @@ func deleteDirectory(db *sql.DB, directory string) error {
     query := "DELETE FROM paths WHERE path LIKE ?"
 
     if has_under || has_percent {
-        // Choosing an escape character
+        // Choosing an escape character for wildcards.
         var escape rune
         found_escape := false
         for _, candidate := range []rune{ '\\', '~', '!', '@', '#', '$', '^', '&' } {
@@ -293,7 +291,7 @@ func deleteDirectory(db *sql.DB, directory string) error {
             return fmt.Errorf("failed to determine an escape character for queries involving %q", directory)
         }
 
-        // Need to sanitize the query for existing wildcards.
+        // Need to escape all existing wildcards in the name.
         pattern = ""
         for _, x := range directory {
             if x == '%' || x == '_' {
@@ -309,7 +307,7 @@ func deleteDirectory(db *sql.DB, directory string) error {
         query += string(escape) + "'"
     }
 
-    // Trimming the suffix, adding a '/' delimiter.
+    // Trimming the suffix, adding an unescaped wildcard.
     if len(directory) > 0 {
         counter := len(directory) - 1
         for counter >= 0 && pattern[counter] == '/' {
@@ -324,4 +322,154 @@ func deleteDirectory(db *sql.DB, directory string) error {
         return fmt.Errorf("failed to delete existing entries for %q; %w", directory, err)
     }
     return nil
+}
+
+/**********************************************************************/
+
+func updatePaths(db *sql.DB, ctx context.Context, tokenizer* unicodeTokenizer) ([]string, error) {
+    update_paths := []string{}
+    update_users := []string{}
+    update_times := []int64{}
+    purge_paths := []string{}
+
+    // Wrapping this inside a function so that the 'rows' are closed before further operations.
+    err := func() error {
+        rows, err := db.Query("SELECT path, timestamp from paths") 
+        if err != nil {
+            return fmt.Errorf("failed to query the 'paths' table; %w", err)
+        }
+        defer rows.Close()
+
+        for rows.Next() {
+            var path string
+            var time int64
+            if err := rows.Scan(&path, &time); err != nil {
+                return fmt.Errorf("failed to traverse rows of the 'paths' table; %w", err)
+            }
+
+            info, err := os.Stat(path)
+            if err != nil {
+                purge_paths = append(purge_paths, path)
+                continue
+            }
+
+            if info.ModTime().Unix() != time {
+                username, err := identifyUser(info)
+                if err != nil {
+                    purge_paths = append(purge_paths, path)
+                } else {
+                    update_paths = append(update_paths, path)
+                    update_users = append(update_users, username)
+                    update_times = append(update_times, time)
+                }
+            }
+        }
+
+        return nil
+    }()
+    if err != nil {
+        return nil, err
+    }
+
+    update_contents := make([]interface{}, len(update_paths))
+    update_payloads := make([][]byte, len(update_paths))
+    update_failures := make([]error, len(update_paths))
+    {
+        var wg sync.WaitGroup
+        wg.Add(len(update_paths))
+
+        for i, f := range update_paths {
+            go func(i int, f string) {
+                defer wg.Done()
+
+                raw, err := os.ReadFile(f)
+                if err != nil {
+                    update_failures[i] = fmt.Errorf("failed to read %q; %w", f, err)
+                    return
+                }
+
+                var vals interface{}
+                err = json.Unmarshal(raw, &vals)
+                if err != nil {
+                    update_failures[i] = fmt.Errorf("failed to parse %q; %w", f, err)
+                    return
+                }
+
+                update_payloads[i] = raw
+                update_contents[i] = vals
+            }(i, f)
+        }
+
+        wg.Wait()
+    }
+
+    // Second pass, setting up a transaction.
+    all_failures := []string{}
+    {
+        tx, err := db.BeginTx(ctx, nil)
+        if err != nil {
+            return nil, fmt.Errorf("failed to prepare a database transaction; %w", err)
+        }
+        defer tx.Rollback()
+
+        delstmt, err := tx.Prepare("DELETE FROM paths WHERE path = ?")
+        if err != nil {
+            return nil, fmt.Errorf("failed to prepare the delete transaction; %w", err)
+        }
+        defer delstmt.Close()
+
+        for _, x := range purge_paths {
+            _, err := delstmt.Exec("DELETE FROM paths WHERE path = ?", x)
+            if err != nil {
+                all_failures = append(all_failures, fmt.Sprintf("failed to purge path %q from the database; %v", x, err))
+            }
+        }
+
+        pustmt, err := tx.Prepare("UPDATE paths SET user = ?, timestamp = ?, metadata = ? WHERE path = ?")
+        if err != nil {
+            return nil, fmt.Errorf("failed to prepare path update statement; %w", err)
+        }
+        defer pustmt.Close()
+
+        pistmt, err := tx.Prepare("SELECT pid FROM paths WHERE path = ?")
+        if err != nil {
+            return nil, fmt.Errorf("failed to prepare path ID statement; %w", err)
+        }
+        defer pistmt.Close()
+
+        prepped, err := newInsertStatements(tx)
+        if err != nil {
+            return nil, fmt.Errorf("failed to prepare token insertion statements for the update; %w", err)
+        }
+        defer prepped.Close()
+
+        for i, f := range update_paths {
+            if update_failures[i] != nil {
+                all_failures = append(all_failures, update_failures[i].Error())
+                continue
+            }
+
+            _, err := pustmt.Exec(update_users[i], update_times[i], update_payloads[i], f)
+            if err != nil {
+                all_failures = append(all_failures, fmt.Sprintf("failed to update %q in the database; %v", f, err))
+                continue
+            }
+
+            var pid int
+            err = pistmt.QueryRow(f).Scan(&pid)
+            if err != nil {
+                all_failures = append(all_failures, fmt.Sprintf("failed to inspect path ID for %q; %v", f, err))
+                continue
+            }
+
+            tokenizeMetadata(tx, update_contents[i], f, pid, "", prepped, tokenizer, all_failures)
+        }
+
+        err = tx.Commit()
+        if err != nil {
+            return nil, fmt.Errorf("failed to commit the update transaction; %w", err)
+        }
+    }
+
+    return all_failures, nil
 }

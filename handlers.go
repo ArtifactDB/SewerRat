@@ -179,5 +179,3 @@ func newDeregisterFinishHandler(db *sql.DB, scratch string) func(http.ResponseWr
         return
     }
 }
-
-

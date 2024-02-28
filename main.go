@@ -4,6 +4,8 @@ import (
     "flag"
     "log"
     "os"
+    "time"
+    "context"
     "net/http"
 )
 
@@ -45,6 +47,41 @@ func main() {
     http.HandleFunc("POST /register/finish/", newRegisterFinishHandler(db, scratch, tokenizer))
     http.HandleFunc("POST /deregister/start/", newDeregisterStartHandler(db, scratch))
     http.HandleFunc("POST /deregister/finish/", newDeregisterStartHandler(db, scratch))
+
+    // Adding a per-hour job that purges various old files in the scratch.
+    {
+        ticker := time.NewTicker(time.Hour)
+        defer ticker.Stop()
+        go func() {
+            for {
+                <-ticker.C
+                err := purgeOldFiles(scratch, time.Hour)
+                if err != nil {
+                    log.Println(err)
+                }
+            }
+        }()
+    }
+
+    // Adding a per-day job that updates the paths.
+    {
+        ticker := time.NewTicker(24 * time.Hour)
+        defer ticker.Stop()
+        var ctx context.Context
+        go func() {
+            for {
+                <-ticker.C
+                fails, err := updatePaths(db, ctx, tokenizer)
+                if err != nil {
+                    log.Println(err)
+                } else {
+                    for _, f := range fails {
+                        log.Println(f)
+                    }
+                }
+            }
+        }()
+    }
 
     log.Fatal(http.ListenAndServe(":" + port, nil))
 }
