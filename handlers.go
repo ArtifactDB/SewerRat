@@ -5,16 +5,12 @@ import (
     "fmt"
 
     "os"
-    "io/fs"
     "path/filepath"
-    "syscall"
-    "os/user"
 
     "net/http"
     "encoding/json"
     "errors"
     "strings"
-    "strconv"
     "database/sql"
 )
 
@@ -34,19 +30,6 @@ func dumpJsonResponse(w http.ResponseWriter, status int, v interface{}) {
     } else {
         w.WriteHeader(status)
     }
-}
-
-func identifyUser(info fs.FileInfo) (string, error) {
-    stat, ok := info.Sys().(*syscall.Stat_t)
-    if !ok {
-        return "", errors.New("failed to extract system information");
-    }
-
-    uinfo, err := user.LookupId(strconv.Itoa(int(stat.Uid)))
-    if !ok {
-        return "", fmt.Errorf("failed to find user name for author; %w", err)
-    }
-    return uinfo.Username, nil
 }
 
 /**********************************************************************/
@@ -97,7 +80,7 @@ func newRegisterFinishHandler(db *sql.DB, scratch string, tokenizer *unicodeToke
         }
 
         expected_path := filepath.Join(regpath, expected_code)
-        expected_info, err := os.Stat(expected_path)
+        _, err = os.Stat(expected_path)
         if errors.Is(err, os.ErrNotExist) {
             dumpJsonResponse(w, http.StatusUnauthorized, map[string]string{ "status": "ERROR", "reason": fmt.Sprintf("verification failed for %q; %v", regpath, err) })
             return
@@ -106,13 +89,7 @@ func newRegisterFinishHandler(db *sql.DB, scratch string, tokenizer *unicodeToke
             return
         }
 
-        username, err := identifyUser(expected_info)
-        if err != nil {
-            dumpJsonResponse(w, http.StatusUnauthorized, map[string]string{ "status": "ERROR", "reason": fmt.Sprintf("failed to identify the file author; %v", err) })
-            return
-        }
-
-        failures, err := addDirectory(db, r.Context(), regpath, username, tokenizer)
+        failures, err := addDirectory(db, r.Context(), regpath, tokenizer)
         if err != nil {
             dumpJsonResponse(w, http.StatusInternalServerError, map[string]string{ "status": "ERROR", "reason": fmt.Sprintf("failed to index directory; %v", err) })
             return

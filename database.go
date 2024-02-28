@@ -3,8 +3,8 @@ package main
 import (
     "os"
     "fmt"
-    "context"
     "time"
+    "context"
     "sync"
     "encoding/json"
     "path/filepath"
@@ -26,13 +26,10 @@ func initializeDatabase(path string) (*sql.DB, error) {
 
     if (!accessible) {
         _, err = db.Exec(`
-CREATE TABLE directories(did INTEGER PRIMARY KEY, directory TEXT NOT NULL, user TEXT NOT NULL, timestamp INTEGER NOT NULL)
-CREATE INDEX index_dir_user ON directories(user, timestamp)
-CREATE INDEX index_dir_timestamp ON directories(timestamp, user)
-
-CREATE TABLE paths(pid INTEGER PRIMARY KEY, did INTEGER, path TEXT NOT NULL, metadata BLOB, FOREIGN KEY(did) REFERENCES directories(did) ON DELETE CASCADE)
-CREATE INDEX index_paths_did ON paths(did, path)
+CREATE TABLE paths(pid INTEGER PRIMARY KEY, path TEXT NOT NULL UNIQUE, user TEXT NOT NULL, timestamp INTEGER NOT NULL, metadata BLOB)
 CREATE INDEX index_paths_path ON paths(path)
+CREATE INDEX index_paths_timestamp ON paths(timestamp, user)
+CREATE INDEX index_paths_user ON paths(user, timestamp)
 
 CREATE TABLE tokens(tid INTEGER PRIMARY KEY, token TEXT NOT NULL UNIQUE)
 CREATE INDEX index_tokens ON tokens(token)
@@ -65,7 +62,7 @@ type insertStatements struct {
 }
 
 func newInsertStatements(tx *sql.Tx) (*insertStatements, error) {
-    p, err := tx.Prepare("INSERT INTO paths(did, path, metadata) VALUES(?, ?, ?) RETURNING pid")
+    p, err := tx.Prepare("INSERT INTO paths(path, user, timestamp, metadata) VALUES(?, ?, ?, ?) RETURNING pid")
     if err != nil {
         return nil, fmt.Errorf("failed to prepare path insertion statement; %w", err)
     }
@@ -119,7 +116,7 @@ func (i *insertStatements) Close() error {
 
 /**********************************************************************/
 
-func addDirectory(db *sql.DB, ctx context.Context, directory string, user string, tokenizer *unicodeTokenizer) ([]string, error) {
+func addDirectory(db *sql.DB, ctx context.Context, directory string, tokenizer *unicodeTokenizer) ([]string, error) {
     all_failures := []string{}
 
     gathered := []string{}
@@ -139,16 +136,9 @@ func addDirectory(db *sql.DB, ctx context.Context, directory string, user string
     }
     defer tx.Rollback()
 
-    // Removing the current directory to propagate deletions, and then adding it again.
-    _, err = tx.Exec("DELETE FROM directories WHERE directory = ?", directory)
+    err = deleteDirectory(db, directory)
     if err != nil {
-        return nil, fmt.Errorf("failed to delete existing entry for %q; %w", directory, err)
-    }
-
-    var did int
-    err = tx.QueryRow("INSERT INTO directories(directory, user, timestamp) VALUES(?, ?, ?) RETURNING vid", directory, user, time.Now().Unix()).Scan(&did)
-    if err != nil {
-        return nil, fmt.Errorf("failed to insert new entry for %q; %w", directory, err)
+        return nil, fmt.Errorf("failed to delete existing records for %q; %w", directory, err)
     }
 
     prepped, err := newInsertStatements(tx)
@@ -159,6 +149,8 @@ func addDirectory(db *sql.DB, ctx context.Context, directory string, user string
 
     // Looping through and parsing each document using multiple goroutines.
     contents := make([]interface{}, len(gathered))
+    users := make([]string, len(gathered))
+    times := make([]time.Time, len(gathered))
     payload := make([][]byte, len(gathered))
     failures := make([]error, len(gathered))
     var wg sync.WaitGroup
@@ -167,19 +159,33 @@ func addDirectory(db *sql.DB, ctx context.Context, directory string, user string
     for i, f := range gathered {
         go func(i int, f string) {
             defer wg.Done()
+
             raw, err := os.ReadFile(f)
             if err != nil {
-                failures[i] = fmt.Errorf("failed to read %q; %w", f, err.Error())
+                failures[i] = fmt.Errorf("failed to read %q; %w", f, err)
                 return
             }
 
             var vals interface{}
             err = json.Unmarshal(raw, &vals)
             if err != nil {
-                failures[i] = fmt.Errorf("failed to parse %q; %w", f, err.Error())
+                failures[i] = fmt.Errorf("failed to parse %q; %w", f, err)
                 return
             }
 
+            info, err := os.Stat(f)
+            if err != nil {
+                failures[i] = fmt.Errorf("failed to stat %q; %w", f, err)
+                return
+            }
+
+            username, err := identifyUser(info)
+            if err != nil {
+                failures[i] = fmt.Errorf("failed to determine author of %q; %w", f, err)
+            }
+
+            users[i] = username
+            times[i] = info.ModTime()
             payload[i] = raw
             contents[i] = vals
         }(i, f)
@@ -194,7 +200,7 @@ func addDirectory(db *sql.DB, ctx context.Context, directory string, user string
         }
 
         var pid int
-        err := prepped.Path.QueryRow(did, f, payload[i]).Scan(&pid)
+        err := prepped.Path.QueryRow(f, users[i], times[i].Unix(), payload[i]).Scan(&pid)
         if err != nil {
             all_failures = append(all_failures, fmt.Sprintf("failed to insert %q into the database; %v", f, err))
             continue
@@ -260,8 +266,60 @@ func tokenizeMetadata(tx *sql.Tx, contents interface{}, path string, pid int, fi
 /**********************************************************************/
 
 func deleteDirectory(db *sql.DB, directory string) error {
-    // Removing the current directory to propagate deletions, and then adding it again.
-    _, err := db.Exec("DELETE FROM directories WHERE directory = ?", directory)
+    all_characters := map[rune]bool{}
+    for _, x := range directory {
+        all_characters[x] = true
+    }
+
+    _, has_under := all_characters['_']
+    _, has_percent := all_characters['%']
+
+    pattern := directory
+    query := "DELETE FROM paths WHERE path LIKE ?"
+
+    if has_under || has_percent {
+        // Choosing an escape character
+        var escape rune
+        found_escape := false
+        for _, candidate := range []rune{ '\\', '~', '!', '@', '#', '$', '^', '&' } {
+            _, has_escape := all_characters[candidate]
+            if !has_escape {
+                escape = candidate
+                found_escape = true
+            }
+        }
+
+        if !found_escape {
+            return fmt.Errorf("failed to determine an escape character for queries involving %q", directory)
+        }
+
+        // Need to sanitize the query for existing wildcards.
+        pattern = ""
+        for _, x := range directory {
+            if x == '%' || x == '_' {
+                pattern += string(escape)
+            }
+            pattern += string(x)
+        }
+
+        query += " ESCAPE '"
+        if escape == '\\' {
+            query += "\\" // need to escape the escape.
+        } 
+        query += string(escape) + "'"
+    }
+
+    // Trimming the suffix, adding a '/' delimiter.
+    if len(directory) > 0 {
+        counter := len(directory) - 1
+        for counter >= 0 && pattern[counter] == '/' {
+            counter--
+        }
+        pattern = pattern[:counter]
+    }
+    pattern += "/%"
+
+    _, err := db.Exec(query, pattern)
     if err != nil {
         return fmt.Errorf("failed to delete existing entries for %q; %w", directory, err)
     }
