@@ -6,6 +6,7 @@ import (
     "fmt"
 
     "os"
+    "io/fs"
     "path/filepath"
 
     "net/http"
@@ -15,13 +16,16 @@ import (
     "encoding/json"
 
     "sync"
-    "strings"
+    "time"
     "errors"
     "context"
 
     "crypto/rand"
     "database/sql"
+    _ "modernc.org/sqlite"
 
+    "strings"
+    "regexp"
 	"unicode"
 	"golang.org/x/text/transform"
 	"golang.org/x/text/unicode/norm"
@@ -70,34 +74,96 @@ CREATE INDEX index_links ON links(tid, fid)
     return nil
 }
 
+/**********************************************************************/
+
 type unicodeTokenizer struct {
     Stripper transform.Transformer
     Splitter *regexp.Regexp
 }
 
-func newUnicodeTokenizer(allow_wildcards bool) {
-    comp, err := regexp.Compile("[^\\p{L}\\p{N}\\p{Co}-]")
-    return unicodeTokenizer {
-	    Stripper: transform.Chain(norm.NFD, runes.Remove(runes.In(unicode.Mn)), norm.NFC),
-        Splitter: regexp.Compile(
-        output, _, e := transform.String(t, s)
-
+func newUnicodeTokenizer(allow_wildcards bool) (*unicodeTokenizer, error) {
+    pattern := ""
+    if allow_wildcards {
+        pattern = "%_"
     }
+
+    comp, err := regexp.Compile("[^\\p{L}\\p{N}\\p{Co}-" + pattern + "]+")
+    if err != nil {
+        return nil, fmt.Errorf("failed to compile regex; %w", err)
+    }
+
+    return &unicodeTokenizer {
+	    Stripper: transform.Chain(norm.NFD, runes.Remove(runes.In(unicode.Mn)), norm.NFC),
+        Splitter: comp,
+    }, nil
 }
 
-func addDirectory(db sql.DB, ctx context.Content, directory string, user string) error {
+func (u *unicodeTokenizer) tokenize(x string) ([]string, error) {
+    y, _, err := transform.String(u.Stripper, x)
+    if err != nil {
+        return nil, fmt.Errorf("failed to strip diacritics from %q; %w", x, err)
+    }
+
+    y = strings.ToLower(y)
+    output := u.Splitter.Split(y, -1)
+
+    final := []string{}
+    for _, t := range output {
+        if len(t) > 0 {
+            final = append(final, t)
+        }
+    }
+    return final, nil
+}
+
+type insertStatements struct {
+    PathInsert *sql.Stmt
+    TokenInsert *sql.Stmt
+    FieldInsert *sql.Stmt
+    LinkInsert *sql.Stmt
+}
+
+func newInsertStatements(tx *sql.Tx) (*insertStatements, error) {
+    p, err := tx.Prepare("INSERT INTO paths(did, path, metadata) VALUES(?, ?, ?) RETURNING pid")
+    if err != nil {
+        return nil, fmt.Errorf("failed to prepare path insertion statement; %w", err)
+    }
+
+    t, err := tx.Prepare("INSERT OR IGNORE INTO tokens(token) VALUES(?)")
+    if err != nil {
+        return nil, fmt.Errorf("failed to prepare token insertion statement; %w", err)
+    }
+
+    f, err := tx.Prepare("INSERT OR IGNORE INTO fields(field) VALUES(?)")
+    if err != nil {
+        return nil, fmt.Errorf("failed to prepare field insertion statement; %w", err)
+    }
+
+    l, err := tx.Prepare("INSERT INTO links(pid, fid, tid) VALUES(?, ?, ?)")
+    if err != nil {
+        return nil, fmt.Errorf("failed to prepare link insertion statement; %w", err)
+    }
+
+    return &insertStatements {
+        PathInsert: p,
+        TokenInsert: t,
+        FieldInsert: f,
+        LinkInsert: l,
+    }, nil
+}
+
+func addDirectory(db *sql.DB, ctx context.Context, directory string, user string, tokenizer *unicodeTokenizer) error {
     gathered := []string{}
-    err := path.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
-        if err == nil && !d.IsDir() && filepath.Base(d.Name()) == "_metadata.json" {
+    filepath.WalkDir(directory, func(path string, d fs.DirEntry, err error) error {
+        // Just skip any directories that we can't access.
+        if err != nil {
+            log.Printf("failed to walk %q; %v", path, err)
+        } else if !d.IsDir() && filepath.Base(d.Name()) == "_metadata.json" {
             gathered = append(gathered, d.Name())
         }
         return nil
     })
-    if err != nil {
-        return fmt.Errorf("failed to walk through directory at %q; %w", dir, err)
-    }
 
-    // Make a request.
     tx, err := db.BeginTx(ctx, nil)
     if err != nil {
         return fmt.Errorf("failed to prepare a database transaction; %w", err)
@@ -105,20 +171,25 @@ func addDirectory(db sql.DB, ctx context.Content, directory string, user string)
     defer tx.Rollback()
 
     // Removing the current directory to propagate deletions, and then adding it again.
-    _, err = tx.Exec("DELETE FROM directories WHERE directory = ?", directory) 
+    _, err = tx.Exec("DELETE FROM directories WHERE directory = ?", directory)
     if err != nil {
-        return fmt.Errorf("failed to delete existing entry for %q; %w", dir, err)
+        return fmt.Errorf("failed to delete existing entry for %q; %w", directory, err)
     }
 
     var did int
     err = tx.QueryRow("INSERT INTO directories(directory, user, timestamp) VALUES(?, ?, ?) RETURNING vid", directory, user, time.Now().Unix()).Scan(&did)
     if err != nil {
-        return fmt.Errorf("failed to insert new entry for %q; %w", dir, err)
+        return fmt.Errorf("failed to insert new entry for %q; %w", directory, err)
     }
 
-    // Looping through and parsing each document.
+    prepped, err := newInsertStatements(tx)
+    if err != nil {
+        return fmt.Errorf("failed to create prepared insertion statements for %q; %w", directory, err)
+    }
+
+    // Looping through and parsing each document using multiple goroutines.
     contents := make([]interface{}, len(gathered))
-    payload := make([]
+    payload := make([][]byte, len(gathered))
     failures := make([]error, len(gathered))
     var wg sync.WaitGroup
     wg.Add(len(gathered))
@@ -126,89 +197,91 @@ func addDirectory(db sql.DB, ctx context.Content, directory string, user string)
     for i, f := range gathered {
         go func(i int, f string) {
             defer wg.Done()
-            contents, err := os.ReadFile(f)
+            raw, err := os.ReadFile(f)
             if err != nil {
                 failures[i] = fmt.Errorf("failed to read %q; %w", f, err.Error())
                 return
             }
 
             var vals interface{}
-            err = json.Unmarshal(contents, &vals)
+            err = json.Unmarshal(raw, &vals)
             if err != nil {
                 failures[i] = fmt.Errorf("failed to parse %q; %w", f, err.Error())
                 return
             }
 
-            payload[i] = contents
+            payload[i] = raw
             contents[i] = vals
         }(i, f)
     }
     wg.Wait()
 
     // Adding each document to the pile. We do this in serial because I don't think transactions are thread-safe.
-    messages := []string{}
     for i, f := range contents {
         if failures[i] != nil {
-            messages = append(messages, failures[i].Error())
+            log.Printf(failures[i].Error())
             continue
         }
 
         var pid int
-        err := tx.QueryRow("INSERT INTO paths(did, path, metadata) VALUES(?, ?, ?) RETURNING pid", did, f, payload[i]).Scan(&pid)
+        err := prepped.PathInsert.QueryRow(did, f, payload[i]).Scan(&pid)
         if err != nil {
-            messages = append(messages, fmt.Sprintf("failed to insert %q into the database", f))
+            log.Printf("failed to insert %q into the database; %v", f, err)
+            continue
         }
 
-        tokenizeMetadata(tx, contents[i], pid, "")
+        tokenizeMetadata(tx, contents[i], pid, "", prepped, tokenizer)
     }
+
+    err = tx.Commit()
+    if err != nil {
+        return fmt.Errorf("failed to commit the transaction for %q; %w", directory, err)
+    }
+
+    return nil
 }
 
-func tokenizeMetadata(tx sql.Tx, contents interface{}, pid int, field string) {
+func tokenizeMetadata(tx *sql.Tx, contents interface{}, pid int, field string, prepped *insertStatements, tokenizer *unicodeTokenizer) {
     switch v := contents.(type) {
     case []interface{}:
-        for i, w := range v {
-            tokenizeMetadata(tx, w, pid, field)
+        for _, w := range v {
+            tokenizeMetadata(tx, w, pid, field, prepped, tokenizer)
         }
     case map[string]interface{}:
         for k, w := range v {
-            tokenizeMetadata(tx, w, pid, (field == "" ? k : field + "." + k))
+            new_field := k
+            if field != "" {
+                new_field = field + "." + k
+            }
+            tokenizeMetadata(tx, w, pid, new_field, prepped, tokenizer)
         }
     case string:
-        components, err := tokenizeString(v)
+        tokens, err := tokenizer.tokenize(v)
         if err != nil {
             log.Printf("failed to tokenize %q; %v", v, err)
             return
         }
 
         for _, t := range tokens {
-            err := tx.Exec("INSERT OR IGNORE INTO tokens(token) VALUES(?)", t)
+            _, err := prepped.TokenInsert.Exec(t)
             if err != nil {
                 log.Printf("failed to insert token %q; %v", t, err)
                 continue
             }
 
-            err = tx.Exec("INSERT OR IGNORE INTO fields(field) VALUES(?)", field)
+            _, err = prepped.FieldInsert.Exec(field)
             if err != nil {
                 log.Printf("failed to insert field %q; %v", field, err)
                 continue
             }
 
-            err = tx.Exec("INSERT INTO links(pid, fid, tid) VALUES(?, (SELECT fid FROM fields WHERE field = ?), (SELECT tid FROM tokens WHERE token = ?))", pid, field, t)
+            _, err = prepped.LinkInsert.Exec(pid, field, t)
             if err != nil {
                 log.Printf("failed to insert link for field %q to token %q; %v", field, t, err)
                 continue
             }
         }
     }
-}
-
-func tokenizeString(x string) ([]string, error) {
-
-    x = norm.NFKD.String(x)
-    x = 
-    x = strings.ToLower(x)
-
-
 }
 
 /**********************************************************************/
