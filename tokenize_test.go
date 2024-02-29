@@ -53,6 +53,17 @@ func TestUnicodeTokenizer(t *testing.T) {
             t.Fatalf("incorrect tokenization %q", out)
         }
     }
+
+    // Removes duplicates.
+    {
+        out, err := tok.Tokenize("Aaron and AARON and aaron")
+        if err != nil {
+            t.Fatalf(err.Error())
+        }
+        if !equalStringArrays(out, []string{ "aaron", "and" }) {
+            t.Fatalf("incorrect tokenization")
+        }
+    }
 }
 
 func TestUnicodeTokenizerWithWildcards(t *testing.T) {

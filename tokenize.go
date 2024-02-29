@@ -42,10 +42,15 @@ func (u *unicodeTokenizer) Tokenize(x string) ([]string, error) {
     output := u.Splitter.Split(y, -1)
 
     final := []string{}
+    present := map[string]bool{}
     for _, t := range output {
         if len(t) > 0 {
-            final = append(final, t)
+            if _, ok := present[t]; !ok {
+                final = append(final, t)
+                present[t] = true
+            }
         }
     }
+
     return final, nil
 }
