@@ -8,10 +8,65 @@ import (
 
 type searchClause struct {
     Type string `json:"type"`
+
+    // Only relevant for type = path.
+    Path string `json:"path"`
+    PathEscape string
+
+    // Only relevant for type = user.
+    User string `json:"user"`
+
+    // Only relevant for type = time.
+    Time int64 `json:"time"`
+    After bool `json:"after"`
+
+    // Only relevant for text.
     Text string `json:"text"`
     Field string `json:"field"`
     Partial bool `json:"partial"`
+
+    // Only relevant for type = and/or.
     Children []*searchClause `json:"children"`
+}
+
+func escapeWildcards(input string) (string, string, error) {
+    all_characters := map[rune]bool{}
+    for _, x := range input {
+        all_characters[x] = true
+    }
+
+    _, has_under := all_characters['_']
+    _, has_percent := all_characters['%']
+    if !has_under && !has_percent {
+        return input, "", nil
+    }
+
+    // Choosing an escape character for wildcards.
+    var escape rune
+    found_escape := false
+    for _, candidate := range []rune{ '\\', '~', '!', '@', '#', '$', '^', '&' } {
+        _, has_escape := all_characters[candidate]
+        if !has_escape {
+            escape = candidate
+            found_escape = true
+        }
+    }
+
+    if !found_escape {
+        return "", "", fmt.Errorf("failed to escape wildcards in %q", input)
+    }
+    escape_str := string(escape)
+
+    // Need to escape all existing wildcards in the name.
+    pattern := ""
+    for _, x := range input {
+        if x == '%' || x == '_' {
+            pattern += escape_str
+        }
+        pattern += string(x)
+    }
+
+    return pattern, escape_str, nil
 }
 
 func sanitizeQuery(original *searchClause, deftok, wildtok *unicodeTokenizer) (*searchClause, error) {
@@ -52,52 +107,90 @@ func sanitizeQuery(original *searchClause, deftok, wildtok *unicodeTokenizer) (*
         }
     }
 
-    if original.Type != "text" {
-        return nil, fmt.Errorf("unknown search clause type %q", original.Type)
+    if original.Type == "text" {
+        var tokens []string
+        var err error
+        if original.Partial {
+            tokens, err = wildtok.Tokenize(original.Text)
+        } else {
+            tokens, err = deftok.Tokenize(original.Text)
+        }
+        if err != nil {
+            return nil, fmt.Errorf("failed to tokenize %q; %w", original.Text, err)
+        }
+        if len(tokens) == 0 {
+            return nil, nil
+        }
+
+        replacements := []*searchClause{}
+        for _, tok := range tokens {
+            replacements = append(replacements, &searchClause{ Type: "text", Partial: original.Partial, Field: original.Field, Text: tok })
+        }
+        if len(replacements) == 1 {
+            return replacements[0], nil
+        } 
+        return &searchClause{ Type: "and", Children: replacements }, nil
     }
 
-    var tokens []string
-    var err error
-    if original.Partial {
-        tokens, err = wildtok.Tokenize(original.Text)
-    } else {
-        tokens, err = deftok.Tokenize(original.Text)
-    }
-    if err != nil {
-        return nil, fmt.Errorf("failed to tokenize %q; %w", original.Text, err)
-    }
-    if len(tokens) == 0 {
-        return nil, nil
+    if original.Type == "user" || original.Type == "time" {
+        return original, nil
     }
 
-    replacements := []*searchClause{}
-    for _, tok := range tokens {
-        replacements = append(replacements, &searchClause{ Type: "text", Partial: original.Partial, Field: original.Field, Text: tok })
+    if original.Type == "path" {
+        pattern, escape, err := escapeWildcards(original.Path)
+        if err != nil {
+            return nil, fmt.Errorf("failed to escape wildcards for path %q; %w", original.Path, err)
+        }
+        return &searchClause { Type: "path", Path: pattern, PathEscape: escape }, nil
     }
-    if len(replacements) == 1 {
-        return replacements[0], nil
-    } 
-    return &searchClause{ Type: "and", Children: replacements }, nil
+
+    return nil, fmt.Errorf("unknown search type %q", original.Type)
 }
 
-func assembleFilter(query *searchClause, parameters []string) string {
+func assembleFilter(query *searchClause, parameters []interface{}) string {
     if query.Type == "text" {
         filter := "paths.pid IN (SELECT pid from links LEFT JOIN tokens ON tokens.tid = links.tid"
         if query.Field != "" {
-            filter += " LEFT JOIN fields ON fields.fid = links.fid WHERE fields.field = ?"
+            filter += " LEFT JOIN fields ON fields.fid = links.fid WHERE fields.field = ? AND"
             parameters = append(parameters, query.Text)
         } else {
             filter += " WHERE"
         }
 
+        filter += " tokens.token"
         if query.Partial {
-            filter += " tokens.token LIKE ?"
+            filter += " LIKE"
         } else {
-            filter += " tokens.token = ?"
+            filter += " ="
         }
+        filter += "?"
         parameters = append(parameters, query.Text)
         filter += ")"
 
+        return filter
+    }
+
+    if query.Type == "user" {
+        filter := "paths.user = ?"
+        parameters = append(parameters, query.Text)
+        return filter
+    }
+
+    if query.Type == "path" {
+        filter := "paths.path LIKE ?"
+        parameters = append(parameters, "%" + query.Path + "%")
+        return filter
+    }
+
+    if query.Type == "time" {
+        filter := "paths.time" 
+        if query.After {
+            filter += " >"
+        } else {
+            filter += " <="
+        }
+        filter += "?"
+        parameters = append(parameters, "%" + query.Path + "%")
         return filter
     }
 
@@ -109,6 +202,7 @@ func assembleFilter(query *searchClause, parameters []string) string {
         return "(" + strings.Join(collected, " AND ") + ")"
     }
 
+    // Implicitly, the rest is type 'or'.
     text := []*searchClause{}
     other := []*searchClause{}
     for _, child := range query.Children {

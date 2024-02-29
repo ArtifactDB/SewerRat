@@ -37,15 +37,32 @@ func main() {
     if err != nil {
         log.Fatalf("failed to create the default tokenizer; %v", err)
     }
-    _, err = newUnicodeTokenizer(true)
+    wild_tokenizer, err := newUnicodeTokenizer(true)
     if err != nil {
         log.Fatalf("failed to create the wildcard tokenizer; %v", err)
     }
 
-    http.HandleFunc("POST /register/start/", newRegisterStartHandler(scratch))
-    http.HandleFunc("POST /register/finish/", newRegisterFinishHandler(db, scratch, tokenizer))
-    http.HandleFunc("POST /deregister/start/", newDeregisterStartHandler(db, scratch))
-    http.HandleFunc("POST /deregister/finish/", newDeregisterStartHandler(db, scratch))
+    // Seeting up the endpoints.
+    {
+        endpoint := "/registry/start/"
+        http.HandleFunc("POST " + endpoint, newRegisterStartHandler(scratch, endpoint))
+    }
+    {
+        endpoint := "/registry/finish/"
+        http.HandleFunc("POST " + endpoint, newRegisterFinishHandler(db, scratch, tokenizer, endpoint))
+    }
+    {
+        endpoint := "/deregister/start/"
+        http.HandleFunc("POST " + endpoint, newDeregisterStartHandler(db, scratch, endpoint))
+    }
+    {
+        endpoint := "/deregister/finish/"
+        http.HandleFunc("POST " + endpoint, newDeregisterStartHandler(db, scratch, endpoint))
+    }
+    {
+        endpoint := "/query"
+        http.HandleFunc("POST " + endpoint, newQueryHandler(db, tokenizer, wild_tokenizer, endpoint))
+    }
 
     // Adding a per-hour job that purges various old files in the scratch.
     {

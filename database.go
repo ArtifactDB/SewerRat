@@ -10,6 +10,7 @@ import (
     "path/filepath"
     "io/fs"
     "database/sql"
+    "strconv"
     _ "modernc.org/sqlite"
 )
 
@@ -26,10 +27,10 @@ func initializeDatabase(path string) (*sql.DB, error) {
 
     if (!accessible) {
         _, err = db.Exec(`
-CREATE TABLE paths(pid INTEGER PRIMARY KEY, path TEXT NOT NULL UNIQUE, user TEXT NOT NULL, timestamp INTEGER NOT NULL, metadata BLOB)
+CREATE TABLE paths(pid INTEGER PRIMARY KEY, path TEXT NOT NULL UNIQUE, user TEXT NOT NULL, time INTEGER NOT NULL, metadata BLOB)
 CREATE INDEX index_paths_path ON paths(path)
-CREATE INDEX index_paths_timestamp ON paths(timestamp, user)
-CREATE INDEX index_paths_user ON paths(user, timestamp)
+CREATE INDEX index_paths_time ON paths(time, user)
+CREATE INDEX index_paths_user ON paths(user, time)
 
 CREATE TABLE tokens(tid INTEGER PRIMARY KEY, token TEXT NOT NULL UNIQUE)
 CREATE INDEX index_tokens ON tokens(token)
@@ -184,7 +185,7 @@ func addDirectory(db *sql.DB, directory string, tokenizer *unicodeTokenizer) ([]
         defer prepped.Close()
 
         // Adding each document to the pile. We do this in serial because I don't think transactions are thread-safe.
-        pstmt, err := tx.Prepare("INSERT INTO paths(path, user, timestamp, metadata) VALUES(?, ?, ?, ?) RETURNING pid")
+        pstmt, err := tx.Prepare("INSERT INTO paths(path, user, time, metadata) VALUES(?, ?, ?, ?) RETURNING pid")
         if err != nil {
             return nil, fmt.Errorf("failed to prepare path insertion statement; %w", err)
         }
@@ -196,7 +197,7 @@ func addDirectory(db *sql.DB, directory string, tokenizer *unicodeTokenizer) ([]
                 continue
             }
 
-            var pid int
+            var pid int64
             err := pstmt.QueryRow(f, users[i], times[i].Unix(), payload[i]).Scan(&pid)
             if err != nil {
                 all_failures = append(all_failures, fmt.Sprintf("failed to insert %q into the database; %v", f, err))
@@ -216,7 +217,7 @@ func addDirectory(db *sql.DB, directory string, tokenizer *unicodeTokenizer) ([]
 }
 
 // Recurse through the metadata structure to disassemble the tokens.
-func tokenizeMetadata(tx *sql.Tx, contents interface{}, path string, pid int, field string, prepped *insertStatements, tokenizer *unicodeTokenizer, failures []string) {
+func tokenizeMetadata(tx *sql.Tx, contents interface{}, path string, pid int64, field string, prepped *insertStatements, tokenizer *unicodeTokenizer, failures []string) {
     switch v := contents.(type) {
     case []interface{}:
         for _, w := range v {
@@ -264,60 +265,30 @@ func tokenizeMetadata(tx *sql.Tx, contents interface{}, path string, pid int, fi
 /**********************************************************************/
 
 func deleteDirectory(db *sql.DB, directory string) error {
-    all_characters := map[rune]bool{}
-    for _, x := range directory {
-        all_characters[x] = true
-    }
-
-    _, has_under := all_characters['_']
-    _, has_percent := all_characters['%']
-
-    pattern := directory
-    query := "DELETE FROM paths WHERE path LIKE ?"
-
-    if has_under || has_percent {
-        // Choosing an escape character for wildcards.
-        var escape rune
-        found_escape := false
-        for _, candidate := range []rune{ '\\', '~', '!', '@', '#', '$', '^', '&' } {
-            _, has_escape := all_characters[candidate]
-            if !has_escape {
-                escape = candidate
-                found_escape = true
-            }
-        }
-
-        if !found_escape {
-            return fmt.Errorf("failed to determine an escape character for queries involving %q", directory)
-        }
-
-        // Need to escape all existing wildcards in the name.
-        pattern = ""
-        for _, x := range directory {
-            if x == '%' || x == '_' {
-                pattern += string(escape)
-            }
-            pattern += string(x)
-        }
-
-        query += " ESCAPE '"
-        if escape == '\\' {
-            query += "\\" // need to escape the escape.
-        } 
-        query += string(escape) + "'"
-    }
-
-    // Trimming the suffix, adding an unescaped wildcard.
+    // Trimming the suffix.
     if len(directory) > 0 {
         counter := len(directory) - 1
-        for counter >= 0 && pattern[counter] == '/' {
+        for counter >= 0 && directory[counter] == '/' {
             counter--
         }
-        pattern = pattern[:counter]
+        directory = directory[:counter]
     }
-    pattern += "/%"
 
-    _, err := db.Exec(query, pattern)
+    pattern, escape, err := escapeWildcards(directory)
+    if err != nil {
+        return fmt.Errorf("failed to query database for paths to delete; %w", err)
+    }
+
+    query := "DELETE FROM paths WHERE path LIKE ?"
+    if escape != "" {
+        query += " ESCAPE '"
+        if escape == "\\" {
+            query += "\\" // need to escape the escape.
+        } 
+        query += escape + "'"
+    }
+
+    _, err = db.Exec(query, pattern + "/%")
     if err != nil {
         return fmt.Errorf("failed to delete existing entries for %q; %w", directory, err)
     }
@@ -334,7 +305,7 @@ func updatePaths(db *sql.DB, tokenizer* unicodeTokenizer) ([]string, error) {
 
     // Wrapping this inside a function so that the 'rows' are closed before further operations.
     err := func() error {
-        rows, err := db.Query("SELECT path, timestamp from paths") 
+        rows, err := db.Query("SELECT path, time from paths") 
         if err != nil {
             return fmt.Errorf("failed to query the 'paths' table; %w", err)
         }
@@ -426,7 +397,7 @@ func updatePaths(db *sql.DB, tokenizer* unicodeTokenizer) ([]string, error) {
         }
 
         // Updating the existing files.
-        pustmt, err := tx.Prepare("UPDATE paths SET user = ?, timestamp = ?, metadata = ? WHERE path = ?")
+        pustmt, err := tx.Prepare("UPDATE paths SET user = ?, time = ?, metadata = ? WHERE path = ?")
         if err != nil {
             return nil, fmt.Errorf("failed to prepare path update statement; %w", err)
         }
@@ -456,7 +427,7 @@ func updatePaths(db *sql.DB, tokenizer* unicodeTokenizer) ([]string, error) {
                 continue
             }
 
-            var pid int
+            var pid int64
             err = pistmt.QueryRow(f).Scan(&pid)
             if err != nil {
                 all_failures = append(all_failures, fmt.Sprintf("failed to inspect path ID for %q; %v", f, err))
@@ -513,4 +484,71 @@ func backupDatabase(db *sql.DB, path string) error {
     }
 
     return nil
+}
+
+/**********************************************************************/
+
+type queryResult struct {
+    Pid int64 `json:"-"`
+    Path string `json:"path"`
+    User string `json:"user"`
+    Time int64 `json:"time"`
+    Metadata json.RawMessage `json:"metadata"`
+}
+
+type scrollPosition struct {
+    Time int64
+    Pid int64
+}
+
+func queryTokens(db * sql.DB, query *searchClause, scroll *scrollPosition, page_limit int) ([]queryResult, error) {
+    full := "SELECT paths.pid, paths.path, paths.user, paths.time, json_extract(paths.metadata, '$') FROM paths"
+
+    // The query can be nil.
+    parameters := []interface{}{}
+    query_present := false
+    if query != nil {
+        query_present = true
+        filter := assembleFilter(query, parameters)
+        full += " WHERE " + filter 
+    }
+
+    // Handling pagination via scrolling window queries, see https://www.sqlite.org/rowvalue.html#scrolling_window_queries.
+    // This should be pretty efficient as we have an index on 'time'.
+    if scroll != nil {
+        if query_present {
+            full += " AND"
+        } else {
+            full += " WHERE"
+        }
+        full += " (paths.time, paths.pid) < (?, ?)"
+        parameters = append(parameters, scroll.Time)
+        parameters = append(parameters, scroll.Pid)
+    }
+    full += " ORDER BY paths.time, paths.pid DESC"
+    if page_limit > 0 {
+        full += " LIMIT " + strconv.Itoa(page_limit)
+    }
+
+    rows, err := db.Query(full, parameters...)
+    if err != nil {
+        return nil, fmt.Errorf("failed to perform query; %w", err)
+    }
+    defer rows.Close()
+
+    output := []queryResult{}
+    for rows.Next() {
+        var pid int64
+        var path string
+        var user string
+        var time int64
+        var metadata string
+        err = rows.Scan(&pid, &path, &user, &time, &metadata)
+        if err != nil {
+            return nil, fmt.Errorf("failed to extract row; %w", err)
+        }
+        output = append(output, queryResult{ Pid: pid, Path: path, User: user, Time: time, Metadata: []byte(metadata) })
+    }
+
+    return output, nil
 }

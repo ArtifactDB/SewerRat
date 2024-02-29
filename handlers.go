@@ -11,6 +11,7 @@ import (
     "encoding/json"
     "errors"
     "strings"
+    "strconv"
     "database/sql"
 )
 
@@ -34,9 +35,9 @@ func dumpJsonResponse(w http.ResponseWriter, status int, v interface{}) {
 
 /**********************************************************************/
 
-func newRegisterStartHandler(scratch string) func(http.ResponseWriter, *http.Request) {
+func newRegisterStartHandler(scratch string, endpoint string) func(http.ResponseWriter, *http.Request) {
     return func(w http.ResponseWriter, r *http.Request) {
-        encpath := strings.TrimPrefix(r.URL.Path, "/register/start/")
+        encpath := strings.TrimPrefix(r.URL.Path, endpoint)
         regpath, err := validateRequestPath(encpath)
         if err != nil {
             dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": err.Error() })
@@ -64,9 +65,9 @@ func newRegisterStartHandler(scratch string) func(http.ResponseWriter, *http.Req
     }
 }
 
-func newRegisterFinishHandler(db *sql.DB, scratch string, tokenizer *unicodeTokenizer) func(http.ResponseWriter, *http.Request) {
+func newRegisterFinishHandler(db *sql.DB, scratch string, tokenizer *unicodeTokenizer, endpoint string) func(http.ResponseWriter, *http.Request) {
     return func(w http.ResponseWriter, r *http.Request) {
-        encpath := strings.TrimPrefix(r.URL.Path, "/register/finish/")
+        encpath := strings.TrimPrefix(r.URL.Path, endpoint)
         regpath, err := validateRequestPath(encpath)
         if err != nil {
             dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": err.Error() })
@@ -102,9 +103,9 @@ func newRegisterFinishHandler(db *sql.DB, scratch string, tokenizer *unicodeToke
 
 /**********************************************************************/
 
-func newDeregisterStartHandler(db *sql.DB, scratch string) func(http.ResponseWriter, *http.Request) {
+func newDeregisterStartHandler(db *sql.DB, scratch string, endpoint string) func(http.ResponseWriter, *http.Request) {
     return func(w http.ResponseWriter, r *http.Request) {
-        encpath := strings.TrimPrefix(r.URL.Path, "/deregister/start/")
+        encpath := strings.TrimPrefix(r.URL.Path, endpoint)
         regpath, err := validateRequestPath(encpath)
         if err != nil {
             dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": err.Error() })
@@ -144,9 +145,9 @@ func newDeregisterStartHandler(db *sql.DB, scratch string) func(http.ResponseWri
     }
 }
 
-func newDeregisterFinishHandler(db *sql.DB, scratch string) func(http.ResponseWriter, *http.Request) {
+func newDeregisterFinishHandler(db *sql.DB, scratch string, endpoint string) func(http.ResponseWriter, *http.Request) {
     return func(w http.ResponseWriter, r *http.Request) {
-        encpath := strings.TrimPrefix(r.URL.Path, "/deregister/finish/")
+        encpath := strings.TrimPrefix(r.URL.Path, endpoint)
         regpath, err := validateRequestPath(encpath)
         if err != nil {
             dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": err.Error() })
@@ -179,3 +180,73 @@ func newDeregisterFinishHandler(db *sql.DB, scratch string) func(http.ResponseWr
         return
     }
 }
+
+/**********************************************************************/
+
+func newQueryHandler(db *sql.DB, tokenizer *unicodeTokenizer, wild_tokenizer *unicodeTokenizer, endpoint string) func(http.ResponseWriter, *http.Request) {
+    return func(w http.ResponseWriter, r *http.Request) {
+        qparam_str := strings.TrimPrefix(r.URL.Path, endpoint)
+        
+        var scroll *scrollPosition
+        limit := 100
+        if qparam_str != "" {
+            if qparam_str[0] == '?' {
+                qparams := strings.Split(qparam_str, "&")
+
+                for _, q := range qparams {
+                    if strings.HasPrefix(q, "scroll=") {
+                        scroll_info := strings.TrimPrefix(q, "scroll=")
+                        i := strings.Index(scroll_info, ",")
+                        time, err := strconv.ParseInt(scroll_info[:i], 10, 64)
+                        if err != nil {
+                            continue
+                        }
+                        pid, err := strconv.ParseInt(scroll_info[(i+1):], 10, 64)
+                        if err != nil {
+                            continue
+                        }
+                        scroll = &scrollPosition{ Time: time, Pid: pid }
+
+                    } else if strings.HasPrefix(q, "limit=") {
+                        limit_info := strings.TrimPrefix(q, "limit=")
+                        limit0, err := strconv.Atoi(limit_info)
+                        if err == nil && limit0 > 0 && limit0 < limit {
+                            limit = limit0
+                        }
+                    }
+                }
+            }
+        }
+
+        query := searchClause{}
+        restricted := http.MaxBytesReader(w, r.Body, 1048576)
+        dec := json.NewDecoder(restricted)
+        err := dec.Decode(&query)
+        if err != nil {
+            dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": fmt.Sprintf("failed to parse response body; %v", err) })
+            return 
+        }
+
+        san, err := sanitizeQuery(&query, tokenizer, wild_tokenizer)
+        if err != nil {
+            dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": fmt.Sprintf("failed to sanitize an invalid query; %v", err) })
+            return
+        }
+
+        res, err := queryTokens(db, san, scroll, limit)
+        if err != nil {
+            dumpJsonResponse(w, http.StatusInternalServerError, map[string]string{ "status": "ERROR", "reason": fmt.Sprintf("failed to query tokens; %v", err) })
+            return
+        }
+
+        respbody := map[string]interface{} { "results": res }
+        if len(res) == limit {
+            last := &(res[limit-1])
+            respbody["scroll"] = endpoint + "?scroll=" + strconv.FormatInt(last.Time, 10) + "," + strconv.FormatInt(last.Pid, 10)
+        }
+
+        dumpJsonResponse(w, http.StatusOK, respbody)
+        return
+    }
+}
+
