@@ -101,7 +101,7 @@ func (i *insertStatements) Close() error {
 
 /**********************************************************************/
 
-func addDirectory(db *sql.DB, directory string, tokenizer *unicodeTokenizer) ([]string, error) {
+func addDirectory(db *sql.DB, directory string, of_interest map[string]bool, tokenizer *unicodeTokenizer) ([]string, error) {
     all_failures := []string{}
 
     paths := []string{}
@@ -109,8 +109,12 @@ func addDirectory(db *sql.DB, directory string, tokenizer *unicodeTokenizer) ([]
         // Just skip any directories that we can't access.
         if err != nil {
             all_failures = append(all_failures, fmt.Sprintf("failed to walk %q; %v", path, err))
-        } else if !d.IsDir() && filepath.Base(d.Name()) == "_metadata.json" {
-            paths = append(paths, d.Name())
+        }
+        if !d.IsDir() {
+            base := filepath.Base(d.Name())
+            if _, ok := of_interest[base]; ok {
+                paths = append(paths, d.Name())
+            }
         }
         return nil
     })

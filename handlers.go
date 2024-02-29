@@ -8,6 +8,7 @@ import (
     "path/filepath"
 
     "net/http"
+    "net/url"
     "encoding/json"
     "errors"
     "strings"
@@ -31,6 +32,26 @@ func dumpJsonResponse(w http.ResponseWriter, status int, v interface{}) {
     } else {
         w.WriteHeader(status)
     }
+}
+
+func extractQueryParameters(leftovers string) (map[string]string, error) {
+    if leftovers[0] != '?' {
+        return nil, errors.New("query parameter string should start with '?'")
+    }
+
+    qparams := strings.Split(leftovers[1:], "&")
+    output := map[string]string{}
+    for _, q := range qparams {
+        i := strings.Index(q, "=")
+        if i < 0 {
+            return nil, errors.New("query parameter string should contain '='")
+        }
+        name := q[:i]
+        val := q[i+1:]
+        output[name] = val
+    }
+
+    return output, nil
 }
 
 /**********************************************************************/
@@ -68,6 +89,42 @@ func newRegisterStartHandler(scratch string, endpoint string) func(http.Response
 func newRegisterFinishHandler(db *sql.DB, scratch string, tokenizer *unicodeTokenizer, endpoint string) func(http.ResponseWriter, *http.Request) {
     return func(w http.ResponseWriter, r *http.Request) {
         encpath := strings.TrimPrefix(r.URL.Path, endpoint)
+
+        i := strings.Index(encpath, "?")
+        allowed := map[string]bool{}
+        if i >= 0 {
+            encpath = encpath[:i]
+            mapping, err := extractQueryParameters(encpath[i:])
+            if err != nil {
+                dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": fmt.Sprintf("failed to parse query parameters; %v", err) })
+                return
+            }
+
+            if allowed_raw, ok := mapping["base"]; ok {
+                allowed_split := strings.Split(allowed_raw, ",")
+                for _, a := range allowed_split {
+                    if len(a) == 0 {
+                        dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": fmt.Sprintf("empty name in 'base'; %v", err) })
+                        return
+                    }
+                    dec, err := url.QueryUnescape(a)
+                    if err != nil {
+                        dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": fmt.Sprintf("failed to decode name in 'base'; %v", err) })
+                        return
+                    }
+                    if _, ok := allowed[dec]; ok {
+                        dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": "duplicate names in 'base'" })
+                        return
+                    }
+                    allowed[dec] = true
+                }
+            }
+        }
+
+        if len(allowed) == 0 {
+            allowed["metadata.json"] = true
+        }
+
         regpath, err := validateRequestPath(encpath)
         if err != nil {
             dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": err.Error() })
@@ -90,7 +147,7 @@ func newRegisterFinishHandler(db *sql.DB, scratch string, tokenizer *unicodeToke
             return
         }
 
-        failures, err := addDirectory(db, regpath, tokenizer)
+        failures, err := addDirectory(db, regpath, allowed, tokenizer)
         if err != nil {
             dumpJsonResponse(w, http.StatusInternalServerError, map[string]string{ "status": "ERROR", "reason": fmt.Sprintf("failed to index directory; %v", err) })
             return
@@ -186,34 +243,40 @@ func newDeregisterFinishHandler(db *sql.DB, scratch string, endpoint string) fun
 func newQueryHandler(db *sql.DB, tokenizer *unicodeTokenizer, wild_tokenizer *unicodeTokenizer, endpoint string) func(http.ResponseWriter, *http.Request) {
     return func(w http.ResponseWriter, r *http.Request) {
         qparam_str := strings.TrimPrefix(r.URL.Path, endpoint)
-        
+
         var scroll *scrollPosition
         limit := 100
         if qparam_str != "" {
-            if qparam_str[0] == '?' {
-                qparams := strings.Split(qparam_str, "&")
+            mapping, err := extractQueryParameters(qparam_str)
+            if err != nil {
+                dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": fmt.Sprintf("failed to parse query parameters; %v", err) })
+                return
+            }
 
-                for _, q := range qparams {
-                    if strings.HasPrefix(q, "scroll=") {
-                        scroll_info := strings.TrimPrefix(q, "scroll=")
-                        i := strings.Index(scroll_info, ",")
-                        time, err := strconv.ParseInt(scroll_info[:i], 10, 64)
-                        if err != nil {
-                            continue
-                        }
-                        pid, err := strconv.ParseInt(scroll_info[(i+1):], 10, 64)
-                        if err != nil {
-                            continue
-                        }
-                        scroll = &scrollPosition{ Time: time, Pid: pid }
+            if val, ok := mapping["scroll"]; ok {
+                i := strings.Index(val, ",")
+                if i < 0 {
+                    dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": "'scroll' should be a comma-separated string" })
+                    return
+                }
+                time, err := strconv.ParseInt(val[:i], 10, 64)
+                if err != nil {
+                    dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": "failed to parse the time from 'scroll'" })
+                    return
+                }
+                pid, err := strconv.ParseInt(val[(i+1):], 10, 64)
+                if err != nil {
+                    dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": "failed to parse the path ID from 'scroll'" })
+                    return
+                }
+                scroll = &scrollPosition{ Time: time, Pid: pid }
+            }
 
-                    } else if strings.HasPrefix(q, "limit=") {
-                        limit_info := strings.TrimPrefix(q, "limit=")
-                        limit0, err := strconv.Atoi(limit_info)
-                        if err == nil && limit0 > 0 && limit0 < limit {
-                            limit = limit0
-                        }
-                    }
+            if val, ok := mapping["limit"]; ok {
+                limit0, err := strconv.Atoi(val)
+                if err != nil || limit <= 0 || limit0 > limit {
+                    dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": "invalid 'limit'" })
+                    return
                 }
             }
         }
@@ -224,7 +287,7 @@ func newQueryHandler(db *sql.DB, tokenizer *unicodeTokenizer, wild_tokenizer *un
         err := dec.Decode(&query)
         if err != nil {
             dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": fmt.Sprintf("failed to parse response body; %v", err) })
-            return 
+            return
         }
 
         san, err := sanitizeQuery(&query, tokenizer, wild_tokenizer)
