@@ -26,6 +26,7 @@ func validateRequestPath(encoded string) (string, error) {
 
     return regpath, nil
 }
+
 func createVerificationCode(path string) (string, error) {
     var candidate string
     buff := make([]byte, 32) // 256 bits of entropy should be enough.
