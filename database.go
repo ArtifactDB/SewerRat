@@ -308,24 +308,24 @@ func deleteDirectory(db *sql.DB, directory string) error {
 /**********************************************************************/
 
 func updatePaths(db *sql.DB, tokenizer* unicodeTokenizer) ([]string, error) {
-    update_paths := []string{}
-    update_users := []string{}
-    update_times := []int64{}
-    purge_paths := []string{}
-
-    // Wrapping this inside a function so that the 'rows' are closed before further operations.
-    err := func() error {
+    update_paths, update_users, update_times, purge_paths, err := func() ([]string, []string, []int64, []string, error) {
+        // Wrapping this inside a function so that the 'rows' are closed before further operations.
         rows, err := db.Query("SELECT path, time from paths") 
         if err != nil {
-            return fmt.Errorf("failed to query the 'paths' table; %w", err)
+            return nil, nil, nil, nil, fmt.Errorf("failed to query the 'paths' table; %w", err)
         }
         defer rows.Close()
+
+        update_paths := []string{}
+        update_users := []string{}
+        update_times := []int64{}
+        purge_paths := []string{}
 
         for rows.Next() {
             var path string
             var time int64
             if err := rows.Scan(&path, &time); err != nil {
-                return fmt.Errorf("failed to traverse rows of the 'paths' table; %w", err)
+                return nil, nil, nil, nil, fmt.Errorf("failed to traverse rows of the 'paths' table; %w", err)
             }
 
             info, err := os.Stat(path)
@@ -334,26 +334,28 @@ func updatePaths(db *sql.DB, tokenizer* unicodeTokenizer) ([]string, error) {
                 continue
             }
 
-            if info.ModTime().Unix() != time {
+            newtime := info.ModTime().Unix()
+            if newtime != time {
                 username, err := identifyUser(info)
                 if err != nil {
                     purge_paths = append(purge_paths, path)
                 } else {
                     update_paths = append(update_paths, path)
                     update_users = append(update_users, username)
-                    update_times = append(update_times, time)
+                    update_times = append(update_times, newtime)
                 }
             }
         }
 
-        return nil
+        return update_paths, update_users, update_times, purge_paths, nil
     }()
     if err != nil {
         return nil, err
     }
 
+    // Reading and parsing the JSON documents in parallel.
     update_parsed := make([]interface{}, len(update_paths))
-    update_raw_contentss := make([][]byte, len(update_paths))
+    update_raw_contents := make([][]byte, len(update_paths))
     update_failures := make([]error, len(update_paths))
     {
         var wg sync.WaitGroup
@@ -376,7 +378,7 @@ func updatePaths(db *sql.DB, tokenizer* unicodeTokenizer) ([]string, error) {
                     return
                 }
 
-                update_raw_contentss[i] = raw
+                update_raw_contents[i] = raw
                 update_parsed[i] = vals
             }(i, f)
         }
@@ -385,28 +387,14 @@ func updatePaths(db *sql.DB, tokenizer* unicodeTokenizer) ([]string, error) {
     }
 
     all_failures := []string{}
+    tx, err := db.Begin()
+    if err != nil {
+        return nil, fmt.Errorf("failed to prepare a database transaction; %w", err)
+    }
+    defer tx.Rollback()
+
+    // Updating the existing files.
     {
-        tx, err := db.Begin()
-        if err != nil {
-            return nil, fmt.Errorf("failed to prepare a database transaction; %w", err)
-        }
-        defer tx.Rollback()
-
-        // Removing all the out-dated paths.
-        delstmt, err := tx.Prepare("DELETE FROM paths WHERE path = ?")
-        if err != nil {
-            return nil, fmt.Errorf("failed to prepare the delete transaction; %w", err)
-        }
-        defer delstmt.Close()
-
-        for _, x := range purge_paths {
-            _, err := delstmt.Exec("DELETE FROM paths WHERE path = ?", x)
-            if err != nil {
-                all_failures = append(all_failures, fmt.Sprintf("failed to purge path %q from the database; %v", x, err))
-            }
-        }
-
-        // Updating the existing files.
         pustmt, err := tx.Prepare("UPDATE paths SET user = ?, time = ?, metadata = ? WHERE path = ?")
         if err != nil {
             return nil, fmt.Errorf("failed to prepare path update statement; %w", err)
@@ -419,6 +407,12 @@ func updatePaths(db *sql.DB, tokenizer* unicodeTokenizer) ([]string, error) {
         }
         defer pistmt.Close()
 
+        delstmt, err := tx.Prepare("DELETE FROM links WHERE pid = ?")
+        if err != nil {
+            return nil, fmt.Errorf("failed to prepare link deletion statement; %w", err)
+        }
+        defer delstmt.Close()
+
         prepped, err := newInsertStatements(tx)
         if err != nil {
             return nil, fmt.Errorf("failed to prepare token insertion statements for the update; %w", err)
@@ -428,10 +422,11 @@ func updatePaths(db *sql.DB, tokenizer* unicodeTokenizer) ([]string, error) {
         for i, f := range update_paths {
             if update_failures[i] != nil {
                 all_failures = append(all_failures, update_failures[i].Error())
+                purge_paths = append(purge_paths, f) // reassign it for purging.
                 continue
             }
 
-            _, err := pustmt.Exec(update_users[i], update_times[i], update_raw_contentss[i], f)
+            _, err := pustmt.Exec(update_users[i], update_times[i], update_raw_contents[i], f)
             if err != nil {
                 all_failures = append(all_failures, fmt.Sprintf("failed to update %q in the database; %v", f, err))
                 continue
@@ -444,14 +439,36 @@ func updatePaths(db *sql.DB, tokenizer* unicodeTokenizer) ([]string, error) {
                 continue
             }
 
+            _, err = delstmt.Exec(pid)
+            if err != nil {
+                all_failures = append(all_failures, fmt.Sprintf("failed to delete links for %q; %v", f, err))
+                continue
+            }
+
             tokfails := tokenizeMetadata(tx, update_parsed[i], f, pid, "", prepped, tokenizer)
             all_failures = append(all_failures, tokfails...)
         }
+    }
 
-        err = tx.Commit()
+    // Purging the paths.
+    {
+        delstmt, err := tx.Prepare("DELETE FROM paths WHERE path = ?")
         if err != nil {
-            return nil, fmt.Errorf("failed to commit the update transaction; %w", err)
+            return nil, fmt.Errorf("failed to prepare the delete transaction; %w", err)
         }
+        defer delstmt.Close()
+
+        for _, x := range purge_paths {
+            _, err := delstmt.Exec(x)
+            if err != nil {
+                all_failures = append(all_failures, fmt.Sprintf("failed to purge path %q from the database; %v", x, err))
+            }
+        }
+    }
+
+    err = tx.Commit()
+    if err != nil {
+        return nil, fmt.Errorf("failed to commit the update transaction; %w", err)
     }
 
     return all_failures, nil
