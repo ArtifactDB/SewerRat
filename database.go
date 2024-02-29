@@ -25,21 +25,26 @@ func initializeDatabase(path string) (*sql.DB, error) {
 		return nil, fmt.Errorf("failed to create SQLite file at %q; %w", path, err)
 	}
 
+    _, err = db.Exec("PRAGMA foreign_keys = ON")
+    if err != nil {
+		return nil, fmt.Errorf("failed to enable foreign key support; %w", err)
+    }
+
     if (!accessible) {
         _, err = db.Exec(`
-CREATE TABLE paths(pid INTEGER PRIMARY KEY, path TEXT NOT NULL UNIQUE, user TEXT NOT NULL, time INTEGER NOT NULL, metadata BLOB)
-CREATE INDEX index_paths_path ON paths(path)
-CREATE INDEX index_paths_time ON paths(time, user)
-CREATE INDEX index_paths_user ON paths(user, time)
+CREATE TABLE paths(pid INTEGER PRIMARY KEY, path TEXT NOT NULL UNIQUE, user TEXT NOT NULL, time INTEGER NOT NULL, metadata BLOB);
+CREATE INDEX index_paths_path ON paths(path);
+CREATE INDEX index_paths_time ON paths(time, user);
+CREATE INDEX index_paths_user ON paths(user, time);
 
-CREATE TABLE tokens(tid INTEGER PRIMARY KEY, token TEXT NOT NULL UNIQUE)
-CREATE INDEX index_tokens ON tokens(token)
+CREATE TABLE tokens(tid INTEGER PRIMARY KEY, token TEXT NOT NULL UNIQUE);
+CREATE INDEX index_tokens ON tokens(token);
 
-CREATE TABLE fields(fid INTEGER PRIMARY KEY, field TEXT NOT NULL UNIQUE)
-CREATE INDEX index_fields ON fields(field)
+CREATE TABLE fields(fid INTEGER PRIMARY KEY, field TEXT NOT NULL UNIQUE);
+CREATE INDEX index_fields ON fields(field);
 
-CREATE TABLE links(pid INTEGER, fid INTEGER, tid INTEGER, FOREIGN KEY(pid) REFERENCES paths(pid) ON DELETE CASCADE)
-CREATE INDEX index_links ON links(tid, fid)
+CREATE TABLE links(pid INTEGER NOT NULL, fid INTEGER NOT NULL, tid INTEGER NOT NULL, FOREIGN KEY(pid) REFERENCES paths(pid) ON DELETE CASCADE, UNIQUE(pid, fid, tid));
+CREATE INDEX index_links ON links(tid, fid);
 `)
         if err != nil {
             os.Remove(path)
@@ -72,7 +77,7 @@ func newInsertStatements(tx *sql.Tx) (*insertStatements, error) {
         return nil, fmt.Errorf("failed to prepare field insertion statement; %w", err)
     }
 
-    l, err := tx.Prepare("INSERT INTO links(pid, fid, tid) VALUES(?, ?, ?)")
+    l, err := tx.Prepare("INSERT OR IGNORE INTO links(pid, fid, tid) VALUES(?, (SELECT fid FROM fields WHERE field = ?), (SELECT tid FROM tokens WHERE token = ?))")
     if err != nil {
         return nil, fmt.Errorf("failed to prepare link insertion statement; %w", err)
     }
@@ -111,19 +116,18 @@ func addDirectory(db *sql.DB, directory string, of_interest map[string]bool, tok
             all_failures = append(all_failures, fmt.Sprintf("failed to walk %q; %v", path, err))
         }
         if !d.IsDir() {
-            base := filepath.Base(d.Name())
-            if _, ok := of_interest[base]; ok {
-                paths = append(paths, d.Name())
+            if _, ok := of_interest[d.Name()]; ok {
+                paths = append(paths, path)
             }
         }
         return nil
     })
 
     // Parsing documents in parallel.
-    contents := make([]interface{}, len(paths))
+    parsed := make([]interface{}, len(paths))
     users := make([]string, len(paths))
     times := make([]time.Time, len(paths))
-    payload := make([][]byte, len(paths))
+    raw_contents := make([][]byte, len(paths))
     failures := make([]error, len(paths))
 
     {
@@ -160,8 +164,8 @@ func addDirectory(db *sql.DB, directory string, of_interest map[string]bool, tok
 
                 users[i] = username
                 times[i] = info.ModTime()
-                payload[i] = raw
-                contents[i] = vals
+                raw_contents[i] = raw
+                parsed[i] = vals
             }(i, f)
         }
 
@@ -195,20 +199,21 @@ func addDirectory(db *sql.DB, directory string, of_interest map[string]bool, tok
         }
         defer pstmt.Close()
 
-        for i, f := range contents {
+        for i, f := range paths {
             if failures[i] != nil {
                 all_failures = append(all_failures, failures[i].Error())
                 continue
             }
 
             var pid int64
-            err := pstmt.QueryRow(f, users[i], times[i].Unix(), payload[i]).Scan(&pid)
+            err := pstmt.QueryRow(f, users[i], times[i].Unix(), raw_contents[i]).Scan(&pid)
             if err != nil {
-                all_failures = append(all_failures, fmt.Sprintf("failed to insert %q into the database; %v", f, err))
+                all_failures = append(all_failures, fmt.Sprintf("failed to insert %q into the database; %v", paths[i], err))
                 continue
             }
 
-            tokenizeMetadata(tx, contents[i], paths[i], pid, "", prepped, tokenizer, all_failures)
+            tokfails := tokenizeMetadata(tx, parsed[i], f, pid, "", prepped, tokenizer)
+            all_failures = append(all_failures, tokfails...)
         }
 
         err = tx.Commit()
@@ -221,11 +226,14 @@ func addDirectory(db *sql.DB, directory string, of_interest map[string]bool, tok
 }
 
 // Recurse through the metadata structure to disassemble the tokens.
-func tokenizeMetadata(tx *sql.Tx, contents interface{}, path string, pid int64, field string, prepped *insertStatements, tokenizer *unicodeTokenizer, failures []string) {
-    switch v := contents.(type) {
+func tokenizeMetadata(tx *sql.Tx, parsed interface{}, path string, pid int64, field string, prepped *insertStatements, tokenizer *unicodeTokenizer) []string {
+    failures := []string{}
+
+    switch v := parsed.(type) {
     case []interface{}:
         for _, w := range v {
-            tokenizeMetadata(tx, w, path, pid, field, prepped, tokenizer, failures)
+            tokfails := tokenizeMetadata(tx, w, path, pid, field, prepped, tokenizer)
+            failures = append(failures, tokfails...)
         }
 
     case map[string]interface{}:
@@ -234,14 +242,14 @@ func tokenizeMetadata(tx *sql.Tx, contents interface{}, path string, pid int64, 
             if field != "" {
                 new_field = field + "." + k
             }
-            tokenizeMetadata(tx, w, path, pid, new_field, prepped, tokenizer, failures)
+            tokfails := tokenizeMetadata(tx, w, path, pid, new_field, prepped, tokenizer)
+            failures = append(failures, tokfails...)
         }
 
     case string:
         tokens, err := tokenizer.Tokenize(v)
         if err != nil {
-            failures = append(failures, fmt.Sprintf("failed to tokenize %q in %q; %v", v, path, err))
-            return
+            return []string{ fmt.Sprintf("failed to tokenize %q in %q; %v", v, path, err) }
         }
 
         for _, t := range tokens {
@@ -264,6 +272,8 @@ func tokenizeMetadata(tx *sql.Tx, contents interface{}, path string, pid int64, 
             }
         }
     }
+
+    return failures
 }
 
 /**********************************************************************/
@@ -275,7 +285,7 @@ func deleteDirectory(db *sql.DB, directory string) error {
         for counter >= 0 && directory[counter] == '/' {
             counter--
         }
-        directory = directory[:counter]
+        directory = directory[:(counter+1)]
     }
 
     pattern, escape, err := escapeWildcards(directory)
@@ -285,11 +295,7 @@ func deleteDirectory(db *sql.DB, directory string) error {
 
     query := "DELETE FROM paths WHERE path LIKE ?"
     if escape != "" {
-        query += " ESCAPE '"
-        if escape == "\\" {
-            query += "\\" // need to escape the escape.
-        } 
-        query += escape + "'"
+        query += " ESCAPE '" + escape + "'"
     }
 
     _, err = db.Exec(query, pattern + "/%")
@@ -346,8 +352,8 @@ func updatePaths(db *sql.DB, tokenizer* unicodeTokenizer) ([]string, error) {
         return nil, err
     }
 
-    update_contents := make([]interface{}, len(update_paths))
-    update_payloads := make([][]byte, len(update_paths))
+    update_parsed := make([]interface{}, len(update_paths))
+    update_raw_contentss := make([][]byte, len(update_paths))
     update_failures := make([]error, len(update_paths))
     {
         var wg sync.WaitGroup
@@ -370,8 +376,8 @@ func updatePaths(db *sql.DB, tokenizer* unicodeTokenizer) ([]string, error) {
                     return
                 }
 
-                update_payloads[i] = raw
-                update_contents[i] = vals
+                update_raw_contentss[i] = raw
+                update_parsed[i] = vals
             }(i, f)
         }
 
@@ -425,7 +431,7 @@ func updatePaths(db *sql.DB, tokenizer* unicodeTokenizer) ([]string, error) {
                 continue
             }
 
-            _, err := pustmt.Exec(update_users[i], update_times[i], update_payloads[i], f)
+            _, err := pustmt.Exec(update_users[i], update_times[i], update_raw_contentss[i], f)
             if err != nil {
                 all_failures = append(all_failures, fmt.Sprintf("failed to update %q in the database; %v", f, err))
                 continue
@@ -438,7 +444,8 @@ func updatePaths(db *sql.DB, tokenizer* unicodeTokenizer) ([]string, error) {
                 continue
             }
 
-            tokenizeMetadata(tx, update_contents[i], f, pid, "", prepped, tokenizer, all_failures)
+            tokfails := tokenizeMetadata(tx, update_parsed[i], f, pid, "", prepped, tokenizer)
+            all_failures = append(all_failures, tokfails...)
         }
 
         err = tx.Commit()
