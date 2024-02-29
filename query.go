@@ -1,7 +1,6 @@
 package main
 
 import (
-    "errors"
     "fmt"
     "strings"
 )
@@ -49,6 +48,7 @@ func escapeWildcards(input string) (string, string, error) {
         if !has_escape {
             escape = candidate
             found_escape = true
+            break
         }
     }
 
@@ -78,14 +78,14 @@ func sanitizeQuery(original *searchClause, deftok, wildtok *unicodeTokenizer) (*
         new_kids := []*searchClause{} 
         for _, x := range original.Children {
             if x == nil {
-                return nil, errors.New("'children' should not contain null values")
+                continue
             }
 
             san, err := sanitizeQuery(x, deftok, wildtok)
             if err != nil {
                 return nil, err
             }
-            if san != nil {
+            if san == nil {
                 continue
             }
 
