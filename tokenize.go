@@ -21,7 +21,7 @@ func newUnicodeTokenizer(allow_wildcards bool) (*unicodeTokenizer, error) {
         pattern = "%_"
     }
 
-    comp, err := regexp.Compile("[^\\p{L}\\p{N}\\p{Co}-" + pattern + "]+")
+    comp, err := regexp.Compile("[^\\p{L}\\p{N}\\p{Co}" + pattern + "-]+")
     if err != nil {
         return nil, fmt.Errorf("failed to compile regex; %w", err)
     }

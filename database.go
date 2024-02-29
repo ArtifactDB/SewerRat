@@ -469,7 +469,7 @@ func backupDatabase(db *sql.DB, path string) error {
 
     _, err = db.Exec("VACUUM INTO ?", path)
     if err != nil {
-        all_errors := []error{ fmt.Errorf("failed to create a backup database; %w", path, err) }
+        all_errors := []error{ fmt.Errorf("failed to create a backup database; %w", err) }
         if existing {
             // Move the backup of the backup back to its previous location.
             err = os.Rename(path + ".backup", path)
