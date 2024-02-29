@@ -5,6 +5,7 @@ import (
     "os"
     "fmt"
     "errors"
+    "path/filepath"
 )
 
 func purgeOldFiles(scratch string, maxlife time.Duration) error {
@@ -13,7 +14,7 @@ func purgeOldFiles(scratch string, maxlife time.Duration) error {
         return fmt.Errorf("failed to read contents of %q; %w", scratch, err) 
     }
 
-    threshold := time.Now().Add(maxlife)
+    threshold := time.Now().Add(-maxlife)
     all_errors := []error{}
     for _, f := range listing {
         info, err := f.Info()
@@ -24,7 +25,7 @@ func purgeOldFiles(scratch string, maxlife time.Duration) error {
 
         timestamp := info.ModTime()
         if threshold.After(timestamp) {
-            err := os.Remove(f.Name())
+            err := os.Remove(filepath.Join(scratch, f.Name()))
             if err != nil {
                 all_errors = append(all_errors, fmt.Errorf("failed to remove %q; %w", f.Name(), err))
             }

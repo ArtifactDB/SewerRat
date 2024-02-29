@@ -163,7 +163,7 @@ func assembleFilter(query *searchClause, parameters []interface{}) string {
         } else {
             filter += " ="
         }
-        filter += "?"
+        filter += " ?"
         parameters = append(parameters, query.Text)
         filter += ")"
 
@@ -189,7 +189,7 @@ func assembleFilter(query *searchClause, parameters []interface{}) string {
         } else {
             filter += " <="
         }
-        filter += "?"
+        filter += " ?"
         parameters = append(parameters, "%" + query.Path + "%")
         return filter
     }
