@@ -686,3 +686,72 @@ func TestUpdatePathsFailure(t *testing.T) {
         t.Fatalf("unexpected paths in the index %v", all_paths)
     }
 }
+
+func TestBackupDatabase(t *testing.T) {
+    tmp, err := os.MkdirTemp("", "")
+    if err != nil {
+        t.Fatalf(err.Error())
+    }
+    defer os.RemoveAll(tmp)
+
+    dbpath := filepath.Join(tmp, "db.sqlite3")
+    dbconn, err := initializeDatabase(dbpath)
+    if err != nil {
+        t.Fatalf(err.Error())
+    }
+    defer dbconn.Close()
+
+    tokr, err := newUnicodeTokenizer(false)
+    if err != nil {
+        t.Fatalf(err.Error())
+    }
+
+    // Mocking up some contents.
+    to_add := filepath.Join(tmp, "to_add")
+    err = mockDirectory(to_add)
+    if err != nil {
+        t.Fatalf(err.Error())
+    }
+
+    comments, err := addDirectory(dbconn, to_add, map[string]bool{ "metadata.json": true, "other.json": true }, tokr)
+    if err != nil {
+        t.Fatalf(err.Error())
+    }
+    if len(comments) > 0 {
+        t.Fatalf("unexpected comments from the directory addition %v", comments)
+    }
+
+    // Running the backup.
+    backpath := filepath.Join(tmp, "db.sqlite3.backup")
+    err = backupDatabase(dbconn, backpath)
+    if err != nil {
+        t.Fatalf(err.Error())
+    }
+
+    dbconn2, err := sql.Open("sqlite", backpath)
+    if err != nil {
+        t.Fatalf(err.Error())
+    }
+
+    all_paths, err := listPaths(dbconn2, tmp)
+    if err != nil {
+        t.Fatalf(err.Error())
+    }
+    if !equalStringArrays(all_paths, []string{ "to_add/metadata.json", "to_add/stuff/metadata.json", "to_add/stuff/other.json", "to_add/whee/other.json" }) {
+        t.Fatalf("unexpected paths in the backup DB")
+    }
+
+    found, err := searchForLink(dbconn2, filepath.Join(to_add, "metadata.json"), "foo", "little")
+    if err != nil {
+        t.Fatalf(err.Error())
+    }
+    if !found {
+        t.Fatalf("could not find expected link in the backup DB")
+    }
+
+    // Backup continues to work when there's an existing file.
+    err = backupDatabase(dbconn, backpath)
+    if err != nil {
+        t.Fatalf(err.Error())
+    }
+}
