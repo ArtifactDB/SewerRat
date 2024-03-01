@@ -173,7 +173,7 @@ func assembleFilter(query *searchClause) (string, []interface{}) {
     }
 
     if query.Type == "user" {
-        return "paths.user = ?", []interface{}{ query.Text }
+        return "paths.user = ?", []interface{}{ query.User }
     }
 
     if query.Type == "path" {
@@ -188,7 +188,7 @@ func assembleFilter(query *searchClause) (string, []interface{}) {
             filter += " <="
         }
         filter += " ?"
-        return filter, []interface{}{ "%" + query.Path + "%" }
+        return filter, []interface{}{ query.Time }
     }
 
     if query.Type == "and" {
