@@ -958,6 +958,34 @@ func TestQueryTokens(t *testing.T) {
         }
     })
 
+    t.Run("scrolling", func(t *testing.T) {
+        res, err := queryTokens(dbconn, nil, nil, 2)
+        if err != nil {
+            t.Fatalf(err.Error())
+        }
+        if len(res) != 2 || res[0].Path != filepath.Join(to_add, "whee/other.json") || res[1].Path != filepath.Join(to_add, "stuff/other.json") {
+            t.Fatalf("search results are not as expected")
+        }
+
+        // Picking up from the last position.
+        res, err = queryTokens(dbconn, nil, &scrollPosition{ Time: res[1].Time, Pid: res[1].Pid }, 2)
+        if err != nil {
+            t.Fatalf(err.Error())
+        }
+        if len(res) != 2 || res[0].Path != filepath.Join(to_add, "stuff/metadata.json") || res[1].Path != filepath.Join(to_add, "metadata.json") {
+            t.Fatalf("search results are not as expected")
+        }
+
+        // Picking up from the last position again.
+        res, err = queryTokens(dbconn, nil, &scrollPosition{ Time: res[1].Time, Pid: res[1].Pid }, 2)
+        if err != nil {
+            t.Fatalf(err.Error())
+        }
+        if len(res) != 0 {
+            t.Fatalf("search results are not as expected")
+        }
+    })
+
     t.Run("full", func(t *testing.T) {
         res, err := queryTokens(dbconn, nil, nil, 0)
         if err != nil {
