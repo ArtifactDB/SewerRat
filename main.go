@@ -22,7 +22,7 @@ func main() {
         os.Exit(1)
     }
 
-    err := os.MkdirAll(scratch, 755)
+    err := os.MkdirAll(scratch, 0700)
     if err != nil {
         log.Fatalf("failed to create the scratch directory at %q; %v", scratch, err)
     }
