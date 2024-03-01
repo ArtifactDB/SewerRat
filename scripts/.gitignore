@@ -1,0 +1,6 @@
+*.sqlite3
+tmp/
+test/
+testing.sh
+init.sh
+
