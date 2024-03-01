@@ -24,34 +24,13 @@ func dumpJsonResponse(w http.ResponseWriter, status int, v interface{}) {
     }
 
     w.Header()["Content-Type"] = []string { "application/json" }
+    w.WriteHeader(status)
     _, err = w.Write(contents)
     if err != nil {
         w.WriteHeader(http.StatusInternalServerError)
         log.Printf("failed to write JSON response; %v", err)
         return
-    } else {
-        w.WriteHeader(status)
     }
-}
-
-func extractQueryParameters(leftovers string) (map[string]string, error) {
-    if leftovers[0] != '?' {
-        return nil, errors.New("query parameter string should start with '?'")
-    }
-
-    qparams := strings.Split(leftovers[1:], "&")
-    output := map[string]string{}
-    for _, q := range qparams {
-        i := strings.Index(q, "=")
-        if i < 0 {
-            return nil, errors.New("query parameter string should contain '='")
-        }
-        name := q[:i]
-        val := q[i+1:]
-        output[name] = val
-    }
-
-    return output, nil
 }
 
 /**********************************************************************/
@@ -62,6 +41,7 @@ func newRegisterStartHandler(scratch string, endpoint string) func(http.Response
         regpath, err := validateRequestPath(encpath)
         if err != nil {
             dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": err.Error() })
+            w.WriteHeader(http.StatusBadRequest)
             return
         }
 
@@ -81,50 +61,38 @@ func newRegisterStartHandler(scratch string, endpoint string) func(http.Response
             return
         }
 
-        dumpJsonResponse(w, http.StatusAccepted, map[string]string{ "status": "PENDING", "value": candidate })
+        dumpJsonResponse(w, http.StatusAccepted, map[string]string{ "status": "PENDING", "code": candidate })
         return
     }
 }
 
 func newRegisterFinishHandler(db *sql.DB, scratch string, tokenizer *unicodeTokenizer, endpoint string) func(http.ResponseWriter, *http.Request) {
     return func(w http.ResponseWriter, r *http.Request) {
-        encpath := strings.TrimPrefix(r.URL.Path, endpoint)
-
-        i := strings.Index(encpath, "?")
+        query := r.URL.Query()
         allowed := map[string]bool{}
-        if i >= 0 {
-            encpath = encpath[:i]
-            mapping, err := extractQueryParameters(encpath[i:])
-            if err != nil {
-                dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": fmt.Sprintf("failed to parse query parameters; %v", err) })
-                return
-            }
-
-            if allowed_raw, ok := mapping["base"]; ok {
-                allowed_split := strings.Split(allowed_raw, ",")
-                for _, a := range allowed_split {
-                    if len(a) == 0 {
-                        dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": fmt.Sprintf("empty name in 'base'; %v", err) })
-                        return
-                    }
-                    dec, err := url.QueryUnescape(a)
-                    if err != nil {
-                        dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": fmt.Sprintf("failed to decode name in 'base'; %v", err) })
-                        return
-                    }
-                    if _, ok := allowed[dec]; ok {
-                        dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": "duplicate names in 'base'" })
-                        return
-                    }
-                    allowed[dec] = true
+        if query.Has("base") {
+            allowed_split := strings.Split(query.Get("base"), ",")
+            for _, a := range allowed_split {
+                if len(a) == 0 {
+                    dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": fmt.Sprintf("empty name in 'base'") })
+                    return
                 }
+                dec, err := url.QueryUnescape(a)
+                if err != nil {
+                    dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": fmt.Sprintf("failed to decode name in 'base'; %v", err) })
+                    return
+                }
+                if _, ok := allowed[dec]; ok {
+                    dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": "duplicate names in 'base'" })
+                    return
+                }
+                allowed[dec] = true
             }
-        }
-
-        if len(allowed) == 0 {
+        } else {
             allowed["metadata.json"] = true
         }
 
+        encpath := strings.TrimPrefix(r.URL.Path, endpoint)
         regpath, err := validateRequestPath(encpath)
         if err != nil {
             dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": err.Error() })
@@ -197,7 +165,7 @@ func newDeregisterStartHandler(db *sql.DB, scratch string, endpoint string) func
             return
         }
 
-        dumpJsonResponse(w, http.StatusAccepted, map[string]string{ "status": "PENDING", "value": candidate })
+        dumpJsonResponse(w, http.StatusAccepted, map[string]string{ "status": "PENDING", "code": candidate })
         return
     }
 }
@@ -242,42 +210,35 @@ func newDeregisterFinishHandler(db *sql.DB, scratch string, endpoint string) fun
 
 func newQueryHandler(db *sql.DB, tokenizer *unicodeTokenizer, wild_tokenizer *unicodeTokenizer, endpoint string) func(http.ResponseWriter, *http.Request) {
     return func(w http.ResponseWriter, r *http.Request) {
-        qparam_str := strings.TrimPrefix(r.URL.Path, endpoint)
-
+        params := r.URL.Query()
         var scroll *scrollPosition
         limit := 100
-        if qparam_str != "" {
-            mapping, err := extractQueryParameters(qparam_str)
-            if err != nil {
-                dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": fmt.Sprintf("failed to parse query parameters; %v", err) })
+
+        if params.Has("scroll") {
+            val := params.Get("scroll")
+            i := strings.Index(val, ",")
+            if i < 0 {
+                dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": "'val' should be a comma-separated string" })
                 return
             }
-
-            if val, ok := mapping["scroll"]; ok {
-                i := strings.Index(val, ",")
-                if i < 0 {
-                    dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": "'scroll' should be a comma-separated string" })
-                    return
-                }
-                time, err := strconv.ParseInt(val[:i], 10, 64)
-                if err != nil {
-                    dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": "failed to parse the time from 'scroll'" })
-                    return
-                }
-                pid, err := strconv.ParseInt(val[(i+1):], 10, 64)
-                if err != nil {
-                    dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": "failed to parse the path ID from 'scroll'" })
-                    return
-                }
-                scroll = &scrollPosition{ Time: time, Pid: pid }
+            time, err := strconv.ParseInt(val[:i], 10, 64)
+            if err != nil {
+                dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": "failed to parse the time from 'val'" })
+                return
             }
+            pid, err := strconv.ParseInt(val[(i+1):], 10, 64)
+            if err != nil {
+                dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": "failed to parse the path ID from 'val'" })
+                return
+            }
+            scroll = &scrollPosition{ Time: time, Pid: pid }
+        }
 
-            if val, ok := mapping["limit"]; ok {
-                limit0, err := strconv.Atoi(val)
-                if err != nil || limit <= 0 || limit0 > limit {
-                    dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": "invalid 'limit'" })
-                    return
-                }
+        if params.Has("limit") {
+            limit0, err := strconv.Atoi(params.Get("limit"))
+            if err != nil || limit <= 0 || limit0 > limit {
+                dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": "invalid 'limit'" })
+                return
             }
         }
 

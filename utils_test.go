@@ -4,6 +4,8 @@ import (
     "os"
     "fmt"
     "path/filepath"
+    "database/sql"
+    "sort"
 )
 
 func equalStringArrays(x []string, y []string) bool {
@@ -65,4 +67,30 @@ func mockDirectory(path string) error {
     }
 
     return nil
+}
+
+func listPaths(dbconn * sql.DB, scratch string) ([]string, error) {
+    rows, err := dbconn.Query("SELECT path FROM paths")
+    if err != nil {
+        return nil, err
+    }
+    defer rows.Close()
+
+    all_paths := []string{}
+    for rows.Next() {
+        var path string
+        err = rows.Scan(&path)
+        if err != nil {
+            return nil, err
+        }
+
+        rel, err := filepath.Rel(scratch, path)
+        if err != nil {
+            return nil, err
+        }
+        all_paths = append(all_paths, rel)
+    }
+
+    sort.Strings(all_paths)
+    return all_paths, nil
 }
