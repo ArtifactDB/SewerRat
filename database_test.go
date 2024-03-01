@@ -968,7 +968,7 @@ func TestQueryTokens(t *testing.T) {
         }
 
         // Picking up from the last position.
-        res, err = queryTokens(dbconn, nil, &scrollPosition{ Time: res[1].Time, Pid: res[1].Pid }, 2)
+        res, err = queryTokens(dbconn, nil, &scrollPosition{ Time: res[1].Time, Pid: res[1].Pid }, 100)
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -976,7 +976,7 @@ func TestQueryTokens(t *testing.T) {
             t.Fatalf("search results are not as expected")
         }
 
-        // Picking up from the last position again.
+        // Checking that it works even after we've exhausted all records.
         res, err = queryTokens(dbconn, nil, &scrollPosition{ Time: res[1].Time, Pid: res[1].Pid }, 2)
         if err != nil {
             t.Fatalf(err.Error())

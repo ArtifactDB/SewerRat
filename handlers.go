@@ -218,17 +218,17 @@ func newQueryHandler(db *sql.DB, tokenizer *unicodeTokenizer, wild_tokenizer *un
             val := params.Get("scroll")
             i := strings.Index(val, ",")
             if i < 0 {
-                dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": "'val' should be a comma-separated string" })
+                dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": "'scroll' should be a comma-separated string" })
                 return
             }
             time, err := strconv.ParseInt(val[:i], 10, 64)
             if err != nil {
-                dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": "failed to parse the time from 'val'" })
+                dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": "failed to parse the time from 'scroll'" })
                 return
             }
             pid, err := strconv.ParseInt(val[(i+1):], 10, 64)
             if err != nil {
-                dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": "failed to parse the path ID from 'val'" })
+                dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": "failed to parse the path ID from 'scroll'" })
                 return
             }
             scroll = &scrollPosition{ Time: time, Pid: pid }
@@ -236,10 +236,11 @@ func newQueryHandler(db *sql.DB, tokenizer *unicodeTokenizer, wild_tokenizer *un
 
         if params.Has("limit") {
             limit0, err := strconv.Atoi(params.Get("limit"))
-            if err != nil || limit <= 0 || limit0 > limit {
+            if err != nil || limit0 <= 0 || limit0 > limit {
                 dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": "invalid 'limit'" })
                 return
             }
+            limit = limit0
         }
 
         query := searchClause{}
@@ -266,7 +267,7 @@ func newQueryHandler(db *sql.DB, tokenizer *unicodeTokenizer, wild_tokenizer *un
         respbody := map[string]interface{} { "results": res }
         if len(res) == limit {
             last := &(res[limit-1])
-            respbody["scroll"] = endpoint + "?scroll=" + strconv.FormatInt(last.Time, 10) + "," + strconv.FormatInt(last.Pid, 10)
+            respbody["next"] = endpoint + "?scroll=" + strconv.FormatInt(last.Time, 10) + "," + strconv.FormatInt(last.Pid, 10)
         }
 
         dumpJsonResponse(w, http.StatusOK, respbody)
