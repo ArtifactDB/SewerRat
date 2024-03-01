@@ -42,27 +42,12 @@ func main() {
         log.Fatalf("failed to create the wildcard tokenizer; %v", err)
     }
 
-    // Seeting up the endpoints.
-    {
-        endpoint := "/register/start/"
-        http.HandleFunc(endpoint, newRegisterStartHandler(scratch, endpoint))
-    }
-    {
-        endpoint := "/register/finish/"
-        http.HandleFunc(endpoint, newRegisterFinishHandler(db, scratch, tokenizer, endpoint))
-    }
-    {
-        endpoint := "/deregister/start/"
-        http.HandleFunc(endpoint, newDeregisterStartHandler(db, scratch, endpoint))
-    }
-    {
-        endpoint := "/deregister/finish/"
-        http.HandleFunc(endpoint, newDeregisterStartHandler(db, scratch, endpoint))
-    }
-    {
-        endpoint := "/query"
-        http.HandleFunc(endpoint, newQueryHandler(db, tokenizer, wild_tokenizer, endpoint))
-    }
+    // Setting up the endpoints.
+    http.HandleFunc("/register/start", newRegisterStartHandler(scratch))
+    http.HandleFunc("/register/finish", newRegisterFinishHandler(db, scratch, tokenizer))
+    http.HandleFunc("/deregister/start", newDeregisterStartHandler(db, scratch))
+    http.HandleFunc("/deregister/finish", newDeregisterFinishHandler(db, scratch))
+    http.HandleFunc("/query", newQueryHandler(db, tokenizer, wild_tokenizer, "/query"))
 
     // Adding a per-hour job that purges various old files in the scratch.
     {

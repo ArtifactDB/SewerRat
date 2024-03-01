@@ -10,23 +10,6 @@ import (
     "errors"
 )
 
-func validateRequestPath(encoded string) (string, error) {
-    if encoded == "" {
-        return "", errors.New("path parameter should be a non-empty string")
-    }
-
-    regpath, err := url.QueryUnescape(encoded)
-    if err != nil {
-        return "", errors.New("path parameter should be a URL-encoded path")
-    }
-
-    if !filepath.IsAbs(regpath) {
-        return "", errors.New("path parameter should be an absolute path")
-    }
-
-    return regpath, nil
-}
-
 func createVerificationCode(path string) (string, error) {
     var candidate string
     buff := make([]byte, 32) // 256 bits of entropy should be enough.

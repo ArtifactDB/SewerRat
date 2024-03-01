@@ -7,31 +7,6 @@ import (
     "path/filepath"
 )
 
-func TestValidateRequestPath(t *testing.T) {
-    _, err := validateRequestPath("")
-    if err == nil || !strings.Contains(err.Error(), "empty string") {
-        t.Fatalf("expected an empty string error")
-    }
-
-    _, err = validateRequestPath("foobar")
-    if err == nil || !strings.Contains(err.Error(), "absolute path") {
-        t.Fatalf("expected an absolute path error")
-    }
-
-    out, err := validateRequestPath("%2Ffoo%2Fbar")
-    if err != nil {
-        t.Fatalf(err.Error())
-    }
-    if out != "/foo/bar" {
-        t.Fatalf("unexpected output %q", out)
-    }
-
-    _, err = validateRequestPath("%%foo%2Fbar")
-    if err == nil || !strings.Contains(err.Error(), "URL-encoded") {
-        t.Fatalf("expected a decoding error")
-    }
-}
-
 func TestCreateVerificationCode(t *testing.T) {
     dir := os.TempDir()
     out, err := createVerificationCode(dir)

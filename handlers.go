@@ -8,7 +8,6 @@ import (
     "path/filepath"
 
     "net/http"
-    "net/url"
     "encoding/json"
     "errors"
     "strings"
@@ -33,17 +32,39 @@ func dumpJsonResponse(w http.ResponseWriter, status int, v interface{}) {
     }
 }
 
+func validatePath(path string) error { 
+    if path == "" {
+        return errors.New("'path' should be present as a non-empty string")
+    }
+    if !filepath.IsAbs(path) {
+        return errors.New("'path' should be an absolute path")
+    }
+    return nil
+}
+
 /**********************************************************************/
 
-func newRegisterStartHandler(scratch string, endpoint string) func(http.ResponseWriter, *http.Request) {
+func newRegisterStartHandler(scratch string) func(http.ResponseWriter, *http.Request) {
     return func(w http.ResponseWriter, r *http.Request) {
         if r.Method != "POST" {
             dumpJsonResponse(w, http.StatusMethodNotAllowed, map[string]string{ "status": "ERROR", "reason": "expected a POST request" })
             return
         }
 
-        encpath := strings.TrimPrefix(r.URL.Path, endpoint)
-        regpath, err := validateRequestPath(encpath)
+        if r.Body == nil {
+            dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": "expected a non-empty request body" })
+            return
+        }
+        dec := json.NewDecoder(r.Body)
+        output := struct { Path string `json:"path"` }{}
+        err := dec.Decode(&output)
+        if err != nil {
+            dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": fmt.Sprintf("failed to decode body; %v", err) })
+            return
+        }
+
+        regpath := output.Path
+        err = validatePath(regpath)
         if err != nil {
             dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": err.Error() })
             return
@@ -70,42 +91,54 @@ func newRegisterStartHandler(scratch string, endpoint string) func(http.Response
     }
 }
 
-func newRegisterFinishHandler(db *sql.DB, scratch string, tokenizer *unicodeTokenizer, endpoint string) func(http.ResponseWriter, *http.Request) {
+func newRegisterFinishHandler(db *sql.DB, scratch string, tokenizer *unicodeTokenizer) func(http.ResponseWriter, *http.Request) {
     return func(w http.ResponseWriter, r *http.Request) {
         if r.Method != "POST" {
             dumpJsonResponse(w, http.StatusMethodNotAllowed, map[string]string{ "status": "ERROR", "reason": "expected a POST request" })
             return
         }
 
-        query := r.URL.Query()
-        allowed := map[string]bool{}
-        if query.Has("base") {
-            allowed_split := strings.Split(query.Get("base"), ",")
-            for _, a := range allowed_split {
-                if len(a) == 0 {
-                    dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": fmt.Sprintf("empty name in 'base'") })
-                    return
-                }
-                dec, err := url.QueryUnescape(a)
-                if err != nil {
-                    dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": fmt.Sprintf("failed to decode name in 'base'; %v", err) })
-                    return
-                }
-                if _, ok := allowed[dec]; ok {
-                    dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": "duplicate names in 'base'" })
-                    return
-                }
-                allowed[dec] = true
-            }
-        } else {
-            allowed["metadata.json"] = true
+        if r.Body == nil {
+            dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": "expected a non-empty request body" })
+            return
+        }
+        dec := json.NewDecoder(r.Body)
+        output := struct { 
+            Path string `json:"path"`
+            Base []string `json:"base"`
+        }{}
+        err := dec.Decode(&output)
+        if err != nil {
+            dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": fmt.Sprintf("failed to decode body; %v", err) })
+            return
         }
 
-        encpath := strings.TrimPrefix(r.URL.Path, endpoint)
-        regpath, err := validateRequestPath(encpath)
+        regpath := output.Path
+        err = validatePath(regpath)
         if err != nil {
             dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": err.Error() })
             return
+        }
+
+        allowed := map[string]bool{}
+        if output.Base != nil {
+            for _, a := range output.Base {
+                if len(a) == 0 {
+                    dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": "empty name in 'base'" })
+                    return
+                }
+                if _, ok := allowed[a]; ok {
+                    dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": "duplicate names in 'base'" })
+                    return
+                }
+                allowed[a] = true
+            }
+            if len(allowed) == 0 {
+                dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": "'base' should have at least one name" })
+                return
+            }
+        } else {
+            allowed["metadata.json"] = true
         }
 
         expected_code, err := fetchVerificationCode(scratch, regpath)
@@ -137,15 +170,27 @@ func newRegisterFinishHandler(db *sql.DB, scratch string, tokenizer *unicodeToke
 
 /**********************************************************************/
 
-func newDeregisterStartHandler(db *sql.DB, scratch string, endpoint string) func(http.ResponseWriter, *http.Request) {
+func newDeregisterStartHandler(db *sql.DB, scratch string) func(http.ResponseWriter, *http.Request) {
     return func(w http.ResponseWriter, r *http.Request) {
         if r.Method != "POST" {
             dumpJsonResponse(w, http.StatusMethodNotAllowed, map[string]string{ "status": "ERROR", "reason": "expected a POST request" })
             return
         }
 
-        encpath := strings.TrimPrefix(r.URL.Path, endpoint)
-        regpath, err := validateRequestPath(encpath)
+        if r.Body == nil {
+            dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": "expected a non-empty request body" })
+            return
+        }
+        dec := json.NewDecoder(r.Body)
+        output := struct { Path string `json:"path"` }{}
+        err := dec.Decode(&output)
+        if err != nil {
+            dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": fmt.Sprintf("failed to decode body; %v", err) })
+            return
+        }
+
+        regpath := output.Path
+        err = validatePath(regpath)
         if err != nil {
             dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": err.Error() })
             return
@@ -184,15 +229,27 @@ func newDeregisterStartHandler(db *sql.DB, scratch string, endpoint string) func
     }
 }
 
-func newDeregisterFinishHandler(db *sql.DB, scratch string, endpoint string) func(http.ResponseWriter, *http.Request) {
+func newDeregisterFinishHandler(db *sql.DB, scratch string) func(http.ResponseWriter, *http.Request) {
     return func(w http.ResponseWriter, r *http.Request) {
         if r.Method != "POST" {
             dumpJsonResponse(w, http.StatusMethodNotAllowed, map[string]string{ "status": "ERROR", "reason": "expected a POST request" })
             return
         }
 
-        encpath := strings.TrimPrefix(r.URL.Path, endpoint)
-        regpath, err := validateRequestPath(encpath)
+        if r.Body == nil {
+            dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": "expected a non-empty request body" })
+            return
+        }
+        dec := json.NewDecoder(r.Body)
+        output := struct { Path string `json:"path"` }{}
+        err := dec.Decode(&output)
+        if err != nil {
+            dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": fmt.Sprintf("failed to decode body; %v", err) })
+            return
+        }
+
+        regpath := output.Path
+        err = validatePath(regpath)
         if err != nil {
             dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": err.Error() })
             return
@@ -267,6 +324,10 @@ func newQueryHandler(db *sql.DB, tokenizer *unicodeTokenizer, wild_tokenizer *un
             limit = limit0
         }
 
+        if r.Body == nil {
+            dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": "expected a non-empty request body" })
+            return
+        }
         query := searchClause{}
         restricted := http.MaxBytesReader(w, r.Body, 1048576)
         dec := json.NewDecoder(restricted)
