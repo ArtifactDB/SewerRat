@@ -1,7 +1,6 @@
 package main
 
 import (
-    "errors"
     "fmt"
     "strings"
 )
@@ -49,6 +48,7 @@ func escapeWildcards(input string) (string, string, error) {
         if !has_escape {
             escape = candidate
             found_escape = true
+            break
         }
     }
 
@@ -78,14 +78,14 @@ func sanitizeQuery(original *searchClause, deftok, wildtok *unicodeTokenizer) (*
         new_kids := []*searchClause{} 
         for _, x := range original.Children {
             if x == nil {
-                return nil, errors.New("'children' should not contain null values")
+                continue
             }
 
             san, err := sanitizeQuery(x, deftok, wildtok)
             if err != nil {
                 return nil, err
             }
-            if san != nil {
+            if san == nil {
                 continue
             }
 
@@ -147,12 +147,14 @@ func sanitizeQuery(original *searchClause, deftok, wildtok *unicodeTokenizer) (*
     return nil, fmt.Errorf("unknown search type %q", original.Type)
 }
 
-func assembleFilter(query *searchClause, parameters []interface{}) string {
+func assembleFilter(query *searchClause) (string, []interface{}) {
     if query.Type == "text" {
+        parameters := []interface{}{}
+
         filter := "paths.pid IN (SELECT pid from links LEFT JOIN tokens ON tokens.tid = links.tid"
         if query.Field != "" {
             filter += " LEFT JOIN fields ON fields.fid = links.fid WHERE fields.field = ? AND"
-            parameters = append(parameters, query.Text)
+            parameters = append(parameters, query.Field)
         } else {
             filter += " WHERE"
         }
@@ -163,23 +165,19 @@ func assembleFilter(query *searchClause, parameters []interface{}) string {
         } else {
             filter += " ="
         }
-        filter += "?"
+        filter += " ?"
         parameters = append(parameters, query.Text)
         filter += ")"
 
-        return filter
+        return filter, parameters
     }
 
     if query.Type == "user" {
-        filter := "paths.user = ?"
-        parameters = append(parameters, query.Text)
-        return filter
+        return "paths.user = ?", []interface{}{ query.User }
     }
 
     if query.Type == "path" {
-        filter := "paths.path LIKE ?"
-        parameters = append(parameters, "%" + query.Path + "%")
-        return filter
+        return "paths.path LIKE ?", []interface{}{ "%" + query.Path + "%" }
     }
 
     if query.Type == "time" {
@@ -189,17 +187,19 @@ func assembleFilter(query *searchClause, parameters []interface{}) string {
         } else {
             filter += " <="
         }
-        filter += "?"
-        parameters = append(parameters, "%" + query.Path + "%")
-        return filter
+        filter += " ?"
+        return filter, []interface{}{ query.Time }
     }
 
     if query.Type == "and" {
         collected := []string{}
+        parameters := []interface{}{}
         for _, child := range query.Children {
-            collected = append(collected, assembleFilter(child, parameters))
+            curfilt, curpar := assembleFilter(child)
+            collected = append(collected, curfilt)
+            parameters = append(parameters, curpar...)
         }
-        return "(" + strings.Join(collected, " AND ") + ")"
+        return "(" + strings.Join(collected, " AND ") + ")", parameters
     }
 
     // Implicitly, the rest is type 'or'.
@@ -214,6 +214,7 @@ func assembleFilter(query *searchClause, parameters []interface{}) string {
     }
 
     collected := []string{}
+    parameters := []interface{}{}
 
     if len(text) > 0 {
         subfilters := []string{}
@@ -242,12 +243,14 @@ func assembleFilter(query *searchClause, parameters []interface{}) string {
         if has_field {
             filter += " LEFT JOIN fields ON fields.fid = links.fid"
         }
-        filter += " WHERE" + strings.Join(subfilters, " OR ")
+        filter += " WHERE " + strings.Join(subfilters, " OR ") + ")"
         collected = append(collected, filter)
     }
 
     for _, ochild := range other {
-        collected = append(collected, assembleFilter(ochild, parameters))
+        curfilt, curpar := assembleFilter(ochild)
+        collected = append(collected, curfilt)
+        parameters = append(parameters, curpar...)
     }
-    return "(" + strings.Join(collected, " OR ") + ")"
+    return "(" + strings.Join(collected, " OR ") + ")", parameters
 }
