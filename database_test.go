@@ -20,35 +20,64 @@ func TestInitializeDatabase(t *testing.T) {
     defer os.RemoveAll(tmp)
 
     dbpath := filepath.Join(tmp, "db.sqlite3")
-    dbconn, err := initializeDatabase(dbpath)
-    if err != nil {
-        t.Fatalf(err.Error())
-    }
-    defer dbconn.Close()
 
-    if _, err := os.Stat(dbpath); err != nil {
-        t.Fatalf("database file doesn't seem to exist; %v", err)
-    }
-
-    res, err := dbconn.Query("SELECT name FROM sqlite_master WHERE type='table';")
-    if err != nil {
-        t.Fatalf(err.Error())
-    }
-
-    collected := []string{}
-    for res.Next() {
-        var tabname string
-        err = res.Scan(&tabname)
+    t.Run("simple", func(t *testing.T) {
+        dbconn, err := initializeDatabase(dbpath)
         if err != nil {
             t.Fatalf(err.Error())
         }
-        collected = append(collected, tabname)
-    }
+        defer dbconn.Close()
 
-    sort.Strings(collected)
-    if !equalStringArrays(collected, []string{ "fields", "links", "paths", "tokens" }) {
-        t.Fatalf("not all tables were correctly initialized")
-    }
+        if _, err := os.Stat(dbpath); err != nil {
+            t.Fatalf("database file doesn't seem to exist; %v", err)
+        }
+
+        res, err := dbconn.Query("SELECT name FROM sqlite_master WHERE type='table';")
+        if err != nil {
+            t.Fatalf(err.Error())
+        }
+
+        collected := []string{}
+        for res.Next() {
+            var tabname string
+            err = res.Scan(&tabname)
+            if err != nil {
+                t.Fatalf(err.Error())
+            }
+            collected = append(collected, tabname)
+        }
+
+        sort.Strings(collected)
+        if !equalStringArrays(collected, []string{ "fields", "links", "paths", "tokens" }) {
+            t.Fatalf("not all tables were correctly initialized")
+        }
+    })
+
+    // Checking that initializeDatabase doesn't wipe our existing information.
+    func() {
+        dbconn, err := sql.Open("sqlite", dbpath)
+        if err != nil {
+            t.Fatalf(err.Error())
+        }
+        defer dbconn.Close()
+        dbconn.Exec("INSERT INTO paths(path, user, time, metadata) VALUES(?, ?, ?, ?)", "whee/superfoo", "blah", 123456, []byte("[1,2,3]"))
+    }()
+
+    t.Run("reinitialized", func(t *testing.T) {
+        dbconn, err := initializeDatabase(dbpath)
+        if err != nil {
+            t.Fatal(err)
+        }
+        defer dbconn.Close()
+
+        all_paths, err := listPaths(dbconn, "whee")
+        if err != nil {
+            t.Fatal(err)
+        }
+        if len(all_paths) != 1 {
+            t.Fatalf("unexpected number of paths in the DB %v", all_paths)
+        }
+    })
 }
 
 func searchForLink(dbconn *sql.DB, path, field, token string) (bool, error) {
