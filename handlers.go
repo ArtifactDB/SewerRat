@@ -37,11 +37,15 @@ func dumpJsonResponse(w http.ResponseWriter, status int, v interface{}) {
 
 func newRegisterStartHandler(scratch string, endpoint string) func(http.ResponseWriter, *http.Request) {
     return func(w http.ResponseWriter, r *http.Request) {
+        if r.Method != "POST" {
+            dumpJsonResponse(w, http.StatusMethodNotAllowed, map[string]string{ "status": "ERROR", "reason": "expected a POST request" })
+            return
+        }
+
         encpath := strings.TrimPrefix(r.URL.Path, endpoint)
         regpath, err := validateRequestPath(encpath)
         if err != nil {
             dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": err.Error() })
-            w.WriteHeader(http.StatusBadRequest)
             return
         }
 
@@ -68,6 +72,11 @@ func newRegisterStartHandler(scratch string, endpoint string) func(http.Response
 
 func newRegisterFinishHandler(db *sql.DB, scratch string, tokenizer *unicodeTokenizer, endpoint string) func(http.ResponseWriter, *http.Request) {
     return func(w http.ResponseWriter, r *http.Request) {
+        if r.Method != "POST" {
+            dumpJsonResponse(w, http.StatusMethodNotAllowed, map[string]string{ "status": "ERROR", "reason": "expected a POST request" })
+            return
+        }
+
         query := r.URL.Query()
         allowed := map[string]bool{}
         if query.Has("base") {
@@ -130,6 +139,11 @@ func newRegisterFinishHandler(db *sql.DB, scratch string, tokenizer *unicodeToke
 
 func newDeregisterStartHandler(db *sql.DB, scratch string, endpoint string) func(http.ResponseWriter, *http.Request) {
     return func(w http.ResponseWriter, r *http.Request) {
+        if r.Method != "POST" {
+            dumpJsonResponse(w, http.StatusMethodNotAllowed, map[string]string{ "status": "ERROR", "reason": "expected a POST request" })
+            return
+        }
+
         encpath := strings.TrimPrefix(r.URL.Path, endpoint)
         regpath, err := validateRequestPath(encpath)
         if err != nil {
@@ -172,6 +186,11 @@ func newDeregisterStartHandler(db *sql.DB, scratch string, endpoint string) func
 
 func newDeregisterFinishHandler(db *sql.DB, scratch string, endpoint string) func(http.ResponseWriter, *http.Request) {
     return func(w http.ResponseWriter, r *http.Request) {
+        if r.Method != "POST" {
+            dumpJsonResponse(w, http.StatusMethodNotAllowed, map[string]string{ "status": "ERROR", "reason": "expected a POST request" })
+            return
+        }
+
         encpath := strings.TrimPrefix(r.URL.Path, endpoint)
         regpath, err := validateRequestPath(encpath)
         if err != nil {
@@ -210,6 +229,11 @@ func newDeregisterFinishHandler(db *sql.DB, scratch string, endpoint string) fun
 
 func newQueryHandler(db *sql.DB, tokenizer *unicodeTokenizer, wild_tokenizer *unicodeTokenizer, endpoint string) func(http.ResponseWriter, *http.Request) {
     return func(w http.ResponseWriter, r *http.Request) {
+        if r.Method != "POST" {
+            dumpJsonResponse(w, http.StatusMethodNotAllowed, map[string]string{ "status": "ERROR", "reason": "expected a POST request" })
+            return
+        }
+
         params := r.URL.Query()
         var scroll *scrollPosition
         limit := 100

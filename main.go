@@ -22,7 +22,7 @@ func main() {
         os.Exit(1)
     }
 
-    err := os.MkdirAll(scratch, 700)
+    err := os.MkdirAll(scratch, 755)
     if err != nil {
         log.Fatalf("failed to create the scratch directory at %q; %v", scratch, err)
     }
@@ -44,24 +44,24 @@ func main() {
 
     // Seeting up the endpoints.
     {
-        endpoint := "/registry/start/"
-        http.HandleFunc("POST " + endpoint, newRegisterStartHandler(scratch, endpoint))
+        endpoint := "/register/start/"
+        http.HandleFunc(endpoint, newRegisterStartHandler(scratch, endpoint))
     }
     {
-        endpoint := "/registry/finish/"
-        http.HandleFunc("POST " + endpoint, newRegisterFinishHandler(db, scratch, tokenizer, endpoint))
+        endpoint := "/register/finish/"
+        http.HandleFunc(endpoint, newRegisterFinishHandler(db, scratch, tokenizer, endpoint))
     }
     {
         endpoint := "/deregister/start/"
-        http.HandleFunc("POST " + endpoint, newDeregisterStartHandler(db, scratch, endpoint))
+        http.HandleFunc(endpoint, newDeregisterStartHandler(db, scratch, endpoint))
     }
     {
         endpoint := "/deregister/finish/"
-        http.HandleFunc("POST " + endpoint, newDeregisterStartHandler(db, scratch, endpoint))
+        http.HandleFunc(endpoint, newDeregisterStartHandler(db, scratch, endpoint))
     }
     {
         endpoint := "/query"
-        http.HandleFunc("POST " + endpoint, newQueryHandler(db, tokenizer, wild_tokenizer, endpoint))
+        http.HandleFunc(endpoint, newQueryHandler(db, tokenizer, wild_tokenizer, endpoint))
     }
 
     // Adding a per-hour job that purges various old files in the scratch.
@@ -114,5 +114,5 @@ func main() {
         }()
     }
 
-    log.Fatal(http.ListenAndServe(":" + port, nil))
+    log.Fatal(http.ListenAndServe("0.0.0.0:" + port, nil))
 }
