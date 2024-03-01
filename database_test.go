@@ -648,7 +648,7 @@ func TestUpdatePathsFailure(t *testing.T) {
         t.Fatalf(err.Error())
     }
 
-    // Mocking up the first directory.
+    // Mocking up the directory.
     to_add := filepath.Join(tmp, "to_add")
     err = mockDirectory(to_add)
     if err != nil {
@@ -754,4 +754,205 @@ func TestBackupDatabase(t *testing.T) {
     if err != nil {
         t.Fatalf(err.Error())
     }
+}
+
+func TestQueryTokensText(t *testing.T) {
+    tmp, err := os.MkdirTemp("", "")
+    if err != nil {
+        t.Fatalf(err.Error())
+    }
+    defer os.RemoveAll(tmp)
+
+    dbpath := filepath.Join(tmp, "db.sqlite3")
+    dbconn, err := initializeDatabase(dbpath)
+    if err != nil {
+        t.Fatalf(err.Error())
+    }
+    defer dbconn.Close()
+
+    tokr, err := newUnicodeTokenizer(false)
+    if err != nil {
+        t.Fatalf(err.Error())
+    }
+
+    // Mocking up some contents.
+    to_add := filepath.Join(tmp, "to_add")
+    err = mockDirectory(to_add)
+    if err != nil {
+        t.Fatalf(err.Error())
+    }
+
+    comments, err := addDirectory(dbconn, to_add, map[string]bool{ "metadata.json": true, "other.json": true }, tokr)
+    if err != nil {
+        t.Fatalf(err.Error())
+    }
+    if len(comments) > 0 {
+        t.Fatalf("unexpected comments from the directory addition %v", comments)
+    }
+
+    t.Run("basic text", func(t *testing.T) {
+        res, err := queryTokens(dbconn, &searchClause{ Type: "text", Text: "lamb" }, nil, 0)
+        if err != nil {
+            t.Fatalf(err.Error())
+        }
+        if len(res) != 2 || res[0].Path != filepath.Join(to_add, "stuff/other.json") || res[1].Path != filepath.Join(to_add, "metadata.json") { // ordered by descending time and PID
+            t.Fatalf("search results are not as expected %v", res)
+        }
+    })
+
+    t.Run("partial text", func(t *testing.T) {
+        res, err := queryTokens(dbconn, &searchClause{ Type: "text", Text: "lamb", Field: "variants" }, nil, 0)
+        if err != nil {
+            t.Fatalf(err.Error())
+        }
+        if len(res) != 1 || res[0].Path != filepath.Join(to_add, "stuff/other.json") {
+            t.Fatalf("search results are not as expected %v", res)
+        }
+    })
+
+    t.Run("text with field", func(t *testing.T) {
+        res, err := queryTokens(dbconn, &searchClause{ Type: "text", Text: "%ar%", Partial: true }, nil, 0)
+        if err != nil {
+            t.Fatalf(err.Error())
+        }
+        if len(res) != 3 || res[0].Path != filepath.Join(to_add, "stuff/other.json") || res[1].Path != filepath.Join(to_add, "stuff/metadata.json") || res[2].Path != filepath.Join(to_add, "metadata.json") {
+            t.Fatalf("search results are not as expected %v", res)
+        }
+    })
+
+    t.Run("and (simple)", func(t *testing.T) {
+        res, err := queryTokens(
+            dbconn, 
+            &searchClause{ 
+                Type: "and", 
+                Children: []*searchClause{ 
+                    &searchClause{ Type: "text", Text: "yuru" }, 
+                    &searchClause{ Type: "text", Text: "non" },
+                },
+            }, 
+            nil, 
+            0,
+        )
+        if err != nil {
+            t.Fatalf(err.Error())
+        }
+        if len(res) != 1 || res[0].Path != filepath.Join(to_add, "whee/other.json") {
+            t.Fatalf("search results are not as expected %v", res)
+        }
+    })
+
+    t.Run("or (simple)", func(t *testing.T) {
+        res, err := queryTokens(
+            dbconn, 
+            &searchClause{ 
+                Type: "or", 
+                Children: []*searchClause{ 
+                    &searchClause{ Type: "text", Text: "yuru" },
+                    &searchClause{ Type: "text", Text: "lamb" },
+                },
+            }, 
+            nil, 
+            0,
+        )
+        if err != nil {
+            t.Fatalf(err.Error())
+        }
+        if len(res) != 4 {
+            t.Fatalf("search results are not as expected %v", res)
+        }
+    })
+
+    t.Run("and (complex)", func(t *testing.T) {
+        res, err := queryTokens(
+            dbconn, 
+            &searchClause{ 
+                Type: "and", 
+                Children: []*searchClause{ 
+                    &searchClause{ Type: "or", Children: []*searchClause{ &searchClause{ Type: "text", Text: "yuru" }, &searchClause{ Type: "text", Text: "border" } } },
+                    &searchClause{ Type: "or", Children: []*searchClause{ &searchClause{ Type: "text", Text: "lamb" }, &searchClause{ Type: "text", Text: "non" } } },
+                },
+            }, 
+            nil, 
+            0,
+        )
+        if err != nil {
+            t.Fatalf(err.Error())
+        }
+        if len(res) != 2 || res[0].Path != filepath.Join(to_add, "whee/other.json") || res[1].Path != filepath.Join(to_add, "metadata.json") {
+            t.Fatalf("search results are not as expected %v", res)
+        }
+    })
+
+    t.Run("or (complex)", func(t *testing.T) {
+        res, err := queryTokens(
+            dbconn, 
+            &searchClause{ 
+                Type: "or", 
+                Children: []*searchClause{ 
+                    &searchClause{ Type: "text", Text: "border" },
+                    &searchClause{ Type: "and", Children: []*searchClause{ &searchClause{ Type: "text", Text: "yuru" }, &searchClause{ Type: "text", Text: "non" } } },
+                },
+            }, 
+            nil, 
+            0,
+        )
+        if err != nil {
+            t.Fatalf(err.Error())
+        }
+        if len(res) != 2 || res[0].Path != filepath.Join(to_add, "whee/other.json") || res[1].Path != filepath.Join(to_add, "metadata.json") {
+            t.Fatalf("search results are not as expected %v", res)
+        }
+    })
+
+    t.Run("or (partial)", func(t *testing.T) {
+        res, err := queryTokens(
+            dbconn, 
+            &searchClause{ 
+                Type: "or", 
+                Children: []*searchClause{ 
+                    &searchClause{ Type: "text", Text: "aar%", Partial: true },
+                    &searchClause{ Type: "text", Text: "ak%", Partial: true },
+                },
+            }, 
+            nil, 
+            0,
+        )
+        if err != nil {
+            t.Fatalf(err.Error())
+        }
+        if len(res) != 2 || res[0].Path != filepath.Join(to_add, "stuff/metadata.json") || res[1].Path != filepath.Join(to_add, "metadata.json") {
+            t.Fatalf("search results are not as expected %v", res)
+        }
+    })
+
+    t.Run("or (field)", func(t *testing.T) {
+        res, err := queryTokens(
+            dbconn, 
+            &searchClause{ 
+                Type: "or", 
+                Children: []*searchClause{ 
+                    &searchClause{ Type: "text", Text: "lamb", Field: "bar.type" },
+                    &searchClause{ Type: "text", Text: "yuru", Field: "anime" },
+                },
+            }, 
+            nil, 
+            0,
+        )
+        if err != nil {
+            t.Fatalf(err.Error())
+        }
+        if len(res) != 2 || res[0].Path != filepath.Join(to_add, "stuff/metadata.json") || res[1].Path != filepath.Join(to_add, "metadata.json") {
+            t.Fatalf("search results are not as expected %v", res)
+        }
+    })
+
+    t.Run("full", func(t *testing.T) {
+        res, err := queryTokens(dbconn, nil, nil, 0)
+        if err != nil {
+            t.Fatalf(err.Error())
+        }
+        if len(res) != 4 {
+            t.Fatalf("search results are not as expected")
+        }
+    })
 }

@@ -537,8 +537,9 @@ func queryTokens(db * sql.DB, query *searchClause, scroll *scrollPosition, page_
     query_present := false
     if query != nil {
         query_present = true
-        filter := assembleFilter(query, parameters)
-        full += " WHERE " + filter 
+        curfilter, curparams := assembleFilter(query)
+        full += " WHERE " + curfilter 
+        parameters = append(parameters, curparams...)
     }
 
     // Handling pagination via scrolling window queries, see https://www.sqlite.org/rowvalue.html#scrolling_window_queries.
