@@ -30,7 +30,7 @@ This is best placed in our `.bash_profile` so that we don't need to do this ever
 These functions are pretty simple and it should be trivial to define equivalents in any programming framework like R or Python.
 
 ```shell
-export SEWER_RAT_URL=<INSERT URL HERE> # get this from the SewerRat admin.
+export SEWER_RAT_URL=<INSERT URL HERE> # get this from your SewerRat admin.
 source scripts/functions.sh
 ```
 
@@ -62,7 +62,74 @@ deregisterSewerRat test
 
 ## Querying the index
 
-## For developers
+We can query the SewerRat index to find files of interest based on the contents of the metadata, the user name of the file owner, the modification date, or any combination thereof.
+This is done by making a POST request to the `/query` endpoint of the SewerRat API, where the request body contains the JSON-encoded search parameters:
+
+```shell
+curl -X POST -L ${SEWER_RAT_URL}/query \
+    -H "Content-Type: application/json" \
+    -d '{ "type": "text", "text": "Aaron" }' | jq
+## {
+##   "results": [
+##     {
+##       "path": "/Users/luna/Programming/GenomicsPlatform/SewerRat/scripts/test/sub/A.json",
+##       "user": "luna",
+##       "time": 1709320903,
+##       "metadata": {
+##         "authors": {
+##           "first": "Aaron",
+##           "last": "Lun"
+##         }
+##       }
+##     }
+##   ]
+## }
+```
+
+The request body should be a "search clause", a JSON object with the `type` string property.
+The nature of the search depends on the value of `type`:
+
+- For `"text"`, SewerRat searches on the text (i.e., any string property) in the metadata document.
+  The search clause should contain the following additional properties:
+  - `text`, the search string.
+    Strings are split into tokens at any character that is not a Unicode letter/number or a dash.
+    All tokens must match to the contents of the metadata in order for a file to be considered a match.
+  - (optional) `field`, the name of the metadata property to be matched.
+    Matches to tokens are only considered within the named property.
+    Properties of nested objects can be specified via `.`-delimited names, e.g., `authors.first`.
+    If `field` is not specified, matches are not restricted to any single property.
+  - (optional) `partial`, a boolean indicating whether to perform a partial match.
+    If `true`, the SQL wildcards (`%` and `_`) may be used in `text` without being lost via tokenization.
+    Defaults to `false`.
+- For `"user"`, SewerRat searches on the user names of the file owners.
+  The search clause should contain the `user` property, a string which contains the user name.
+- For `"path"`, SewerRat searches on the path to each file. 
+  The search clause should contain the `path` string property.
+  A file is considered to be a match if its path contains `path` as a substring.
+- For `"time"`, SewerRat searches on the modification time of each file.
+  The search clause should contain the following additional properties:
+  - `time`, an integer containing the Unix time.
+    SewerRat searches for files that were modified before this time.
+  - (optional) `after`, a boolean indicating whether to instead search for files that were created after `time`.
+- For `"and"` and `"or"`, SewerRat searches on a combination of other filters.
+  The search clause should contain the `children` property, which is an array of other search clauses.
+  A file is only considered to be a match if it matches all (`"and"`) or any (`"or"`) of the individual clauses in `children`.
+
+The API returns a request body that contains a JSON object with the following properties:
+
+- `results`, an array of objects containing the matching metadata files, sorted by decreasing modification time.
+   Each object has the following properties:
+   - `path`, a string containing the path to the file.
+   - `user`, the identity of the file owner.
+   - `time`, the Unix time of most recent file modification.
+   - `metadata`, the contents of the file.
+- (optional) `next`, a string containing the endpoint to use for the next page of results.
+  If this is not present, all results have already been obtained.
+
+Callers can control the number of results to return in each page by setting the `limit=` query parameter.
+This should be a positive integer that is no greater than 100.
+
+## Spinning up an instance
 
 Clone this repository and build the binary:
 
@@ -72,7 +139,7 @@ cd SewerRat
 go build
 ```
 
-And then run SewerRat.
+And then run the SewerRat binary.
 The `-db` flag specifies the location of the SQLite file, 
 `-scratch` specifies the scratch directory for storing verification codes, 
 and `-port` is the port we're listening to for requests (e.g., 8080).
@@ -81,7 +148,50 @@ and `-port` is the port we're listening to for requests (e.g., 8080).
 ./SewerRat -db DBPATH -scratch SCRATCH -port PORT
 ```
 
-Any existing file at `DBPATH` will be used, so the SewerRat can be easily restarted with the same database.
+If a SQLite file at `DBPATH` already exists, it will be used directly, so the SewerRat can be easily restarted with the same database.
 
 The SewerRat will periodically (by default, daily) create a back-up of the index at `DBPATH.backup`.
 This can be used to manually recover from problems with the SQLite database by copying the backup to `DBPATH` and restarting the SewerRat.
+
+## Registration in more detail
+
+We previously glossed over the registration process by presenting users with the `registerSewerRat` function.
+The process itself is slightly involved but it should still be simple enough to implement in any language.
+First, we make a call to the `/register/start` endpoint with a request body that contains `path`, the absolute path to our directory that we want to register.
+
+```shell
+PWD=$(pwd)
+curl -X POST -L ${SEWER_RAT_URL}/register/start \
+    -H "Content-Type: application/json" \
+    -d '{ "path": "'${PWD}'/test" }' | jq
+## {
+##   "code": ".sewer_HP0JOaQ14NBadaLGDPjOW712S2SIA_u-9yQH6AKbaQ8",
+##   "status": "PENDING"
+## }
+```
+
+On success, this returns a `PENDING` status with a verification code.
+The caller is expected to verify that they have write access to the specified directory by creating the file inside the directory with the specified code.
+Once this is done, we call the `/register/finish` endpoint with a request body that contains the same `path`.
+The body may also contain `base`, an array of strings containing the names of the files to register within the directory -
+if this is not provided, only files named `metadata.json` will be registered.
+
+```shell
+curl -X POST -L ${SEWER_RAT_URL}/register/finish \
+    -H "Content-Type: application/json" \
+    -d '{ "path": "'${PWD}'/test", "base": [ "A.json", "B.json" ] }' | jq
+## {
+##   "comments": [],
+##   "status": "SUCCESS"
+## }
+```
+
+On success, the files in the specified directory will be registered in the index.
+Note that the SewerRat will just skip problematic files, e.g., invalid JSON, insufficient permissions.
+Any such problems are reported in the `comments` array rather than blocking the entire indexing process.
+
+The deregistration process is identical if we replace the `/register/*` endpoints with `/deregister/*`.
+The only exception is when the caller requests deregistration of a directory that does not exist.
+In this case, `/deregister/start` may return a `SUCCESS` status instead of `PENDING`, after which `/deregister/finish` does not need to be called.
+
+On error, the request body will contain an `ERROR` status with the `reason` string property containing the reason for the failure.
