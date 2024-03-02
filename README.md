@@ -1,5 +1,9 @@
 # Collecting random shit from a shared filesystem
 
+[![Test and build](https://github.com/ArtifactDB/SewerRat/actions/workflows/build.yaml/badge.svg)](https://github.com/ArtifactDB/SewerRat/actions/workflows/build.yaml)
+[![Publish version](https://github.com/ArtifactDB/SewerRat/actions/workflows/publish.yaml/badge.svg)](https://github.com/ArtifactDB/SewerRat/actions/workflows/publish.yaml)
+[![Latest version](https://img.shields.io/github/v/tag/ArtifactDB/SewerRat?label=Version)](https://github.com/ArtifactDB/SewerRat/releases)
+
 ## Introduction
 
 SewerRat retrieves user-supplied metadata from a shared filesystem and indexes them into a giant SQLite file.
