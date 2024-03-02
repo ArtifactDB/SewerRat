@@ -3,22 +3,18 @@ package main
 import (
     "flag"
     "log"
-    "os"
     "time"
     "net/http"
+    "strconv"
 )
 
 func main() {
-    dbpath0 := flag.String("db", "", "Path to the SQLite file for the metadata")
-    port0 := flag.String("port", "", "Port to listen to for requests")
+    dbpath0 := flag.String("db", "index.sqlite3", "Path to the SQLite file for the metadata")
+    port0 := flag.Int("port", 8080, "Port to listen to for requests")
     flag.Parse()
 
     dbpath := *dbpath0
     port := *port0
-    if dbpath == "" || port == "" {
-        flag.Usage()
-        os.Exit(1)
-    }
 
     db, err := initializeDatabase(dbpath)
     if err != nil {
@@ -92,5 +88,5 @@ func main() {
         }()
     }
 
-    log.Fatal(http.ListenAndServe("0.0.0.0:" + port, nil))
+    log.Fatal(http.ListenAndServe("0.0.0.0:" + strconv.Itoa(port), nil))
 }

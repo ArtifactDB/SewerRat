@@ -140,8 +140,8 @@ go build
 ```
 
 And then run the SewerRat binary.
-The `-db` flag specifies the location of the SQLite file, 
-and `-port` is the port we're listening to for requests (e.g., 8080).
+The `-db` flag specifies the location of the SQLite file (default to `index.sqlite3`)
+and `-port` is the port we're listening to for requests (defaults to 8080).
 
 ```shell
 ./SewerRat -db DBPATH -port PORT
