@@ -84,8 +84,10 @@ func TestRegisterHandlers(t *testing.T) {
     }
     defer dbconn.Close()
 
-    scratch := filepath.Join(tmp, "scratch")
-    err = os.Mkdir(scratch, 0700)
+    verifier := newVerificationRegistry(5)
+
+    to_add := filepath.Join(tmp, "to_add")
+    err = mockDirectory(to_add)
     if err != nil {
         t.Fatalf(err.Error())
     }
@@ -95,15 +97,9 @@ func TestRegisterHandlers(t *testing.T) {
         t.Fatalf(err.Error())
     }
 
-    to_add := filepath.Join(tmp, "to_add")
-    err = mockDirectory(to_add)
-    if err != nil {
-        t.Fatalf(err.Error())
-    }
-
     var code string
     t.Run("register start", func(t *testing.T) {
-        handler := http.HandlerFunc(newRegisterStartHandler(scratch))
+        handler := http.HandlerFunc(newRegisterStartHandler(verifier))
 
         {
             req := createJsonRequest("POST", "/register/start", map[string]interface{}{ "path": "foo" }, t)
@@ -135,88 +131,111 @@ func TestRegisterHandlers(t *testing.T) {
         }
     })
 
-    t.Run("register finish", func(t *testing.T) {
-        handler := http.HandlerFunc(newRegisterFinishHandler(dbconn, scratch, tokr))
+    quickRegisterStart := func() string {
+        handler := http.HandlerFunc(newRegisterStartHandler(verifier))
+        req := createJsonRequest("POST", "/register/start", map[string]interface{}{ "path": to_add }, t)
+        rr := httptest.NewRecorder()
+        handler.ServeHTTP(rr, req)
+        if rr.Code != http.StatusAccepted {
+            t.Fatalf("should have succeeded")
+        }
+        output := decodeStringyResponse(rr.Body, t)
+        return output["code"]
+    }
 
-        // First attempt fails, because we didn't add the registration code.
-        {
-            req := createJsonRequest("POST", "/register/finish", map[string]interface{}{ "path": to_add }, t)
-            rr := httptest.NewRecorder()
-            handler.ServeHTTP(rr, req)
-            if rr.Code != http.StatusUnauthorized {
-                t.Fatalf("should have failed due to lack of code")
-            }
+    t.Run("register finish without verification", func(t *testing.T) {
+        quickRegisterStart()
+        handler := http.HandlerFunc(newRegisterFinishHandler(dbconn, verifier, tokr))
+        req := createJsonRequest("POST", "/register/finish", map[string]interface{}{ "path": to_add }, t)
+        rr := httptest.NewRecorder()
+        handler.ServeHTTP(rr, req)
+        if rr.Code != http.StatusUnauthorized {
+            t.Fatalf("should have failed due to lack of code")
+        }
+    })
+
+    t.Run("register finish ok", func(t *testing.T) {
+        code := quickRegisterStart()
+        err := os.WriteFile(filepath.Join(to_add, code), []byte(""), 0644)
+        if err != nil {
+            t.Fatal(err)
         }
 
-        os.WriteFile(filepath.Join(to_add, code), []byte(""), 0644)
-
-        {
-            req := createJsonRequest("POST", "/register/finish", map[string]interface{}{ "path": to_add }, t)
-            rr := httptest.NewRecorder()
-            handler.ServeHTTP(rr, req)
-            if rr.Code != http.StatusOK {
-                t.Fatalf("should have succeeded")
-            }
-
-            output := struct {
-                Status string
-                Comments []string
-            }{}
-            dec := json.NewDecoder(rr.Body)
-            err = dec.Decode(&output)
-            if err != nil {
-                t.Fatal(err)
-            }
-            if output.Status != "SUCCESS" || len(output.Comments) > 0 {
-                t.Fatalf("unexpected body")
-            }
-
-            all_paths, err := listPaths(dbconn, to_add)
-            if err != nil {
-                t.Fatal(err)
-            }
-            if !equalStringArrays(all_paths, []string{ "metadata.json", "stuff/metadata.json" }) {
-                t.Fatalf("unexpected paths in the database %v", all_paths)
-            }
+        handler := http.HandlerFunc(newRegisterFinishHandler(dbconn, verifier, tokr))
+        req := createJsonRequest("POST", "/register/finish", map[string]interface{}{ "path": to_add }, t)
+        rr := httptest.NewRecorder()
+        handler.ServeHTTP(rr, req)
+        if rr.Code != http.StatusOK {
+            t.Fatalf("should have succeeded")
         }
 
-        {
-            req := createJsonRequest("POST", "/register/finish", map[string]interface{}{ "path": to_add, "base": []string{ "metadata.json", "metadata.json" } }, t)
-            rr := httptest.NewRecorder()
-            handler.ServeHTTP(rr, req)
-            if rr.Code != http.StatusBadRequest {
-                t.Fatalf("should have failed with duplicate names")
-            }
+        output := struct {
+            Status string
+            Comments []string
+        }{}
+        dec := json.NewDecoder(rr.Body)
+        err = dec.Decode(&output)
+        if err != nil {
+            t.Fatal(err)
+        }
+        if output.Status != "SUCCESS" || len(output.Comments) > 0 {
+            t.Fatalf("unexpected body")
         }
 
-        {
-            req := createJsonRequest("POST", "/register/finish", map[string]interface{}{ "path": to_add, "base": []string{ "metadata.json", "other.json" } }, t)
-            rr := httptest.NewRecorder()
-            handler.ServeHTTP(rr, req)
-            if rr.Code != http.StatusOK {
-                t.Fatalf("should have succeeded")
-            }
+        all_paths, err := listPaths(dbconn, to_add)
+        if err != nil {
+            t.Fatal(err)
+        }
+        if !equalStringArrays(all_paths, []string{ "metadata.json", "stuff/metadata.json" }) {
+            t.Fatalf("unexpected paths in the database %v", all_paths)
+        }
+    })
 
-            output := struct {
-                Status string
-                Comments []string
-            }{}
-            dec := json.NewDecoder(rr.Body)
-            err = dec.Decode(&output)
-            if err != nil {
-                t.Fatal(err)
-            }
-            if output.Status != "SUCCESS" || len(output.Comments) > 0 {
-                t.Fatalf("unexpected body")
-            }
+    t.Run("register finish with duplicate names", func(t *testing.T) {
+        quickRegisterStart()
+        handler := http.HandlerFunc(newRegisterFinishHandler(dbconn, verifier, tokr))
+        req := createJsonRequest("POST", "/register/finish", map[string]interface{}{ "path": to_add, "base": []string{ "metadata.json", "metadata.json" } }, t)
+        rr := httptest.NewRecorder()
+        handler.ServeHTTP(rr, req)
+        if rr.Code != http.StatusBadRequest {
+            t.Fatalf("should have failed with duplicate names")
+        }
+    })
 
-            all_paths, err := listPaths(dbconn, to_add)
-            if err != nil {
-                t.Fatal(err)
-            }
-            if !equalStringArrays(all_paths, []string{ "metadata.json", "stuff/metadata.json", "stuff/other.json", "whee/other.json" }) {
-                t.Fatalf("unexpected paths in the database %v", all_paths)
-            }
+    t.Run("register finish with proper names", func(t *testing.T) {
+        code := quickRegisterStart()
+        err := os.WriteFile(filepath.Join(to_add, code), []byte(""), 0644)
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        handler := http.HandlerFunc(newRegisterFinishHandler(dbconn, verifier, tokr))
+        req := createJsonRequest("POST", "/register/finish", map[string]interface{}{ "path": to_add, "base": []string{ "metadata.json", "other.json" } }, t)
+        rr := httptest.NewRecorder()
+        handler.ServeHTTP(rr, req)
+        if rr.Code != http.StatusOK {
+            t.Fatalf("should have succeeded")
+        }
+
+        output := struct {
+            Status string
+            Comments []string
+        }{}
+        dec := json.NewDecoder(rr.Body)
+        err = dec.Decode(&output)
+        if err != nil {
+            t.Fatal(err)
+        }
+        if output.Status != "SUCCESS" || len(output.Comments) > 0 {
+            t.Fatalf("unexpected body")
+        }
+
+        all_paths, err := listPaths(dbconn, to_add)
+        if err != nil {
+            t.Fatal(err)
+        }
+        if !equalStringArrays(all_paths, []string{ "metadata.json", "stuff/metadata.json", "stuff/other.json", "whee/other.json" }) {
+            t.Fatalf("unexpected paths in the database %v", all_paths)
         }
     })
 }
@@ -235,11 +254,7 @@ func TestDeregisterHandlers(t *testing.T) {
     }
     defer dbconn.Close()
 
-    scratch := filepath.Join(tmp, "scratch")
-    err = os.Mkdir(scratch, 0700)
-    if err != nil {
-        t.Fatalf(err.Error())
-    }
+    verifier := newVerificationRegistry(5)
 
     tokr, err := newUnicodeTokenizer(false)
     if err != nil {
@@ -262,7 +277,7 @@ func TestDeregisterHandlers(t *testing.T) {
 
     var code string
     t.Run("deregister start", func(t *testing.T) {
-        handler := http.HandlerFunc(newDeregisterStartHandler(dbconn, scratch))
+        handler := http.HandlerFunc(newDeregisterStartHandler(dbconn, verifier))
 
         {
             req := createJsonRequest("POST", "/deregister/start", map[string]interface{}{ "path": "foo" }, t)
@@ -294,7 +309,7 @@ func TestDeregisterHandlers(t *testing.T) {
     })
 
     t.Run("register finish", func(t *testing.T) {
-        handler := http.HandlerFunc(newDeregisterFinishHandler(dbconn, scratch))
+        handler := http.HandlerFunc(newDeregisterFinishHandler(dbconn, verifier))
 
         // First attempt fails, because we didn't add the registration code.
         {
@@ -354,7 +369,7 @@ func TestDeregisterHandlers(t *testing.T) {
     }
 
     t.Run("deregister immediate", func(t *testing.T) {
-        handler := http.HandlerFunc(newDeregisterStartHandler(dbconn, scratch))
+        handler := http.HandlerFunc(newDeregisterStartHandler(dbconn, verifier))
         req := createJsonRequest("POST", "/deregister/start", map[string]interface{}{ "path": to_add }, t)
         rr := httptest.NewRecorder()
         handler.ServeHTTP(rr, req)
@@ -390,12 +405,6 @@ func TestQueryHandler(t *testing.T) {
         t.Fatalf(err.Error())
     }
     defer dbconn.Close()
-
-    scratch := filepath.Join(tmp, "scratch")
-    err = os.Mkdir(scratch, 0700)
-    if err != nil {
-        t.Fatalf(err.Error())
-    }
 
     tokr, err := newUnicodeTokenizer(false)
     if err != nil {

@@ -10,21 +10,14 @@ import (
 
 func main() {
     dbpath0 := flag.String("db", "", "Path to the SQLite file for the metadata")
-    scratch0 := flag.String("scratch", "", "Path to a scratch directory")
     port0 := flag.String("port", "", "Port to listen to for requests")
     flag.Parse()
 
     dbpath := *dbpath0
     port := *port0
-    scratch := *scratch0
-    if dbpath == "" || port == "" || scratch == "" {
+    if dbpath == "" || port == "" {
         flag.Usage()
         os.Exit(1)
-    }
-
-    err := os.MkdirAll(scratch, 0700)
-    if err != nil {
-        log.Fatalf("failed to create the scratch directory at %q; %v", scratch, err)
     }
 
     db, err := initializeDatabase(dbpath)
@@ -42,24 +35,24 @@ func main() {
         log.Fatalf("failed to create the wildcard tokenizer; %v", err)
     }
 
+    const num_verification_threads = 64
+    verifier := newVerificationRegistry(num_verification_threads)
+
     // Setting up the endpoints.
-    http.HandleFunc("/register/start", newRegisterStartHandler(scratch))
-    http.HandleFunc("/register/finish", newRegisterFinishHandler(db, scratch, tokenizer))
-    http.HandleFunc("/deregister/start", newDeregisterStartHandler(db, scratch))
-    http.HandleFunc("/deregister/finish", newDeregisterFinishHandler(db, scratch))
+    http.HandleFunc("/register/start", newRegisterStartHandler(verifier))
+    http.HandleFunc("/register/finish", newRegisterFinishHandler(db, verifier, tokenizer))
+    http.HandleFunc("/deregister/start", newDeregisterStartHandler(db, verifier))
+    http.HandleFunc("/deregister/finish", newDeregisterFinishHandler(db, verifier))
     http.HandleFunc("/query", newQueryHandler(db, tokenizer, wild_tokenizer, "/query"))
 
-    // Adding a per-hour job that purges various old files in the scratch.
+    // Adding a hour job that purges various old verification sessions.
     {
-        ticker := time.NewTicker(time.Hour)
+        ticker := time.NewTicker(10 * time.Minute)
         defer ticker.Stop()
         go func() {
             for {
                 <-ticker.C
-                err := purgeOldFiles(scratch, time.Hour)
-                if err != nil {
-                    log.Println(err)
-                }
+                verifier.Flush(10 * time.Minute)
             }
         }()
     }

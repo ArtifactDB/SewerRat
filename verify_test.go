@@ -1,56 +1,48 @@
 package main
 
 import (
-    "os"
     "testing"
     "strings"
-    "path/filepath"
 )
 
-func TestCreateVerificationCode(t *testing.T) {
-    dir := os.TempDir()
-    out, err := createVerificationCode(dir)
+func TestVerificationRegistry(t *testing.T) {
+    v := newVerificationRegistry(3)
+
+    path := "adasdasdasd"
+    candidate, err := v.Provision(path)
     if err != nil {
-        t.Fatalf(err.Error())
+        t.Fatal(err)
     }
 
-    if !strings.HasPrefix(out, ".sewer_") {
+    if !strings.HasPrefix(candidate, ".sewer_") {
         t.Fatalf("expected code to have a '.sewer_' prefix")
     }
-    if len(out) < 32 {
+    if len(candidate) < 32 {
         t.Fatalf("expected code to be at least 32 characters long")
     }
 
+    reload, ok := v.Pop(path)
+    if !ok || reload != candidate {
+        t.Fatal("failed to report the right code")
+    }
+
+    reload, ok = v.Pop(path)
+    if ok {
+        t.Fatal("code should have been popped on first use")
+    }
+
     // Get a different code on another invocation.
-    out2, err := createVerificationCode(dir)
+    candidate2, err := v.Provision(path)
     if err != nil {
         t.Fatalf(err.Error())
     }
-    if out == out2 {
+    if candidate == candidate2 {
         t.Fatalf("expected to get different codes")
     }
-}
 
-func TestDepositVerificationCode(t *testing.T) {
-    tmp, err := os.MkdirTemp("", "")
-    if err != nil {
-        t.Fatalf(err.Error())
-    }
-    defer os.RemoveAll(tmp)
-
-    err = depositVerificationCode(tmp, "/foo/bar", "aaron")
-    if err != nil {
-        t.Fatalf(err.Error())
-    }
-    if _, err := os.Stat(filepath.Join(tmp, "%2Ffoo%2Fbar")); err != nil {
-        t.Fatalf("failed to deposit the verification code")
-    }
-
-    code, err := fetchVerificationCode(tmp, "/foo/bar")
-    if err != nil {
-        t.Fatalf("failed to fetch the verification code")
-    }
-    if code != "aaron" {
-        t.Fatalf("mismatch in the verification code")
+    v.Flush(0)
+    reload, ok = v.Pop(path)
+    if ok {
+        t.Fatal("code should have been flushed")
     }
 }

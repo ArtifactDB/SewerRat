@@ -44,7 +44,7 @@ func validatePath(path string) error {
 
 /**********************************************************************/
 
-func newRegisterStartHandler(scratch string) func(http.ResponseWriter, *http.Request) {
+func newRegisterStartHandler(verifier *verificationRegistry) func(http.ResponseWriter, *http.Request) {
     return func(w http.ResponseWriter, r *http.Request) {
         if r.Method != "POST" {
             dumpJsonResponse(w, http.StatusMethodNotAllowed, map[string]string{ "status": "ERROR", "reason": "expected a POST request" })
@@ -70,7 +70,7 @@ func newRegisterStartHandler(scratch string) func(http.ResponseWriter, *http.Req
             return
         }
 
-        candidate, err := createVerificationCode(regpath)
+        candidate, err := verifier.Provision(regpath)
         if err != nil {
             status := http.StatusInternalServerError
             if errors.Is(err, os.ErrPermission) {
@@ -80,18 +80,12 @@ func newRegisterStartHandler(scratch string) func(http.ResponseWriter, *http.Req
             return
         }
 
-        err = depositVerificationCode(scratch, regpath, candidate)
-        if err != nil {
-            dumpJsonResponse(w, http.StatusInternalServerError, map[string]string{ "status": "ERROR", "reason": fmt.Sprintf("failed to deposit verification code for %q; %v", regpath, err) })
-            return
-        }
-
         dumpJsonResponse(w, http.StatusAccepted, map[string]string{ "status": "PENDING", "code": candidate })
         return
     }
 }
 
-func newRegisterFinishHandler(db *sql.DB, scratch string, tokenizer *unicodeTokenizer) func(http.ResponseWriter, *http.Request) {
+func newRegisterFinishHandler(db *sql.DB, verifier *verificationRegistry, tokenizer *unicodeTokenizer) func(http.ResponseWriter, *http.Request) {
     return func(w http.ResponseWriter, r *http.Request) {
         if r.Method != "POST" {
             dumpJsonResponse(w, http.StatusMethodNotAllowed, map[string]string{ "status": "ERROR", "reason": "expected a POST request" })
@@ -141,9 +135,9 @@ func newRegisterFinishHandler(db *sql.DB, scratch string, tokenizer *unicodeToke
             allowed["metadata.json"] = true
         }
 
-        expected_code, err := fetchVerificationCode(scratch, regpath)
-        if err != nil {
-            dumpJsonResponse(w, http.StatusInternalServerError, map[string]string{ "status": "ERROR", "reason": fmt.Sprintf("failed to fetch verification code for %q; %v", regpath, err) })
+        expected_code, ok := verifier.Pop(regpath)
+        if !ok {
+            dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": fmt.Sprintf("no verification code available for %q", regpath) })
             return
         }
 
@@ -170,7 +164,7 @@ func newRegisterFinishHandler(db *sql.DB, scratch string, tokenizer *unicodeToke
 
 /**********************************************************************/
 
-func newDeregisterStartHandler(db *sql.DB, scratch string) func(http.ResponseWriter, *http.Request) {
+func newDeregisterStartHandler(db *sql.DB, verifier *verificationRegistry) func(http.ResponseWriter, *http.Request) {
     return func(w http.ResponseWriter, r *http.Request) {
         if r.Method != "POST" {
             dumpJsonResponse(w, http.StatusMethodNotAllowed, map[string]string{ "status": "ERROR", "reason": "expected a POST request" })
@@ -208,7 +202,7 @@ func newDeregisterStartHandler(db *sql.DB, scratch string) func(http.ResponseWri
             }
         }
 
-        candidate, err := createVerificationCode(regpath)
+        candidate, err := verifier.Provision(regpath)
         if err != nil {
             status := http.StatusInternalServerError
             if errors.Is(err, os.ErrPermission) {
@@ -218,18 +212,12 @@ func newDeregisterStartHandler(db *sql.DB, scratch string) func(http.ResponseWri
             return
         }
 
-        err = depositVerificationCode(scratch, regpath, candidate)
-        if err != nil {
-            dumpJsonResponse(w, http.StatusInternalServerError, map[string]string{ "status": "ERROR", "reason": fmt.Sprintf("failed to deposit verification code for %q; %v", regpath, err) })
-            return
-        }
-
         dumpJsonResponse(w, http.StatusAccepted, map[string]string{ "status": "PENDING", "code": candidate })
         return
     }
 }
 
-func newDeregisterFinishHandler(db *sql.DB, scratch string) func(http.ResponseWriter, *http.Request) {
+func newDeregisterFinishHandler(db *sql.DB, verifier *verificationRegistry) func(http.ResponseWriter, *http.Request) {
     return func(w http.ResponseWriter, r *http.Request) {
         if r.Method != "POST" {
             dumpJsonResponse(w, http.StatusMethodNotAllowed, map[string]string{ "status": "ERROR", "reason": "expected a POST request" })
@@ -255,9 +243,9 @@ func newDeregisterFinishHandler(db *sql.DB, scratch string) func(http.ResponseWr
             return
         }
 
-        expected_code, err := fetchVerificationCode(scratch, regpath)
-        if err != nil {
-            dumpJsonResponse(w, http.StatusInternalServerError, map[string]string{ "status": "ERROR", "reason": fmt.Sprintf("failed to fetch verification code for %q; %v", regpath, err) })
+        expected_code, ok := verifier.Pop(regpath)
+        if !ok {
+            dumpJsonResponse(w, http.StatusInternalServerError, map[string]string{ "status": "ERROR", "reason": fmt.Sprintf("no verification code available for %q", regpath) })
             return
         }
 

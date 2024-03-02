@@ -141,11 +141,10 @@ go build
 
 And then run the SewerRat binary.
 The `-db` flag specifies the location of the SQLite file, 
-`-scratch` specifies the scratch directory for storing verification codes, 
 and `-port` is the port we're listening to for requests (e.g., 8080).
 
 ```shell
-./SewerRat -db DBPATH -scratch SCRATCH -port PORT
+./SewerRat -db DBPATH -port PORT
 ```
 
 If a SQLite file at `DBPATH` already exists, it will be used directly, so the SewerRat can be easily restarted with the same database.
