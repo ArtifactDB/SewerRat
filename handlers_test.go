@@ -308,49 +308,65 @@ func TestDeregisterHandlers(t *testing.T) {
         }
     })
 
-    t.Run("register finish", func(t *testing.T) {
+    quickDeregisterStart := func() string {
+        handler := http.HandlerFunc(newDeregisterStartHandler(dbconn, verifier))
+        req := createJsonRequest("POST", "/deregister/start", map[string]interface{}{ "path": to_add }, t)
+        rr := httptest.NewRecorder()
+        handler.ServeHTTP(rr, req)
+        if rr.Code != http.StatusAccepted {
+            t.Fatalf("should have succeeded")
+        }
+        output := decodeStringyResponse(rr.Body, t)
+        return output["code"]
+    }
+
+    t.Run("deregister fail", func(t *testing.T) {
+        quickDeregisterStart()
         handler := http.HandlerFunc(newDeregisterFinishHandler(dbconn, verifier))
 
         // First attempt fails, because we didn't add the registration code.
-        {
-            req := createJsonRequest("POST", "/deregister/finish", map[string]interface{}{ "path": to_add }, t)
-            if err != nil {
-                t.Fatal(err)
-            }
-
-            rr := httptest.NewRecorder()
-            handler.ServeHTTP(rr, req)
-            if rr.Code != http.StatusUnauthorized {
-                t.Fatalf("should have failed due to lack of code")
-            }
+        req := createJsonRequest("POST", "/deregister/finish", map[string]interface{}{ "path": to_add }, t)
+        if err != nil {
+            t.Fatal(err)
         }
 
-        os.WriteFile(filepath.Join(to_add, code), []byte(""), 0644)
+        rr := httptest.NewRecorder()
+        handler.ServeHTTP(rr, req)
+        if rr.Code != http.StatusUnauthorized {
+            t.Fatalf("should have failed due to lack of code")
+        }
+    })
 
-        {
-            req := createJsonRequest("POST", "/deregister/finish", map[string]interface{}{ "path": to_add }, t)
-            if err != nil {
-                t.Fatal(err)
-            }
+    t.Run("deregister ok", func(t *testing.T) {
+        code := quickDeregisterStart()
+        err := os.WriteFile(filepath.Join(to_add, code), []byte(""), 0644)
+        if err != nil {
+            t.Fatal(err)
+        }
 
-            rr := httptest.NewRecorder()
-            handler.ServeHTTP(rr, req)
-            if rr.Code != http.StatusOK {
-                t.Fatalf("should have succeeded")
-            }
+        handler := http.HandlerFunc(newDeregisterFinishHandler(dbconn, verifier))
+        req := createJsonRequest("POST", "/deregister/finish", map[string]interface{}{ "path": to_add }, t)
+        if err != nil {
+            t.Fatal(err)
+        }
 
-            output := decodeStringyResponse(rr.Body, t)
-            if output["status"] != "SUCCESS" {
-                t.Fatalf("unexpected body")
-            }
+        rr := httptest.NewRecorder()
+        handler.ServeHTTP(rr, req)
+        if rr.Code != http.StatusOK {
+            t.Fatalf("should have succeeded")
+        }
 
-            all_paths, err := listPaths(dbconn, to_add)
-            if err != nil {
-                t.Fatal(err)
-            }
-            if len(all_paths) != 0 {
-                t.Fatalf("unexpected paths in the database %v", all_paths)
-            }
+        output := decodeStringyResponse(rr.Body, t)
+        if output["status"] != "SUCCESS" {
+            t.Fatalf("unexpected body")
+        }
+
+        all_paths, err := listPaths(dbconn, to_add)
+        if err != nil {
+            t.Fatal(err)
+        }
+        if len(all_paths) != 0 {
+            t.Fatalf("unexpected paths in the database %v", all_paths)
         }
     })
 
