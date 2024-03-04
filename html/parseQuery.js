@@ -1,26 +1,24 @@
 function parseQuery(message, at=0, open_par=false) {
     let word = "";
     let words = [];
-    let children = [];
+    let clauses = [];
     let operations = [];
-    let i = at;
 
-    // Function to easily add a text search clause.
-    function add_text_child() {
+    function add_text_clause(at) {
         let new_component = { type: "text" };
 
         if (words.length == 0) {
-            throw new Error("no search terms at position " + String(i));
+            throw new Error("no search terms at position " + String(at));
         }
         let fi = words[0].indexOf(":");
         if (fi == 0) {
-            throw new Error("search field should be non-empty for terms ending at " + String(i));
+            throw new Error("search field should be non-empty for terms ending at " + String(at));
         } else if (fi > 0) {
             new_component.field = words[0].slice(0, fi);
             let leftover = words[0].slice(fi + 1);
             if (leftover == "") {
                 if (words.length == 1) {
-                    throw new Error("no search terms at position " + String(i) + " after removing the search field");
+                    throw new Error("no search terms at position " + String(at) + " after removing the search field");
                 }
                 words = words.slice(1);
             } else {
@@ -32,22 +30,39 @@ function parseQuery(message, at=0, open_par=false) {
         if (new_component.text.match("%")) {
             new_component.partial = true;
         }
-        children.push(new_component);
+        clauses.push(new_component);
         words = [];
         return;
     }
 
-    // Parsing the query to obtain all of the (possibly nested) text clauses.
+    function add_operation(at) {
+        if (operations.length == clauses.length) {
+            // Operations are binary, so if there wasn't already a preceding
+            // clause, then we must try to add a text clause.
+            add_text_clause(at);
+        } else if (operations.length > clauses.length) {
+            throw new Error("multiple AND or OR keywords at position " + String(at));
+        }
+        operations.push(word);
+        word = "";
+    }
+
+    // Parsing the query to obtain all of the individual search clauses.
+    let i = at;
     let closing_par = false;
     while (i < message.length) {
         const c = message[i];
+        const is_whitespace = c.match(/\s/);
+
         if (c == "(") {
-            if (operations.length != children.length) {
+            if (word == "AND" || word == "OR") {
+                add_operation(i);
+            } else if (word != "" || words.length > 0) {
                 throw new Error("search clauses must be separated by AND or OR at position " + String(i));
             }
-            let nested = parseMetadataQuery(message, i + 1, true);
+            let nested = parseQuery(message, i + 1, true);
             i = nested.at;
-            children.push(nested.metadata);
+            clauses.push(nested.metadata);
             continue;
         } else if (c == ")") {
             if (!open_par) {
@@ -58,15 +73,13 @@ function parseQuery(message, at=0, open_par=false) {
             break;
         }
 
-        let is_whitespace = c.match(/\s/);
         if (is_whitespace) {
             if (word == "AND" || word == "OR") {
-                add_text_child();
-                operations.push(word);
+                add_operation(i);
             } else if (word.length) {
                 words.push(word)
+                word = "";
             }
-            word = "";
         } else {
             word += c;
         }
@@ -74,10 +87,12 @@ function parseQuery(message, at=0, open_par=false) {
         ++i;
     }
 
-    if (word.length) {
-        words.push(word);
+    if (operations.length == clauses.length) {
+        if (word.length) {
+            words.push(word);
+        }
+        add_text_clause(i);
     }
-    add_text_child();
 
     if (open_par && !closing_par) {
         throw new Error("unmatched openining parenthesis at position " + String(at - 1))
@@ -85,35 +100,35 @@ function parseQuery(message, at=0, open_par=false) {
 
     // Finding the stretches of ANDs first.
     if (operations.length > 0) {
-        let tmp_children = [];
-        let active_children = [children[0]];
+        let tmp_clauses = [];
+        let active_clauses = [clauses[0]];
         for (var o = 0; o < operations.length; ++o) {
             if (operations[o] == "AND") {
-                active_children.push(children[o + 1]);
+                active_clauses.push(clauses[o + 1]);
             } else {
-                tmp_children.push(active_children);
-                active_children = [children[o + 1]];
+                tmp_clauses.push(active_clauses);
+                active_clauses = [clauses[o + 1]];
             }
         }
-        tmp_children.push(active_children);
+        tmp_clauses.push(active_clauses);
 
-        for (var t = 0; t < tmp_children.length; t++) {
-            if (tmp_children[t].length > 1) {
-                tmp_children[t] = { type: "and", children: tmp_children[t] };
+        for (var t = 0; t < tmp_clauses.length; t++) {
+            if (tmp_clauses[t].length > 1) {
+                tmp_clauses[t] = { type: "and", children: tmp_clauses[t] };
             } else {
-                tmp_children[t] = tmp_children[t][0];
+                tmp_clauses[t] = tmp_clauses[t][0];
             }
         }
 
-        children = tmp_children;
+        clauses = tmp_clauses;
     }
 
     // Finally, resolving the ORs.
     let output;
-    if (children.length > 1) {
-        output = { type: "or", children: children };
+    if (clauses.length > 1) {
+        output = { type: "or", children: clauses };
     } else {
-        output = children[0];
+        output = clauses[0];
     }
     return { metadata: output, at: i };
 }

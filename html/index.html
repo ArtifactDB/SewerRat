@@ -102,9 +102,9 @@
         }
 
         if (!resp.ok) {
-            let message = String(res.status) + " " + res.statusText;
+            let message = String(resp.status) + " " + resp.statusText;
             try {
-                let body = await res.json();
+                let body = await resp.json();
                 if ("reason" in body) {
                     message += ": " + body.reason;
                 }
