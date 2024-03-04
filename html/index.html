@@ -24,10 +24,10 @@
     function populateQueryBody() {
         const all_clauses = [];
 
-        const errdiv = self.document.querySelector("#parse-error");
+        const errdiv = self.document.getElementById("parse-error");
         errdiv.replaceChildren();
 
-        const metadiv = self.document.querySelector('#metadata');
+        const metadiv = self.document.getElementById('metadata');
         try {
             let parsed = parseQuery(metadiv.value);
             all_clauses.push(parsed.metadata);
@@ -36,22 +36,22 @@
             return false;
         }
 
-        const user = self.document.querySelector('#user');
+        const user = self.document.getElementById('user');
         if (user.value != "") {
             all_clauses.push({ "type": "user", "user": user.value });
         }
 
-        const path = self.document.querySelector('#path');
+        const path = self.document.getElementById('path');
         if (path.value != "") {
             all_clauses.push({ "type": "path", "path": path.value });
         }
 
-        const date_from = self.document.querySelector('#date-from');
+        const date_from = self.document.getElementById('date-from');
         if (date_from.valueAsDate != null) {
             all_clauses.push({ "type": "time", "time": date_from.valueAsDate.getTime() / 1000, "after": true });
         }
 
-        const date_to = self.document.querySelector('#date-to');
+        const date_to = self.document.getElementById('date-to');
         if (date_to.valueAsDate != null) {
             all_clauses.push({ "type": "time", "time": date_to.valueAsDate.getTime() / 1000 });
         }
@@ -71,7 +71,7 @@
     var query_next = null;
     var sofar = 0;
 
-    async function populateSearchResults(request_endpoint, clear=false) {
+    async function populateSearchResults(request_endpoint, clear_existing) {
         let resp = await fetch(base_url + request_endpoint, { 
             method: "POST", 
             body: query_body, 
@@ -80,8 +80,8 @@
             }
         })
 
-        const resdiv = self.document.querySelector('#search');
-        if (clear) {
+        const resdiv = self.document.getElementById('search');
+        if (clear_existing) {
             resdiv.replaceChildren();
             sofar = 0;
         }
@@ -129,7 +129,7 @@
                 bg = "#4D4D4D";
             }
             counter.textContent = String(global_i);
-            counter.style = "display: inline-block; min-width: 2em; background-color: " + bg + "; color: " + col + "; margin-right: 5px; padding: 5px; border-radius: 15px 50px 30px; text-align: center"; 
+            counter.style = "display: inline-block; min-width: 2em; background-color: " + bg + "; color: " + col + "; margin-right: 5px; padding: 5px; text-align: center"; 
             child.appendChild(counter);
 
             let pchild = self.document.createElement("code");
@@ -146,11 +146,21 @@
             resdiv.appendChild(self.document.createElement("hr"));
         }
 
+        const nextdiv = self.document.getElementById('search-next');
         if ("next" in output) {
             query_next = output.next;
-            sofar += len(output.results);
+            sofar += output.results.length;
+
+            let newform = document.createElement("form");
+            newform.onsubmit = continueSearch;
+            let newbutton = document.createElement("input");
+            newbutton.type = "submit";
+            newbutton.value = "More results";
+            newform.appendChild(newbutton);
+            nextdiv.appendChild(newform);
         } else {
             query_next = null;
+            nextdiv.replaceChildren();
         }
         return;
     }
@@ -158,6 +168,11 @@
     function startNewSearch() {
         populateQueryBody();
         populateSearchResults("/query", true)
+        return false;
+    }
+
+    function continueSearch() {
+        populateSearchResults(query_next, false)
         return false;
     }
   </script>
@@ -271,12 +286,12 @@
   </div>
   <br><br>
 
-  <input type="submit">
+  <input type="submit" value="Search">
 </form>
 <hr style="border-width:3px;">
 
 <div id="search"></div>
-<div id="search-error"></div>
+<div id="search-next"></div>
 
 </body>
 </html>
