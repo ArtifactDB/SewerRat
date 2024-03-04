@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <script type="text/javascript" src="renderjson.js"></script>
+  <style>
+    .renderjson a { 
+        text-decoration: none; 
+        color: grey;
+    }
+    .renderjson .disclosure { 
+        color: grey;
+        font-size: 150%; 
+    }
+  </style>
+
+  <script type="text/javascript">
+    function parseMetadataQuery(message, at) {
+        let current = {};
+        let i = at;
+        let word = "";
+        let words: []
+
+        for (; i < message.length; ++i) {
+            const c = message[i];
+            if (c == "(") {
+                let nested = parseMetadataQuery(message, i + 1);
+
+            } else if (c == ")") {
+                break;
+            } else if (!c.match(/\s/)) {
+                word += c;
+            } else {
+                if (word == "AND") {
+                    if current 
+
+                } else if (word == "OR") {
+
+                }
+            }
+        }
+
+        return { metadata: current, at: i }
+    }
+
+    function assembleMetadataQuery() {
+        const metadiv = document.querySelector('#metadata');
+        let metaval = metadiv.value;
+        let chain = [];
+        let depth = 0;
+        let word = 
+
+
+        for (const x of metaval) {
+            if (x == "(") {
+                ++depth;
+                chain.push({});
+            } else if (x == ")") {
+                --depth;
+            } else if (x == " ") {
+
+            } else if (x == ":") {
+
+            } else {
+                word += x;
+            }
+        }
+    }
+
+    function assembleQuery() {
+        const searchdiv = document.querySelector('#search');
+    }
+
+    function search() {
+        renderjson.set_icons("⊕", "⊖");
+        const searchdiv = document.querySelector('#search');
+
+        fetch("http://0.0.0.0:8080/query", {
+            method: "POST",
+            body: JSON.stringify(assembleQuery())
+        }).then(res => {
+            for (const x of res.results) {
+                sel.appendChild(renderjson(x));
+            }
+        });
+
+        return false;
+    }
+  </script>
+
+  <style>
+    .tooltip {
+      position: relative;
+      display: inline-block;
+      border-bottom: 1px dotted black;
+    }
+    
+    .tooltip .tooltiptext {
+      visibility: hidden;
+      background-color: lightgrey;
+      width: max-content;
+      max-width: 50vw; /* (as much as you want) */
+      border-radius: 6px;
+      padding: 5px 5px;
+    
+      /* Position the tooltip */
+      position: absolute;
+      z-index: 1;
+    }
+    
+    .tooltip:hover .tooltiptext {
+      visibility: visible;
+    }
+  </style>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css">
+</head>
+
+<body>
+
+<h1>SewerRat search</h1>
+
+<form onsubmit="return runMe();">
+  <div style="display: flex; align-items: center; margin-bottom: 0.8em">
+    <label for="metadata" style="margin-right: 0.2em">Metadata:</label>
+    <textarea id="metadata" name="metadata" rows="1" style="width:40vw"></textarea>
+    <div class="tooltip" style="margin-left: 0.2em">
+      <i class="fa fa-question-circle" aria-hidden="true"></i>
+      <span class="tooltiptext">
+        Free text search on the metadata. Leave empty to skip this filter.
+        For simple use cases, just enter one or more search terms, and we'll search for metadata files that match all the terms.
+        <br><br>
+        Advanced users can use the <code>AND</code> and <code>OR</code> keywords to assemble complex queries.
+        (Make sure to use all-caps for these keywords.)
+        This can be combined with parentheses to control precedence, e.g., <code>(a b OR c d) AND (e f)</code>;
+        otherwise, <code>AND</code> takes precedence over <code>OR</code>.
+        Note that any sequence of adjacent search terms are implicitly <code>AND</code>,
+        i.e., the query above can be expanded as <code>((a AND b) OR (c AND d)) AND (e AND f))</code>.
+        <br><br>
+        Even more advanced users can prefix any sequence of search terms with the name of a metadata field, 
+        to only search for matches within that field of the metadata file, e.g.,
+        <code>(title: prostate cancer) AND (genome: GRCh38 OR genome: GRCm38)</code>.
+        Note that this does not extend to the <code>AND</code> and <code>OR</code> keywords,
+        i.e., <code>title:foo OR bar</code> will not limit the search for <code>bar</code> to the <code>title</code> field.
+        <br><br>
+        Extremely advanced users can attach a <code>%</code> wildcard to any term to enable a partial search,
+        e.g., <code>neur%</code> will match files with <code>neuron</code>, <code>neural</code>, <code>neurological</code>, etc.
+      </span>
+    </div>
+  </div>
+
+  <label for="user">User:</label>
+  <input type="text" id="user" name="user" placeholder="user123">
+  <div class="tooltip">
+    <i class="fa fa-question-circle" aria-hidden="true"></i>
+    <span class="tooltiptext">
+      Unix ID of the user who created the file.
+      Leave empty to skip this filter.
+    </span>
+  </div>
+  <br><br>
+
+  <label for="path">Path:</label>
+  <input type="text" id="path" name="path" placeholder="/some/location/on/the/file-system">
+  <div class="tooltip">
+    <i class="fa fa-question-circle" aria-hidden="true"></i>
+    <span class="tooltiptext">
+      Any substring of the absolute path to the file, e.g.,
+      <code>/home/user/user1234/foo/bar</code>,
+      <code>user1234/foo</code>,
+      <code>foo/bar</code>,
+      <code>1234/foo/b</code>.
+      Leave empty to skip this filter.
+    </span>
+  </div>
+  <br><br>
+
+  <label for="date-from">Date (from):</label>
+  <input type="date" id="date-from" name="date-from">
+  <div class="tooltip">
+    <i class="fa fa-question-circle" aria-hidden="true"></i>
+    <span class="tooltiptext">
+      Only files with modification times after this date are considered.
+      Leave empty to skip this filter.
+    </span>
+  </div>
+  <br><br>
+
+  <label for="date-to">Date (to):</label>
+  <input type="date" id="date-to" name="date-to">
+  <div class="tooltip">
+    <i class="fa fa-question-circle" aria-hidden="true"></i>
+    <span class="tooltiptext">
+      Only files with modification times before this date are considered.
+      Leave empty to skip this filter.
+    </span>
+  </div>
+  <br><br>
+
+  <input type="submit">
+</form>
+<hr>
+
+<div id="search">
+</div>
+
+</body>
+</html>
+
