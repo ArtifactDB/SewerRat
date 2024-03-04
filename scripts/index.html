@@ -3,6 +3,10 @@
 <head>
   <script type="text/javascript" src="renderjson.js"></script>
   <style>
+    .renderjson {
+      margin: 0.1em 0px;
+    }
+
     .renderjson a { 
         text-decoration: none; 
         color: grey;
@@ -13,76 +17,147 @@
     }
   </style>
 
+  <script type="text/javascript" src="parseQuery.js"></script>
   <script type="text/javascript">
-    function parseMetadataQuery(message, at) {
-        let current = {};
-        let i = at;
-        let word = "";
-        let words: []
+    var query_body = null;
 
-        for (; i < message.length; ++i) {
-            const c = message[i];
-            if (c == "(") {
-                let nested = parseMetadataQuery(message, i + 1);
+    function populateQueryBody() {
+        const all_clauses = [];
 
-            } else if (c == ")") {
-                break;
-            } else if (!c.match(/\s/)) {
-                word += c;
-            } else {
-                if (word == "AND") {
-                    if current 
+        const errdiv = self.document.querySelector("#parse-error");
+        errdiv.replaceChildren();
 
-                } else if (word == "OR") {
+        const metadiv = self.document.querySelector('#metadata');
+        try {
+            let parsed = parseQuery(metadiv.value);
+            all_clauses.push(parsed.metadata);
+        } catch (e) {
+            errdiv.appendChild(self.document.createTextNode(e.message));
+            return false;
+        }
 
+        const user = self.document.querySelector('#user');
+        if (user.value != "") {
+            all_clauses.push({ "type": "user", "user": user.value });
+        }
+
+        const path = self.document.querySelector('#path');
+        if (path.value != "") {
+            all_clauses.push({ "type": "path", "path": path.value });
+        }
+
+        const date_from = self.document.querySelector('#date-from');
+        if (date_from.valueAsDate != null) {
+            all_clauses.push({ "type": "time", "time": date_from.valueAsDate.getTime() / 1000, "after": true });
+        }
+
+        const date_to = self.document.querySelector('#date-to');
+        if (date_to.valueAsDate != null) {
+            all_clauses.push({ "type": "time", "time": date_to.valueAsDate.getTime() / 1000 });
+        }
+
+        let query;
+        if (all_clauses.length == 1) {
+            query = all_clauses[0];
+        } else {
+            query = { "type": "and", "children": all_clauses };
+        }
+ 
+        query_body = JSON.stringify(query);
+        return;
+    }
+
+    const base_url = "http://0.0.0.0:8080"; 
+    var query_next = null;
+    var sofar = 0;
+
+    async function populateSearchResults(request_endpoint, clear=false) {
+        let resp = await fetch(base_url + request_endpoint, { 
+            method: "POST", 
+            body: query_body, 
+            headers: {
+                "Content-Type": "application/json"
+            }
+        })
+
+        const resdiv = self.document.querySelector('#search');
+        if (clear) {
+            resdiv.replaceChildren();
+            sofar = 0;
+        }
+        function populateResultError(message) {
+            let errmsg = self.document.createElement("p");
+            errmsg.style["color"] = "red";
+            errmsg.textContent = "Oops, looks like something went wrong (" + message + ")";
+            resdiv.appendChild(errmsg);
+            return;
+        }
+
+        if (!resp.ok) {
+            let message = String(res.status) + " " + res.statusText;
+            try {
+                let body = await res.json();
+                if ("reason" in body) {
+                    message += ": " + body.reason;
                 }
-            }
+            } catch (e) {}
+            populateResultError(message);
+            return;
         }
 
-        return { metadata: current, at: i }
-    }
-
-    function assembleMetadataQuery() {
-        const metadiv = document.querySelector('#metadata');
-        let metaval = metadiv.value;
-        let chain = [];
-        let depth = 0;
-        let word = 
-
-
-        for (const x of metaval) {
-            if (x == "(") {
-                ++depth;
-                chain.push({});
-            } else if (x == ")") {
-                --depth;
-            } else if (x == " ") {
-
-            } else if (x == ":") {
-
-            } else {
-                word += x;
-            }
+        let output;
+        try {
+            output = await resp.json();
+        } catch (e) {
+            populateResultError(e.message);
+            return;
         }
-    }
 
-    function assembleQuery() {
-        const searchdiv = document.querySelector('#search');
-    }
-
-    function search() {
         renderjson.set_icons("⊕", "⊖");
-        const searchdiv = document.querySelector('#search');
+        for (var i = 0; i < output.results.length; ++i) {
+            const x = output.results[i];
+            const child = self.document.createElement("div");
 
-        fetch("http://0.0.0.0:8080/query", {
-            method: "POST",
-            body: JSON.stringify(assembleQuery())
-        }).then(res => {
-            for (const x of res.results) {
-                sel.appendChild(renderjson(x));
+            let counter = self.document.createElement("span");
+            let global_i = sofar + i + 1;
+            var col, bg;
+            if (global_i % 2 === 1) {
+                col = "black";
+                bg = "lightgrey";
+            } else {
+                col = "white";
+                bg = "#4D4D4D";
             }
-        });
+            counter.textContent = String(global_i);
+            counter.style = "display: inline-block; min-width: 2em; background-color: " + bg + "; color: " + col + "; margin-right: 5px; padding: 5px; border-radius: 15px 50px 30px; text-align: center"; 
+            child.appendChild(counter);
 
+            let pchild = self.document.createElement("code");
+            pchild.textContent = x.path;
+            child.appendChild(pchild);
+            child.append(self.document.createTextNode(", created by "));
+            let uchild = self.document.createElement("code");
+            uchild.textContent = x.user;
+            child.appendChild(uchild);
+            child.append(self.document.createTextNode(" at " + (new Date(x.time * 1000)).toString()));
+
+            child.appendChild(renderjson(x.metadata));
+            resdiv.appendChild(child);
+            resdiv.appendChild(self.document.createElement("hr"));
+        }
+
+        if ("next" in output) {
+            query_next = output.next;
+            sofar += len(output.results);
+        } else {
+            query_next = null;
+        }
+        return;
+    }
+
+    function startNewSearch() {
+        populateQueryBody();
+        populateSearchResults("/query", true)
         return false;
     }
   </script>
@@ -118,7 +193,7 @@
 
 <h1>SewerRat search</h1>
 
-<form onsubmit="return runMe();">
+<form onsubmit="return startNewSearch();">
   <div style="display: flex; align-items: center; margin-bottom: 0.8em">
     <label for="metadata" style="margin-right: 0.2em">Metadata:</label>
     <textarea id="metadata" name="metadata" rows="1" style="width:40vw"></textarea>
@@ -145,6 +220,7 @@
         e.g., <code>neur%</code> will match files with <code>neuron</code>, <code>neural</code>, <code>neurological</code>, etc.
       </span>
     </div>
+    <div id="parse-error" style="color:red; margin-left:0.2em"></div>
   </div>
 
   <label for="user">User:</label>
@@ -197,10 +273,10 @@
 
   <input type="submit">
 </form>
-<hr>
+<hr style="border-width:3px;">
 
-<div id="search">
-</div>
+<div id="search"></div>
+<div id="search-error"></div>
 
 </body>
 </html>

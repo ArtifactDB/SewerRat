@@ -10,7 +10,7 @@ function parseQuery(message, at=0, open_par=false) {
         let new_component = { type: "text" };
 
         if (words.length == 0) {
-            throw new Error("no search terms at position" + String(i));
+            throw new Error("no search terms at position " + String(i));
         }
         let fi = words[0].indexOf(":");
         if (fi == 0) {
@@ -20,7 +20,7 @@ function parseQuery(message, at=0, open_par=false) {
             let leftover = words[0].slice(fi + 1);
             if (leftover == "") {
                 if (words.length == 1) {
-                    throw new Error("no search terms at position" + String(i) + " after removing the search field");
+                    throw new Error("no search terms at position " + String(i) + " after removing the search field");
                 }
                 words = words.slice(1);
             } else {
@@ -64,8 +64,9 @@ function parseQuery(message, at=0, open_par=false) {
                 add_text_child();
                 operations.push(word);
             } else if (word.length) {
-                words.append(word)
+                words.push(word)
             }
+            word = "";
         } else {
             word += c;
         }
@@ -74,7 +75,7 @@ function parseQuery(message, at=0, open_par=false) {
     }
 
     if (word.length) {
-        words.append(word);
+        words.push(word);
     }
     add_text_child();
 
@@ -94,9 +95,9 @@ function parseQuery(message, at=0, open_par=false) {
                 active_children = [children[o + 1]];
             }
         }
-
         tmp_children.push(active_children);
-        for (var t = 0; t < tmp_children; t++) {
+
+        for (var t = 0; t < tmp_children.length; t++) {
             if (tmp_children[t].length > 1) {
                 tmp_children[t] = { type: "and", children: tmp_children[t] };
             } else {
