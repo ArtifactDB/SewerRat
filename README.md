@@ -164,6 +164,9 @@ If a SQLite file at `DBPATH` already exists, it will be used directly, so a Sewe
 SewerRat will periodically (by default, daily) create a back-up of the index at `DBPATH.backup`.
 This can be used to manually recover from problems with the SQLite database by copying the backup to `DBPATH` and restarting the SewerRat instance.
 
+The [`html/`](html) subdirectory contains a minimal search page that queries a local SewerRat instance, also accessible from [GitHub Pages](https://artifactdb.github.com/SewerRat),
+Developers can copy this page and change the `base_url` to point to their production instance.
+
 ## Registration in more detail
 
 We previously glossed over the registration process by presenting users with the `registerSewerRat` function.
