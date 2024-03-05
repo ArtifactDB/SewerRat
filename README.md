@@ -124,6 +124,9 @@ The nature of the search depends on the value of `type`:
 - For `"and"` and `"or"`, SewerRat searches on a combination of other filters.
   The search clause should contain the `children` property, which is an array of other search clauses.
   A file is only considered to be a match if it matches all (`"and"`) or any (`"or"`) of the individual clauses in `children`.
+- For `"not"`, SewerRat negates the filter.
+  The search clause should contain the `child` property, which contains the search clause to be negated.
+  A file is only considered to be a match if it does not match the clause in `child`.
 
 The API returns a request body that contains a JSON object with the following properties:
 

@@ -168,6 +168,23 @@ func TestSanitizeQuery(t *testing.T) {
         }
     })
 
+    t.Run("not", func(t *testing.T) {
+        query := &searchClause {
+            Type: "not",
+            Child: &searchClause{ Type: "text", Text: "whee blah" },
+        }
+
+        san, err := sanitizeQuery(query, deftok, wildtok)
+        if err != nil {
+            t.Fatalf(err.Error())
+        }
+
+        // Now the nested OR is collapsed, but the AND is retained.
+        if san == nil || san.Type != "not" || san.Child == nil || san.Child.Type != "and" {
+            t.Fatalf("unexpected result from sanitization %v", san)
+        }
+    })
+
     t.Run("text", func(t *testing.T) {
         {
             // Single token.

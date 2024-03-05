@@ -26,6 +26,9 @@ type searchClause struct {
 
     // Only relevant for type = and/or.
     Children []*searchClause `json:"children"`
+
+    // Only relevant for type = not.
+    Child *searchClause `json:"child"`
 }
 
 func escapeWildcards(input string) (string, string, error) {
@@ -105,6 +108,17 @@ func sanitizeQuery(original *searchClause, deftok, wildtok *unicodeTokenizer) (*
         } else {
             return &searchClause { Type: original.Type, Children: new_kids }, nil
         }
+    }
+
+    if original.Type == "not" {
+        if original.Child == nil {
+            return nil, fmt.Errorf("search clause of type %q should have non-empty 'child'", original.Type)
+        }
+        san, err := sanitizeQuery(original.Child, deftok, wildtok)
+        if err != nil {
+            return nil, err
+        }
+        return &searchClause { Type: original.Type, Child: san }, nil
     }
 
     if original.Type == "text" {
@@ -189,6 +203,11 @@ func assembleFilter(query *searchClause) (string, []interface{}) {
         }
         filter += " ?"
         return filter, []interface{}{ query.Time }
+    }
+
+    if query.Type == "not" {
+        curfilt, curpar := assembleFilter(query.Child)
+        return "NOT " + curfilt, curpar
     }
 
     if query.Type == "and" {

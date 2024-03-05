@@ -3,6 +3,7 @@ function parseQuery(message, at=0, open_par=false) {
     let words = [];
     let clauses = [];
     let operations = [];
+    let negation = false;
 
     function add_text_clause(at) {
         let new_component = { type: "text" };
@@ -30,6 +31,12 @@ function parseQuery(message, at=0, open_par=false) {
         if (new_component.text.match("%")) {
             new_component.partial = true;
         }
+
+        if (negation) {
+            new_component = { "type": "not", "child": new_component };
+            negation = false;
+        }
+
         clauses.push(new_component);
         words = [];
         return;
@@ -57,14 +64,20 @@ function parseQuery(message, at=0, open_par=false) {
         if (c == "(") {
             if (word == "AND" || word == "OR") {
                 add_operation(i);
+            } else if (word == "NOT") {
+                negation = true;
+                word = "";
             } else if (word != "" || words.length > 0) {
                 throw new Error("search clauses must be separated by AND or OR at position " + String(i));
             }
             let nested = parseQuery(message, i + 1, true);
             i = nested.at;
             clauses.push(nested.metadata);
+            negation = false;
             continue;
-        } else if (c == ")") {
+        }
+
+        if (c == ")") {
             if (!open_par) {
                 throw new Error("unmatched closing parenthesis at position " + String(i))
             }
@@ -76,6 +89,9 @@ function parseQuery(message, at=0, open_par=false) {
         if (is_whitespace) {
             if (word == "AND" || word == "OR") {
                 add_operation(i);
+            } else if (word == "NOT") {
+                negation = true;
+                word = "";
             } else if (word.length) {
                 words.push(word)
                 word = "";

@@ -225,17 +225,22 @@
           Free text search on the metadata. Leave empty to skip this filter.
           For simple use cases, just enter one or more search terms, and we'll search for metadata files that match all the terms.
           <br><br>
-          Advanced users can use the <code>AND</code> and <code>OR</code> keywords to assemble complex queries.
+          Advanced users can use the <code>AND</code> and <code>OR</code> keywords to perform binary logical operations.
           (Make sure to use all-caps for these keywords.)
           This can be combined with parentheses to control precedence, e.g., <code>(a b OR c d) AND (e f)</code>;
           otherwise, <code>AND</code> takes precedence over <code>OR</code>.
           Note that any sequence of adjacent search terms are implicitly <code>AND</code>,
           i.e., the query above can be expanded as <code>((a AND b) OR (c AND d)) AND (e AND f))</code>.
           <br><br>
+          On a similar note, the <code>NOT</code> keyword can be used for unary negation.
+          This should be put before any search terms, e.g., <code>(NOT a b) AND (c d)</code>.
+          If there are no parenthese, any <code>NOT</code> will take precedence over the other boolean operations,
+          i.e., the above query is the same as <code>NOT a b AND c d</code>.
+          <br><br>
           Even more advanced users can prefix any sequence of search terms with the name of a metadata field, 
           to only search for matches within that field of the metadata file, e.g.,
           <code>(title: prostate cancer) AND (genome: GRCh38 OR genome: GRCm38)</code>.
-          Note that this does not extend to the <code>AND</code> and <code>OR</code> keywords,
+          Note that this does not extend to the <code>AND</code>, <code>OR</code> and <code>NOT</code> keywords,
           i.e., <code>title:foo OR bar</code> will not limit the search for <code>bar</code> to the <code>title</code> field.
           <br><br>
           Extremely advanced users can attach a <code>%</code> wildcard to any term to enable a partial search,
