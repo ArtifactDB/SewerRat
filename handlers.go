@@ -22,7 +22,8 @@ func dumpJsonResponse(w http.ResponseWriter, status int, v interface{}) {
         contents = []byte("unknown")
     }
 
-    w.Header()["Content-Type"] = []string { "application/json" }
+    w.Header().Set("Content-Type", "application/json")
+    w.Header().Set("Access-Control-Allow-Origin", "*")
     w.WriteHeader(status)
     _, err = w.Write(contents)
     if err != nil {
@@ -274,6 +275,14 @@ func newDeregisterFinishHandler(db *sql.DB, verifier *verificationRegistry) func
 
 func newQueryHandler(db *sql.DB, tokenizer *unicodeTokenizer, wild_tokenizer *unicodeTokenizer, endpoint string) func(http.ResponseWriter, *http.Request) {
     return func(w http.ResponseWriter, r *http.Request) {
+        if r.Method == "OPTIONS" {
+            w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
+            w.Header().Set("Access-Control-Allow-Origin", "*")
+            w.Header().Set("Access-Control-Allow-Headers", "*")
+            w.WriteHeader(http.StatusNoContent)
+            return
+        }
+
         if r.Method != "POST" {
             dumpJsonResponse(w, http.StatusMethodNotAllowed, map[string]string{ "status": "ERROR", "reason": "expected a POST request" })
             return
