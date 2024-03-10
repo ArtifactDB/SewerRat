@@ -11,6 +11,9 @@ import (
 func main() {
     dbpath0 := flag.String("db", "index.sqlite3", "Path to the SQLite file for the metadata")
     port0 := flag.Int("port", 8080, "Port to listen to for requests")
+    backup0 := flag.Int("backup", 24, "Frequency of back-ups, in hours")
+    update0 := flag.Int("update", 24, "Frequency of updates, in hours")
+    lifetime0 := flag.Int("session", 10, "Session lifetime, in minutes")
     flag.Parse()
 
     dbpath := *dbpath0
@@ -43,19 +46,20 @@ func main() {
 
     // Adding a hour job that purges various old verification sessions.
     {
-        ticker := time.NewTicker(10 * time.Minute)
+        lifetime := time.Duration(*lifetime0) * time.Minute
+        ticker := time.NewTicker(lifetime)
         defer ticker.Stop()
         go func() {
             for {
                 <-ticker.C
-                verifier.Flush(10 * time.Minute)
+                verifier.Flush(lifetime)
             }
         }()
     }
 
     // Adding a per-day job that updates the paths.
     {
-        ticker := time.NewTicker(24 * time.Hour)
+        ticker := time.NewTicker(time.Duration(*update0) * time.Hour)
         defer ticker.Stop()
         go func() {
             for {
@@ -74,7 +78,7 @@ func main() {
 
     // Adding another per-day job that does the backup.
     {
-        ticker := time.NewTicker(24 * time.Hour)
+        ticker := time.NewTicker(time.Duration(*backup0) * time.Hour)
         defer ticker.Stop()
         go func() {
             time.Sleep(time.Hour * 12) // start at a different cycle from the path updates.

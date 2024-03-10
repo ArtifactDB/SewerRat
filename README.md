@@ -50,7 +50,7 @@ The registration process will walk recursively through the specified directory, 
 We can then perform some complex searches on the contents of these files (see [below](#querying-the-index)).
 There is no limit on the number of times that a directory can be registered, though every new registration will replace all previously-registered files from that directory.
 
-SewerRat will periodically (by default, daily) update the index by examining all paths to metadata files in its registry.
+SewerRat will periodically update the index by examining all paths to metadata files in its registry.
 If we modified one of our files, SewerRat will re-index that file; and if we deleted a file, SewerRat will remove it from the index.
 This ensures that the information in the index reflects the organization on the filesystem.
 Note that SewerRat will not index new files that were added to a directory after registration.
@@ -164,8 +164,18 @@ and `-port` is the port we're listening to for requests (defaults to 8080).
 
 If a SQLite file at `DBPATH` already exists, it will be used directly, so a SewerRat instance can be easily restarted with the same database.
 
-SewerRat will periodically (by default, daily) create a back-up of the index at `DBPATH.backup`.
+SewerRat will periodically create a back-up of the index at `DBPATH.backup`.
 This can be used to manually recover from problems with the SQLite database by copying the backup to `DBPATH` and restarting the SewerRat instance.
+
+Additional arguments can be passed to `./SewerRat` to control its behavior (check out `./SewerRat -h` for details):
+
+- `-backup` controls the frequency of back-up creation.
+  This defaults to 24 hours.
+- `-update` controls the frequency of index updates.
+  This defaults to 24 hours.
+- `-session` specifies the lifetime of a registration sesssion 
+  (i.e., the maximum time between starting and finishing the registration, see below).
+  This defaults to 10 minutes.
 
 The [`html/`](html) subdirectory contains a minimal search page that queries a local SewerRat instance.
 Developers can copy this page and change the `base_url` to point to their production instance.
