@@ -198,8 +198,8 @@ curl -X POST -L ${SEWER_RAT_URL}/register/start \
 ```
 
 On success, this returns a `PENDING` status with a verification code.
-The caller is expected to verify that they have write access to the specified directory by creating the file inside the directory with the specified code.
-Once this is done, we call the `/register/finish` endpoint with a request body that contains the same `path`.
+The caller is expected to verify that they have write access to the specified directory by creating a file with the same name as the verification code (i.e., `.sewer_XXX`) inside that directory.
+Once this is done, we call the `/register/finish` endpoint with a request body that contains the same directory `path`.
 The body may also contain `base`, an array of strings containing the names of the files to register within the directory -
 if this is not provided, only files named `metadata.json` will be registered.
 
@@ -216,6 +216,7 @@ curl -X POST -L ${SEWER_RAT_URL}/register/finish \
 On success, the files in the specified directory will be registered in the index.
 Note that SewerRat will just skip problematic files, e.g., invalid JSON, insufficient permissions.
 Any such problems are reported in the `comments` array rather than blocking the entire indexing process.
+The verification code file can also be deleted from the directory once the registration is complete.
 
 The deregistration process is identical if we replace the `/register/*` endpoints with `/deregister/*`.
 The only exception is when the caller requests deregistration of a directory that does not exist.
