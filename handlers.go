@@ -143,7 +143,7 @@ func newRegisterFinishHandler(db *sql.DB, verifier *verificationRegistry, tokeni
         }
 
         expected_path := filepath.Join(regpath, expected_code)
-        _, err = os.Stat(expected_path)
+        code_info, err := os.Stat(expected_path)
         if errors.Is(err, os.ErrNotExist) {
             dumpJsonResponse(w, http.StatusUnauthorized, map[string]string{ "status": "ERROR", "reason": fmt.Sprintf("verification failed for %q; %v", regpath, err) })
             return
@@ -152,7 +152,13 @@ func newRegisterFinishHandler(db *sql.DB, verifier *verificationRegistry, tokeni
             return
         }
 
-        failures, err := addDirectory(db, regpath, allowed, tokenizer)
+        username, err := identifyUser(code_info)
+        if err != nil {
+            dumpJsonResponse(w, http.StatusInternalServerError, map[string]string{ "status": "ERROR", "reason": fmt.Sprintf("cannot identify the registering user from %q; %v", regpath, err) })
+            return
+        }
+
+        failures, err := addDirectory(db, regpath, allowed, username, tokenizer)
         if err != nil {
             dumpJsonResponse(w, http.StatusInternalServerError, map[string]string{ "status": "ERROR", "reason": fmt.Sprintf("failed to index directory; %v", err) })
             return
