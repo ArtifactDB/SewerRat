@@ -48,7 +48,7 @@ func TestInitializeDatabase(t *testing.T) {
         }
 
         sort.Strings(collected)
-        if !equalStringArrays(collected, []string{ "fields", "links", "paths", "tokens" }) {
+        if !equalStringArrays(collected, []string{ "dirs", "fields", "links", "paths", "tokens" }) {
             t.Fatalf("not all tables were correctly initialized")
         }
     })
@@ -60,7 +60,17 @@ func TestInitializeDatabase(t *testing.T) {
             t.Fatalf(err.Error())
         }
         defer dbconn.Close()
-        dbconn.Exec("INSERT INTO paths(path, user, time, metadata) VALUES(?, ?, ?, ?)", "whee/superfoo", "blah", 123456, []byte("[1,2,3]"))
+
+        var did int64
+        err = dbconn.QueryRow("INSERT INTO dirs(path, user, time, names) VALUES(?, ?, ?, ?) RETURNING did", "whee/superfoo", "blah", 123456, []byte("[\"a.json\"]")).Scan(&did)
+        if err != nil {
+            t.Fatalf(err.Error())
+        }
+
+        _, err = dbconn.Exec("INSERT INTO paths(path, did, user, time, metadata) VALUES(?, ?, ?, ?, ?)", "whee/superfoo/stuff", did, "blah", 123456, []byte("[1,2,3]"))
+        if err != nil {
+            t.Fatalf(err.Error())
+        }
     }()
 
     t.Run("reinitialized", func(t *testing.T) {
@@ -136,12 +146,50 @@ func TestAddDirectory(t *testing.T) {
         defer dbconn.Close()
         defer os.Remove(dbpath)
 
-        comments, err := addDirectory(dbconn, to_add, map[string]bool{ "metadata.json": true }, tokr)
+        comments, err := addDirectory(dbconn, to_add, map[string]bool{ "metadata.json": true }, "myself", tokr)
         if err != nil {
             t.Fatalf(err.Error())
         }
         if len(comments) > 0 {
             t.Fatalf("unexpected comments from the directory addition %v", comments)
+        }
+
+        {
+            rows, err := dbconn.Query("SELECT path, user, time, json_extract(names, '$') FROM dirs")
+            if err != nil {
+                t.Fatalf(err.Error())
+            }
+            defer rows.Close()
+
+            counter := 0
+            for rows.Next() {
+                var path, owner, names string
+                var creation int64
+                err = rows.Scan(&path, &owner, &creation, &names)
+                if err != nil {
+                    t.Fatalf(err.Error())
+                }
+
+                if (path != to_add) {
+                    t.Fatalf("invalid registration directory %q", path)
+                }
+
+                if creation <= 0 || creation > now {
+                    t.Fatalf("invalid registration time %q", creation)
+                }
+                if owner != "myself" {
+                    t.Fatalf("incorrect registering username %q", owner)
+                }
+                if !strings.HasPrefix(names, "[") || !strings.HasSuffix(names, "]") {
+                    t.Fatalf("unexpected names %q", names)
+                }
+
+                counter += 1
+            }
+
+            if counter != 1 {
+                t.Fatalf("expected exactly 1 entry in 'dirs' (got %v)", counter)
+            }
         }
 
         {
@@ -219,12 +267,24 @@ func TestAddDirectory(t *testing.T) {
         defer os.Remove(dbpath)
 
         // Works with multiple JSON targets.
-        comments, err := addDirectory(dbconn, to_add, map[string]bool{ "metadata.json": true, "other.json": true }, tokr)
+        comments, err := addDirectory(dbconn, to_add, map[string]bool{ "metadata.json": true, "other.json": true }, "myslef", tokr)
         if err != nil {
             t.Fatalf(err.Error())
         }
         if len(comments) > 0 {
             t.Fatalf("unexpected comments from the directory addition %v", comments)
+        }
+
+        all_dirs, err := listDirs(dbconn)
+        if err != nil {
+            t.Fatal(err)
+        }
+        payload, ok := all_dirs[to_add]
+        if len(all_dirs) != 1 || !ok {
+            t.Fatalf("unexpected directories in the index %v", all_dirs)
+        }
+        if !equalStringArrays(payload, []string{ "metadata.json", "other.json" }) {
+            t.Fatalf("unexpected names in the index %v", payload)
         }
 
         all_paths, err := listPaths(dbconn, tmp)
@@ -251,7 +311,7 @@ func TestAddDirectory(t *testing.T) {
         defer os.Remove(dbpath)
 
         // Works with multiple JSON directories.
-        comments, err := addDirectory(dbconn, to_add, map[string]bool{ "other.json": true }, tokr)
+        comments, err := addDirectory(dbconn, to_add, map[string]bool{ "other.json": true }, "myself", tokr)
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -259,12 +319,28 @@ func TestAddDirectory(t *testing.T) {
             t.Fatalf("unexpected comments from the directory addition %v", comments)
         }
 
-        comments, err = addDirectory(dbconn, to_add2, map[string]bool{ "metadata.json": true }, tokr)
+        comments, err = addDirectory(dbconn, to_add2, map[string]bool{ "metadata.json": true }, "myself", tokr)
         if err != nil {
             t.Fatalf(err.Error())
         }
         if len(comments) > 0 {
             t.Fatalf("unexpected comments from the directory addition %v", comments)
+        }
+
+        all_dirs, err := listDirs(dbconn)
+        if err != nil {
+            t.Fatal(err)
+        }
+        payload, ok := all_dirs[to_add]
+        payload2, ok2 := all_dirs[to_add2]
+        if len(all_dirs) != 2 || !ok || !ok2 {
+            t.Fatalf("unexpected directories in the index %v", all_dirs)
+        }
+        if !equalStringArrays(payload, []string{ "other.json" }) {
+            t.Fatalf("unexpected names in the index %v", payload)
+        }
+        if !equalStringArrays(payload2, []string{ "metadata.json" }) {
+            t.Fatalf("unexpected names in the index %v", payload2)
         }
 
         all_paths, err := listPaths(dbconn, tmp)
@@ -276,7 +352,7 @@ func TestAddDirectory(t *testing.T) {
         }
 
         // Recalling on an existing directory wipes out existing entries and replaces it.
-        comments, err = addDirectory(dbconn, to_add, map[string]bool{ "metadata.json": true }, tokr)
+        comments, err = addDirectory(dbconn, to_add, map[string]bool{ "metadata.json": true }, "myself", tokr)
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -314,7 +390,7 @@ func TestAddDirectory(t *testing.T) {
         defer os.Remove(dbpath)
 
         // Reports the error correctly.
-        comments, err := addDirectory(dbconn, to_fail, map[string]bool{ "metadata.json": true, "other.json": true }, tokr)
+        comments, err := addDirectory(dbconn, to_fail, map[string]bool{ "metadata.json": true, "other.json": true }, "myself", tokr)
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -356,7 +432,7 @@ func TestDeleteDirectory(t *testing.T) {
         t.Fatalf(err.Error())
     }
 
-    comments, err := addDirectory(dbconn, to_add, map[string]bool{ "metadata.json": true, "other.json": true }, tokr)
+    comments, err := addDirectory(dbconn, to_add, map[string]bool{ "metadata.json": true, "other.json": true }, "myself", tokr)
     if err != nil {
         t.Fatalf(err.Error())
     }
@@ -364,7 +440,7 @@ func TestDeleteDirectory(t *testing.T) {
         t.Fatalf("unexpected comments from the directory addition %v", comments)
     }
 
-    comments, err = addDirectory(dbconn, to_add2, map[string]bool{ "other.json": true }, tokr)
+    comments, err = addDirectory(dbconn, to_add2, map[string]bool{ "other.json": true }, "myself", tokr)
     if err != nil {
         t.Fatalf(err.Error())
     }
@@ -376,6 +452,16 @@ func TestDeleteDirectory(t *testing.T) {
     err = deleteDirectory(dbconn, to_add)
     if err != nil {
         t.Fatalf(err.Error())
+    }
+
+    all_dirs, err := listDirs(dbconn)
+    if err != nil {
+        t.Fatal(err)
+    }
+    _, ok := all_dirs[to_add]
+    _, ok2 := all_dirs[to_add2]
+    if len(all_dirs) != 1 || ok || !ok2 {
+        t.Fatalf("unexpected directories in the index %v", all_dirs)
     }
 
     all_paths, err := listPaths(dbconn, tmp)
@@ -446,32 +532,44 @@ func TestUpdatePaths(t *testing.T) {
         t.Fatalf(err.Error())
     }
 
-    checkLinkCohort := func(dbconn *sql.DB, scratch string, should_find bool) bool {
-        found, err := searchForLink(dbconn, filepath.Join(scratch, "stuff", "metadata.json"), "anime", "yuru")
+    getTime := func(dbconn *sql.DB, path string) int64 {
+        var val int64
+        err := dbconn.QueryRow("SELECT time FROM paths WHERE path = ?", path).Scan(&val)
         if err != nil {
             t.Fatalf(err.Error())
+        }
+        return val
+    }
+
+    // This function checks that a deleted path has no presence in the 'links' table.
+    hasAnyLink := func(dbconn *sql.DB, path string) (bool, error) {
+        count := -1
+
+        err := dbconn.QueryRow(`
+    SELECT COUNT(links.pid) FROM links
+    LEFT JOIN paths ON paths.pid = links.pid 
+    WHERE paths.path = ?
+    `, path).Scan(&count)
+        if err != nil {
+            return false, err
+        }
+
+        return count > 0, nil
+    }
+
+    // This function assumes that the test scenario involves overwriting 'stuff/metadata.json' and
+    // 'whee/other.json'. We need to check that the specific links associated with each overwritten
+    // file are absent, as the paths themselves will still be present (and thus hasAnyLink won't work).
+    checkUpdatedLinks := func(dbconn *sql.DB, to_add string, should_find bool) bool {
+        found, err := searchForLink(dbconn, filepath.Join(to_add, "stuff", "metadata.json"), "anime", "yuru")
+        if err != nil {
+            t.Fatal(err)
         }
         if found != should_find {
             return false
         }
 
-        found, err = searchForLink(dbconn, filepath.Join(scratch, "whee", "other.json"), "favorites", "biyori")
-        if err != nil {
-            t.Fatalf(err.Error())
-        }
-        if found != should_find {
-            return false
-        }
-
-        found, err = searchForLink(dbconn, filepath.Join(scratch, "stuff", "other.json"), "variants", "lamb")
-        if err != nil {
-            t.Fatalf(err.Error())
-        }
-        if found != should_find {
-            return false
-        }
-
-        found, err = searchForLink(dbconn, filepath.Join(scratch, "whee", "other.json"), "favorites", "biyori")
+        found, err = searchForLink(dbconn, filepath.Join(to_add, "whee", "other.json"), "favorites", "biyori")
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -482,16 +580,7 @@ func TestUpdatePaths(t *testing.T) {
         return true
     }
 
-    getTime := func(dbconn *sql.DB, path string) int64 {
-        var val int64
-        err := dbconn.QueryRow("SELECT time FROM paths WHERE path = ?", path).Scan(&val)
-        if err != nil {
-            t.Fatalf(err.Error())
-        }
-        return val
-    }
-
-    t.Run("simple", func(t *testing.T) {
+    t.Run("modified", func(t *testing.T) {
         dbconn, err := initializeDatabase(dbpath)
         if err != nil {
             t.Fatalf(err.Error())
@@ -508,7 +597,7 @@ func TestUpdatePaths(t *testing.T) {
 
         var oldtime1, oldtime2 int64
         {
-            comments, err := addDirectory(dbconn, to_add, map[string]bool{ "metadata.json": true, "other.json": true }, tokr)
+            comments, err := addDirectory(dbconn, to_add, map[string]bool{ "metadata.json": true, "other.json": true }, "myself", tokr)
             if err != nil {
                 t.Fatalf(err.Error())
             }
@@ -516,27 +605,19 @@ func TestUpdatePaths(t *testing.T) {
                 t.Fatalf("unexpected comments from the directory addition %v", comments)
             }
 
-            if !checkLinkCohort(dbconn, to_add, true) {
-                t.Fatalf("failed to find links that should be there")
+            ok := checkUpdatedLinks(dbconn, to_add, true) // positive control.
+            if !ok {
+                t.Fatal("failed to find an expected link prior to update")
             }
 
             oldtime1 = getTime(dbconn, filepath.Join(to_add, "stuff", "metadata.json"))
             oldtime2 = getTime(dbconn, filepath.Join(to_add, "whee", "other.json"))
         }
 
-        // Reorganizing stuff and then updating the path.
+        // Reorganizing stuff by modifying files.
         time.Sleep(time.Second * 2)
-        err = os.Remove(filepath.Join(to_add, "metadata.json"))
-        if err != nil {
-            t.Fatalf(err.Error())
-        }
 
         err = os.WriteFile(filepath.Join(to_add, "stuff", "metadata.json"), []byte(`{ "melon": "watermelon", "flesh": "red" }`), 0600)
-        if err != nil {
-            t.Fatalf(err.Error())
-        }
-
-        err = os.Remove(filepath.Join(to_add, "stuff", "other.json"))
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -546,6 +627,7 @@ func TestUpdatePaths(t *testing.T) {
             t.Fatalf(err.Error())
         }
 
+        // Now actually running the update.
         comments, err := updatePaths(dbconn, tokr)
         if err != nil {
             t.Fatalf(err.Error())
@@ -554,6 +636,7 @@ func TestUpdatePaths(t *testing.T) {
             t.Fatalf("unexpected comments from updating")
         }
 
+        // Check that the links are present for the updated files. 
         found, err := searchForLink(dbconn, filepath.Join(to_add, "whee", "other.json"), "melon", "canteloupe")
         if err != nil {
             t.Fatalf(err.Error())
@@ -578,16 +661,355 @@ func TestUpdatePaths(t *testing.T) {
             t.Fatalf("time was not updated properly")
         }
 
-        // Check that other links and files were deleted.
-        if !checkLinkCohort(dbconn, to_add, false) {
-            t.Fatalf("found links that shouldn't be there")
+        // Check that old links associated with the overwritten files were deleted.
+        ok := checkUpdatedLinks(dbconn, to_add, false)
+        if !ok {
+            t.Fatal("found an unexpected link after the update")
         }
 
+        // Other links are still present though,
+        found, err = searchForLink(dbconn, filepath.Join(to_add, "stuff", "other.json"), "variants", "lamb")
+        if err != nil {
+            t.Fatalf(err.Error())
+        }
+        if !found {
+            t.Fatal("missing a link for a non-modified file")
+        }
+
+        found, err = searchForLink(dbconn, filepath.Join(to_add, "metadata.json"), "bar.breed", "merino")
+        if err != nil {
+            t.Fatalf(err.Error())
+        }
+        if !found {
+            t.Fatal("missing a link for a non-modified file")
+        }
+
+        // All paths are present.
+        all_paths, err := listPaths(dbconn, tmp)
+        if err != nil {
+            t.Fatalf(err.Error())
+        }
+        if !equalStringArrays(all_paths, []string{ "to_add/metadata.json", "to_add/stuff/metadata.json", "to_add/stuff/other.json", "to_add/whee/other.json" }) {
+            t.Fatalf("unexpected paths in the index %v", all_paths)
+        }
+    })
+
+    t.Run("deleted", func(t *testing.T) {
+        dbconn, err := initializeDatabase(dbpath)
+        if err != nil {
+            t.Fatalf(err.Error())
+        }
+        defer dbconn.Close()
+        defer os.Remove(dbpath)
+
+        to_add := filepath.Join(tmp, "to_add")
+        err = mockDirectory(to_add)
+        if err != nil {
+            t.Fatalf(err.Error())
+        }
+        defer os.RemoveAll(to_add)
+
+        {
+            comments, err := addDirectory(dbconn, to_add, map[string]bool{ "metadata.json": true, "other.json": true }, "myself", tokr)
+            if err != nil {
+                t.Fatalf(err.Error())
+            }
+            if len(comments) > 0 {
+                t.Fatalf("unexpected comments from the directory addition %v", comments)
+            }
+        }
+
+        // Deleting some files.
+        err = os.Remove(filepath.Join(to_add, "metadata.json"))
+        if err != nil {
+            t.Fatalf(err.Error())
+        }
+
+        err = os.Remove(filepath.Join(to_add, "stuff", "other.json"))
+        if err != nil {
+            t.Fatalf(err.Error())
+        }
+
+        // Now actually running the update.
+        comments, err := updatePaths(dbconn, tokr)
+        if err != nil {
+            t.Fatalf(err.Error())
+        }
+        if len(comments) > 0 {
+            t.Fatalf("unexpected comments from updating")
+        }
+
+        // Check that links for the deleted files have been lost.
+        for _, f := range []string{ "metadata.json", filepath.Join("stuff", "other.json") } {
+            found, err := hasAnyLink(dbconn, filepath.Join(to_add, f)) 
+            if err != nil {
+                t.Fatalf(err.Error())
+            }
+            if found {
+                t.Fatal("found unexpected link that should have been purged")
+            }
+        }
+
+        // Other links are still present. 
+        found, err := searchForLink(dbconn, filepath.Join(to_add, "stuff", "metadata.json"), "characters.first", "akari")
+        if err != nil {
+            t.Fatalf(err.Error())
+        }
+        if !found {
+            t.Fatal("missing a link for a non-modified file")
+        }
+
+        found, err = searchForLink(dbconn, filepath.Join(to_add, "whee", "other.json"), "favorites", "biyori")
+        if err != nil {
+            t.Fatalf(err.Error())
+        }
+        if !found {
+            t.Fatal("missing a link for a non-modified file")
+        }
+
+        // All paths are present.
         all_paths, err := listPaths(dbconn, tmp)
         if err != nil {
             t.Fatalf(err.Error())
         }
         if !equalStringArrays(all_paths, []string{ "to_add/stuff/metadata.json", "to_add/whee/other.json" }) {
+            t.Fatalf("unexpected paths in the index %v", all_paths)
+        }
+    })
+
+    t.Run("new", func(t *testing.T) {
+        dbconn, err := initializeDatabase(dbpath)
+        if err != nil {
+            t.Fatalf(err.Error())
+        }
+        defer dbconn.Close()
+        defer os.Remove(dbpath)
+
+        to_add := filepath.Join(tmp, "to_add")
+        err = mockDirectory(to_add)
+        if err != nil {
+            t.Fatalf(err.Error())
+        }
+        defer os.RemoveAll(to_add)
+
+        {
+            comments, err := addDirectory(dbconn, to_add, map[string]bool{ "metadata.json": true, "other.json": true }, "myself", tokr)
+            if err != nil {
+                t.Fatalf(err.Error())
+            }
+            if len(comments) > 0 {
+                t.Fatalf("unexpected comments from the directory addition %v", comments)
+            }
+        }
+
+        // Reorganizing stuff by modifying files, adding new files.
+        err = os.Mkdir(filepath.Join(to_add, "mega"), 0700)
+        if err != nil {
+            t.Fatalf(err.Error())
+        }
+
+        err = os.WriteFile(filepath.Join(to_add, "mega", "metadata.json"), []byte(`{ "melon": "honeydew", "flesh": "green" }`), 0600)
+        if err != nil {
+            t.Fatalf(err.Error())
+        }
+
+        err = os.WriteFile(filepath.Join(to_add, "mega", "other.json"), []byte(`{ "melon": "winter", "flesh": "white" }`), 0600)
+        if err != nil {
+            t.Fatalf(err.Error())
+        }
+
+        // Now actually running the update.
+        comments, err := updatePaths(dbconn, tokr)
+        if err != nil {
+            t.Fatalf(err.Error())
+        }
+        if len(comments) > 0 {
+            t.Fatalf("unexpected comments from updating")
+        }
+
+        // Check that the insertion was done correctly.
+        {
+            self, err := user.Current()
+            if err != nil {
+                t.Fatalf(err.Error())
+            }
+            username := self.Username
+            now := time.Now().Unix()
+
+            for _, base := range []string{ "other.json", "metadata.json" } {
+                var user, meta string
+                var time int64
+                err := dbconn.QueryRow("SELECT user, time, json_extract(metadata, '$') FROM paths WHERE path = ?", filepath.Join(to_add, "mega", base)).Scan(&user, &time, &meta)
+                if err != nil {
+                    t.Fatal(err)
+                }
+
+                if user != username {
+                    t.Fatal("unexpected user for a new file")
+                }
+                if time < now {
+                    t.Fatal("unexpected creation time for a new file")
+                }
+                if !strings.HasPrefix(meta, "{") || !strings.HasSuffix(meta, "}") {
+                    t.Fatalf("unexpected metadata %q", meta)
+                }
+            }
+        }
+
+        // Check that the links are present for the new files. 
+        found, err := searchForLink(dbconn, filepath.Join(to_add, "mega", "metadata.json"), "melon", "honeydew")
+        if err != nil {
+            t.Fatalf(err.Error())
+        }
+        if !found {
+            t.Fatalf("failed to find the link")
+        }
+
+        found, err = searchForLink(dbconn, filepath.Join(to_add, "mega", "other.json"), "melon", "winter")
+        if err != nil {
+            t.Fatalf(err.Error())
+        }
+        if !found {
+            t.Fatalf("failed to find the link")
+        }
+
+        // All paths are present.
+        all_paths, err := listPaths(dbconn, tmp)
+        if err != nil {
+            t.Fatalf(err.Error())
+        }
+        if !equalStringArrays(all_paths, []string{ "to_add/mega/metadata.json", "to_add/mega/other.json", "to_add/metadata.json", "to_add/stuff/metadata.json", "to_add/stuff/other.json", "to_add/whee/other.json" }) {
+            t.Fatalf("unexpected paths in the index %v", all_paths)
+        }
+    })
+
+    t.Run("altogether", func(t *testing.T) {
+        dbconn, err := initializeDatabase(dbpath)
+        if err != nil {
+            t.Fatalf(err.Error())
+        }
+        defer dbconn.Close()
+        defer os.Remove(dbpath)
+
+        to_add := filepath.Join(tmp, "to_add")
+        err = mockDirectory(to_add)
+        if err != nil {
+            t.Fatalf(err.Error())
+        }
+        defer os.RemoveAll(to_add)
+
+        {
+            comments, err := addDirectory(dbconn, to_add, map[string]bool{ "metadata.json": true, "other.json": true }, "myself", tokr)
+            if err != nil {
+                t.Fatalf(err.Error())
+            }
+            if len(comments) > 0 {
+                t.Fatalf("unexpected comments from the directory addition %v", comments)
+            }
+        }
+
+        // Reorganizing stuff by modifying files, adding new files.
+        time.Sleep(time.Second * 2)
+        err = os.Remove(filepath.Join(to_add, "metadata.json"))
+        if err != nil {
+            t.Fatalf(err.Error())
+        }
+
+        err = os.WriteFile(filepath.Join(to_add, "stuff", "metadata.json"), []byte(`{ "melon": "watermelon", "flesh": "red" }`), 0600)
+        if err != nil {
+            t.Fatalf(err.Error())
+        }
+
+        err = os.Remove(filepath.Join(to_add, "stuff", "other.json"))
+        if err != nil {
+            t.Fatalf(err.Error())
+        }
+
+        err = os.WriteFile(filepath.Join(to_add, "whee", "other.json"), []byte(`{ "melon": "canteloupe", "flesh": "orange" }`), 0600)
+        if err != nil {
+            t.Fatalf(err.Error())
+        }
+
+        err = os.Mkdir(filepath.Join(to_add, "mega"), 0700)
+        if err != nil {
+            t.Fatalf(err.Error())
+        }
+
+        err = os.WriteFile(filepath.Join(to_add, "mega", "metadata.json"), []byte(`{ "melon": "honeydew", "flesh": "green" }`), 0600)
+        if err != nil {
+            t.Fatalf(err.Error())
+        }
+
+        err = os.WriteFile(filepath.Join(to_add, "mega", "other.json"), []byte(`{ "melon": "winter", "flesh": "white" }`), 0600)
+        if err != nil {
+            t.Fatalf(err.Error())
+        }
+
+        // Now actually running the update.
+        comments, err := updatePaths(dbconn, tokr)
+        if err != nil {
+            t.Fatalf(err.Error())
+        }
+        if len(comments) > 0 {
+            t.Fatalf("unexpected comments from updating")
+        }
+
+        // Check that the links are present for the updated files. 
+        found, err := searchForLink(dbconn, filepath.Join(to_add, "whee", "other.json"), "melon", "canteloupe")
+        if err != nil {
+            t.Fatalf(err.Error())
+        }
+        if !found {
+            t.Fatalf("failed to find the link")
+        }
+
+        found, err = searchForLink(dbconn, filepath.Join(to_add, "stuff", "metadata.json"), "melon", "watermelon")
+        if err != nil {
+            t.Fatalf(err.Error())
+        }
+        if !found {
+            t.Fatalf("failed to find the link")
+        }
+
+        // Check that the links are present for the new files. 
+        found, err = searchForLink(dbconn, filepath.Join(to_add, "mega", "metadata.json"), "melon", "honeydew")
+        if err != nil {
+            t.Fatalf(err.Error())
+        }
+        if !found {
+            t.Fatalf("failed to find the link")
+        }
+
+        found, err = searchForLink(dbconn, filepath.Join(to_add, "mega", "other.json"), "melon", "winter")
+        if err != nil {
+            t.Fatalf(err.Error())
+        }
+        if !found {
+            t.Fatalf("failed to find the link")
+        }
+
+        // Check that all other links have been removed.
+        ok := checkUpdatedLinks(dbconn, to_add, false)
+        if !ok {
+            t.Fatal("found an unexpected link after the update")
+        }
+
+        for _, f := range []string{ "metadata.json", filepath.Join("stuff", "other.json") } {
+            found, err := hasAnyLink(dbconn, filepath.Join(to_add, f)) 
+            if err != nil {
+                t.Fatalf(err.Error())
+            }
+            if found {
+                t.Fatal("found unexpected link that should have been purged")
+            }
+        }
+
+        // List out the paths.
+        all_paths, err := listPaths(dbconn, tmp)
+        if err != nil {
+            t.Fatalf(err.Error())
+        }
+        if !equalStringArrays(all_paths, []string{ "to_add/mega/metadata.json", "to_add/mega/other.json", "to_add/stuff/metadata.json", "to_add/whee/other.json" }) {
             t.Fatalf("unexpected paths in the index %v", all_paths)
         }
     })
@@ -607,7 +1029,7 @@ func TestUpdatePaths(t *testing.T) {
         }
         defer os.RemoveAll(to_add)
 
-        comments, err := addDirectory(dbconn, to_add, map[string]bool{ "metadata.json": true, "other.json": true }, tokr)
+        comments, err := addDirectory(dbconn, to_add, map[string]bool{ "metadata.json": true, "other.json": true }, "myself", tokr)
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -666,7 +1088,7 @@ func TestBackupDatabase(t *testing.T) {
         t.Fatalf(err.Error())
     }
 
-    comments, err := addDirectory(dbconn, to_add, map[string]bool{ "metadata.json": true, "other.json": true }, tokr)
+    comments, err := addDirectory(dbconn, to_add, map[string]bool{ "metadata.json": true, "other.json": true }, "myself", tokr)
     if err != nil {
         t.Fatalf(err.Error())
     }
@@ -735,7 +1157,7 @@ func TestQueryTokens(t *testing.T) {
         t.Fatalf(err.Error())
     }
 
-    comments, err := addDirectory(dbconn, to_add, map[string]bool{ "metadata.json": true, "other.json": true }, tokr)
+    comments, err := addDirectory(dbconn, to_add, map[string]bool{ "metadata.json": true, "other.json": true }, "myself", tokr)
     if err != nil {
         t.Fatalf(err.Error())
     }

@@ -267,7 +267,7 @@ func TestDeregisterHandlers(t *testing.T) {
         t.Fatalf(err.Error())
     }
 
-    comments, err := addDirectory(dbconn, to_add, map[string]bool{ "metadata.json": true, "other.json": true }, tokr)
+    comments, err := addDirectory(dbconn, to_add, map[string]bool{ "metadata.json": true, "other.json": true }, "myself", tokr)
     if err != nil {
         t.Fatal(err)
     }
@@ -371,7 +371,7 @@ func TestDeregisterHandlers(t *testing.T) {
     })
 
     // Readding the directory, and then removing it from the file system.
-    comments, err = addDirectory(dbconn, to_add, map[string]bool{ "metadata.json": true, "other.json": true }, tokr)
+    comments, err = addDirectory(dbconn, to_add, map[string]bool{ "metadata.json": true, "other.json": true }, "myself", tokr)
     if err != nil {
         t.Fatal(err)
     }
@@ -438,7 +438,7 @@ func TestQueryHandler(t *testing.T) {
         t.Fatalf(err.Error())
     }
 
-    comments, err := addDirectory(dbconn, to_add, map[string]bool{ "metadata.json": true, "other.json": true }, tokr)
+    comments, err := addDirectory(dbconn, to_add, map[string]bool{ "metadata.json": true, "other.json": true }, "myself", tokr)
     if err != nil {
         t.Fatal(err)
     }
