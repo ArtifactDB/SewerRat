@@ -50,11 +50,10 @@ The registration process will walk recursively through the specified directory, 
 We can then perform some complex searches on the contents of these files (see [below](#querying-the-index)).
 There is no limit on the number of times that a directory can be registered, though every new registration will replace all previously-registered files from that directory.
 
-SewerRat will periodically update the index by examining all paths to metadata files in its registry.
-If we modified one of our files, SewerRat will re-index that file; and if we deleted a file, SewerRat will remove it from the index.
-This ensures that the information in the index reflects the organization on the filesystem.
-Note that SewerRat will not index new files that were added to a directory after registration.
-If we want these files in the index, we'll have to re-register the directory.
+SewerRat will periodically update the index by inspecting all of its registered directories for new content.
+If we added or modified a file with one of the registered names (e.g., `A.json`), SewerRat will (re-)index that file.
+Similarly, if we deleted a file, SewerRat will remove it from the index.
+This ensures that the information in the index reflects the directory contents on the filesystem.
 
 To remove files from the registry, we call the `deregisterSewerRat` function from [`scripts/functions.sh`](scripts/functions.sh).
 This will remove all files in the registry that were previously registered from the specified directory.
