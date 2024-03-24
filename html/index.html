@@ -79,7 +79,7 @@
     var query_next = null;
     var sofar = 0;
 
-    async function populateSearchResults(request_endpoint, clear_existing) {
+    async function populateSearchResults(request_endpoint, new_search) {
         let resp = await fetch(base_url + request_endpoint, { 
             method: "POST", 
             body: query_body, 
@@ -88,11 +88,13 @@
             }
         })
 
-        const resdiv = self.document.getElementById('search');
-        if (clear_existing) {
+        const resdiv = self.document.getElementById('search-res');
+        if (new_search) {
             resdiv.replaceChildren();
+            query_next = null;
             sofar = 0;
         }
+
         function populateResultError(message) {
             let errmsg = self.document.createElement("p");
             errmsg.style["color"] = "red";
@@ -162,24 +164,43 @@
             let newform = document.createElement("form");
             newform.onsubmit = continueSearch;
             let newbutton = document.createElement("input");
+            newbutton.id = "submit-next"
             newbutton.type = "submit";
             newbutton.value = "More results";
             newform.appendChild(newbutton);
-            nextdiv.appendChild(newform);
+            nextdiv.replaceChildren(newform);
         } else {
             query_next = null;
             nextdiv.replaceChildren();
         }
+
+        if (new_search) {
+            const search = self.document.getElementById("submit-new");
+            search.value = "Search";
+            search.removeAttribute("disabled");
+            if (output.results.length == 0) {
+                resdiv.appendChild(self.document.createTextNode("No results found ¯\\_(ツ)_/¯"));
+            }
+        }
+
         return;
     }
 
     function startNewSearch() {
+        const search = self.document.getElementById("submit-new");
+        search.value = "Loading..."
+        search.setAttribute("disabled", "");
+
         populateQueryBody();
         populateSearchResults("/query", true)
         return false;
     }
 
     function continueSearch() {
+        const search = self.document.getElementById("submit-next");
+        search.value = "Loading..."
+        search.setAttribute("disabled", "");
+
         populateSearchResults(query_next, false)
         return false;
     }
@@ -298,11 +319,11 @@
     </div>
     <br><br>
 
-    <input type="submit" value="Search">
+    <input id="submit-new" type="submit" value="Search">
   </form>
   <hr style="border-width:3px;">
 
-  <div id="search"></div>
+  <div id="search-res"></div>
   <div id="search-next"></div>
 
 </body>
