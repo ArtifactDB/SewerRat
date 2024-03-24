@@ -602,6 +602,7 @@ func TestUpdatePaths(t *testing.T) {
                 t.Fatalf("unexpected comments from the directory addition %v", comments)
             }
 
+            // Running a positive control.
             if !checkLinkCohort(dbconn, to_add, true) {
                 t.Fatalf("failed to find links that should be there")
             }
@@ -610,7 +611,7 @@ func TestUpdatePaths(t *testing.T) {
             oldtime2 = getTime(dbconn, filepath.Join(to_add, "whee", "other.json"))
         }
 
-        // Reorganizing stuff and then updating the path.
+        // Reorganizing stuff by modifying files, adding new files.
         time.Sleep(time.Second * 2)
         err = os.Remove(filepath.Join(to_add, "metadata.json"))
         if err != nil {
@@ -632,6 +633,22 @@ func TestUpdatePaths(t *testing.T) {
             t.Fatalf(err.Error())
         }
 
+        err = os.Mkdir(filepath.Join(to_add, "mega"), 0700)
+        if err != nil {
+            t.Fatalf(err.Error())
+        }
+
+        err = os.WriteFile(filepath.Join(to_add, "mega", "metadata.json"), []byte(`{ "melon": "honeydew", "flesh": "green" }`), 0600)
+        if err != nil {
+            t.Fatalf(err.Error())
+        }
+
+        err = os.WriteFile(filepath.Join(to_add, "mega", "other.json"), []byte(`{ "melon": "winter", "flesh": "white" }`), 0600)
+        if err != nil {
+            t.Fatalf(err.Error())
+        }
+
+        // Now actually running the update.
         comments, err := updatePaths(dbconn, tokr)
         if err != nil {
             t.Fatalf(err.Error())
@@ -640,6 +657,7 @@ func TestUpdatePaths(t *testing.T) {
             t.Fatalf("unexpected comments from updating")
         }
 
+        // Check that the links are present for the updated files. 
         found, err := searchForLink(dbconn, filepath.Join(to_add, "whee", "other.json"), "melon", "canteloupe")
         if err != nil {
             t.Fatalf(err.Error())
@@ -656,6 +674,23 @@ func TestUpdatePaths(t *testing.T) {
             t.Fatalf("failed to find the link")
         }
 
+        // Check that the links are present for the new files. 
+        found, err = searchForLink(dbconn, filepath.Join(to_add, "mega", "metadata.json"), "melon", "honeydew")
+        if err != nil {
+            t.Fatalf(err.Error())
+        }
+        if !found {
+            t.Fatalf("failed to find the link")
+        }
+
+        found, err = searchForLink(dbconn, filepath.Join(to_add, "mega", "other.json"), "melon", "winter")
+        if err != nil {
+            t.Fatalf(err.Error())
+        }
+        if !found {
+            t.Fatalf("failed to find the link")
+        }
+
         // Check that the times were updated.
         if oldtime1 >= getTime(dbconn, filepath.Join(to_add, "stuff", "metadata.json")) {
             t.Fatalf("time was not updated properly")
@@ -664,7 +699,7 @@ func TestUpdatePaths(t *testing.T) {
             t.Fatalf("time was not updated properly")
         }
 
-        // Check that other links and files were deleted.
+        // Check that links associated with the purged files were deleted.
         if !checkLinkCohort(dbconn, to_add, false) {
             t.Fatalf("found links that shouldn't be there")
         }
@@ -673,7 +708,7 @@ func TestUpdatePaths(t *testing.T) {
         if err != nil {
             t.Fatalf(err.Error())
         }
-        if !equalStringArrays(all_paths, []string{ "to_add/stuff/metadata.json", "to_add/whee/other.json" }) {
+        if !equalStringArrays(all_paths, []string{ "to_add/mega/metadata.json", "to_add/mega/other.json", "to_add/stuff/metadata.json", "to_add/whee/other.json" }) {
             t.Fatalf("unexpected paths in the index %v", all_paths)
         }
     })
