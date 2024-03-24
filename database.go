@@ -102,12 +102,12 @@ CREATE TABLE dirs(
     did INTEGER PRIMARY KEY, 
     path TEXT NOT NULL UNIQUE, 
     user TEXT NOT NULL, 
-    time INTEGER NOT NULL
+    time INTEGER NOT NULL,
     names BLOB
 );
 CREATE INDEX index_dirs_path ON dirs(path);
-CREATE INDEX index_dirs_time ON paths(time, user);
-CREATE INDEX index_dirs_user ON paths(user, time);
+CREATE INDEX index_dirs_time ON dirs(time, user);
+CREATE INDEX index_dirs_user ON dirs(user, time);
 
 CREATE TABLE paths(
     pid INTEGER PRIMARY KEY, 
@@ -675,7 +675,7 @@ func updatePaths(db *sql.DB, tokenizer* unicodeTokenizer) ([]string, error) {
                 continue
             }
 
-            _, err := pustmt.Exec(u.User, u.Time, u.Raw, u.Path)
+            _, err := pustmt.Exec(u.User, u.Time.Unix(), u.Raw, u.Path)
             if err != nil {
                 all_failures = append(all_failures, fmt.Sprintf("failed to update %q in the database; %v", u.Path, err))
                 continue

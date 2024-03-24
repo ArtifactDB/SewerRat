@@ -5,6 +5,7 @@ import (
     "fmt"
     "path/filepath"
     "database/sql"
+    "encoding/json"
     "sort"
 )
 
@@ -93,4 +94,33 @@ func listPaths(dbconn * sql.DB, scratch string) ([]string, error) {
 
     sort.Strings(all_paths)
     return all_paths, nil
+}
+
+func listDirs(dbconn *sql.DB) (map[string][]string, error) {
+    rows, err := dbconn.Query("SELECT path, json_extract(names, '$') FROM dirs")
+    if err != nil {
+        return nil, err
+    }
+    defer rows.Close()
+
+    output := map[string][]string{}
+    for rows.Next() {
+        var path string
+        var names_raw []byte
+        err = rows.Scan(&path, &names_raw)
+        if err != nil {
+            return nil, err
+        }
+
+        var names []string
+        err = json.Unmarshal(names_raw, &names)
+        if err != nil {
+            return nil, err
+        }
+
+        sort.Strings(names)
+        output[path] = names
+    }
+
+    return output, nil
 }
