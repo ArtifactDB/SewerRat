@@ -448,194 +448,186 @@ func deleteDirectory(db *sql.DB, directory string) error {
 
 /**********************************************************************/
 
+type directoryEntry struct {
+    Parent int64
+    Info fs.FileInfo
+}
+
+func scanDirectories(db *sql.DB) (map[string]*directoryEntry, []string, error) {
+    type Directory struct {
+        Path string
+        Id int64
+        Names []string
+    }
+
+    // Wrapped inside a function so that 'rows' are closed before further ops.
+    all_dirs, err := func() ([]*Directory, error) {
+        rows, err := db.Query("SELECT did, path, names from dirs") 
+        if err != nil {
+            return nil, fmt.Errorf("failed to query the 'dirs' table; %w", err)
+        }
+        defer rows.Close()
+
+        all_dirs := []*Directory{}
+        for rows.Next() {
+            var id int64
+            var path string
+            var names_raw []byte
+            if err := rows.Scan(&id, &path, &names_raw); err != nil {
+                return nil, fmt.Errorf("failed to traverse rows of the 'dirs' table; %w", err)
+            }
+
+            var names []string
+            err = json.Unmarshal(names_raw, &names)
+            if err != nil {
+                return nil, fmt.Errorf("failed to parse names of 'dirs' for %q; %w", path, err)
+            }
+
+            all_dirs = append(all_dirs, &Directory{ Id: id, Path: path, Names: names })
+        }
+
+        return all_dirs, nil
+    }()
+    if err != nil {
+        return nil, nil, fmt.Errorf("failed to scan directories; %w", err)
+    }
+
+    // Listing the contents of all registered directories, in parallel.
+    dircontents := make([]map[string]*directoryEntry, len(all_dirs))
+    dirfailures := make([][]string, len(all_dirs))
+
+    var wg sync.WaitGroup
+    wg.Add(len(all_dirs))
+
+    for i, dir := range all_dirs {
+        go func(i int, dir *Directory) {
+            defer wg.Done()
+
+            curcontents := map[string]*directoryEntry{}
+            curfailures := []string{}
+            curnames := map[string]bool{}
+            for _, n := range dir.Names {
+                curnames[n] = true
+            }
+
+            filepath.WalkDir(dir.Path, func(path string, d fs.DirEntry, err error) error {
+                // Just skip any directories that we can't access.
+                if err != nil {
+                    curfailures = append(curfailures, fmt.Sprintf("failed to walk %q; %v", path, err))
+                    return nil
+                }
+                if d.IsDir() {
+                    return nil
+                }
+                _, ok := curnames[filepath.Base(path)]
+                if !ok {
+                    return nil
+                }
+                info, err := d.Info()
+                if err != nil {
+                    curfailures = append(curfailures, fmt.Sprintf("failed to stat %q; %v", path, err))
+                    return nil
+                }
+                curcontents[path] = &directoryEntry{ Parent: dir.Id, Info: info }
+                return nil
+            })
+
+            dircontents[i] = curcontents 
+            dirfailures[i] = curfailures
+        }(i, dir)
+    }
+
+    wg.Wait()
+
+    out_contents := map[string]*directoryEntry{}
+    for _, d := range dircontents {
+        for k, v := range d {
+            out_contents[k] = v
+        }
+    }
+
+    out_failures := []string{}
+    for _, f := range dirfailures {
+        out_failures = append(out_failures, f...)
+    }
+
+    return out_contents, out_failures, nil
+}
+
+func checkExistingPaths(db *sql.DB, all_contents map[string]*directoryEntry) ([]*loadedMetadata, []string, error) {
+    // Scan through all registered paths to check if any of these
+    // already exist. This is again wrapped inside a function so that 'rows'
+    // are closed before further ops.
+    update_paths, update_stats, purge_paths, err := func() ([]string, []fs.FileInfo, []string, error) {
+        rows, err := db.Query("SELECT path, time from paths") 
+        if err != nil {
+            return nil, nil, nil, fmt.Errorf("failed to query the 'paths' table; %w", err)
+        }
+        defer rows.Close()
+
+        update_paths := []string{}
+        update_stats := []fs.FileInfo{}
+        purge_paths := []string{}
+
+        for rows.Next() {
+            var path string
+            var time int64
+            if err := rows.Scan(&path, &time); err != nil {
+                return nil, nil, nil, fmt.Errorf("failed to traverse rows of the 'paths' table; %w", err)
+            }
+
+            candidate, ok := all_contents[path]
+            if !ok {
+                purge_paths = append(purge_paths, path)
+                continue
+            }
+            delete(all_contents, path) // indicate that this does not need to be updated anymore.
+
+            newtime := candidate.Info.ModTime().Unix()
+            if newtime == time {
+                continue
+            }
+
+            // No need to track the directory ID, as that is already present in the row.
+            update_paths = append(update_paths, path)
+            update_stats = append(update_stats, candidate.Info)
+        }
+
+        return update_paths, update_stats, purge_paths, nil
+    }()
+    if err != nil {
+        return nil, nil, err
+    }
+
+    return loadMetadata(update_paths, update_stats), purge_paths, nil
+}
+
 func updatePaths(db *sql.DB, tokenizer* unicodeTokenizer) ([]string, error) {
     all_failures := []string{}
 
-    /**************************************
-     ******* STAGE 1: directory scan ******
-     **************************************/
+    dir_contents, dir_failures, err := scanDirectories(db)
+    if err != nil {
+        return nil, err
+    }
+    all_failures = append(all_failures, dir_failures...)
 
-    type Candidate struct {
-        Directory int64
-        Info fs.FileInfo
+    // This step will also prune 'dir_contents' to remove the paths that
+    // are already present in 'db', such that the subsequent creation of
+    // 'new_assets' doesn't include paths that are already indexed.
+    update_assets, purge_paths, err := checkExistingPaths(db, dir_contents)
+    if err != nil {
+        return nil, err
     }
 
-    all_contents := map[string]*Candidate{}
-    {
-        // First, we scan through all registered directories. This is wrapped
-        // inside a function so that 'rows' are closed before further ops.
-        type Directory struct {
-            Path string
-            Id int64
-            Names []string
-        }
-
-        all_dirs, err := func() ([]*Directory, error) {
-            rows, err := db.Query("SELECT did, path, names from dirs") 
-            if err != nil {
-                return nil, fmt.Errorf("failed to query the 'dirs' table; %w", err)
-            }
-            defer rows.Close()
-
-            all_dirs := []*Directory{}
-            for rows.Next() {
-                var id int64
-                var path string
-                var names_raw []byte
-                if err := rows.Scan(&id, &path, &names_raw); err != nil {
-                    return nil, fmt.Errorf("failed to traverse rows of the 'dirs' table; %w", err)
-                }
-
-                var names []string
-                err = json.Unmarshal(names_raw, &names)
-                if err != nil {
-                    all_failures = append(all_failures, fmt.Sprintf("failed to parse names of 'dirs' for %q; %v", path, err))
-                    continue
-                }
-
-                all_dirs = append(all_dirs, &Directory{ Id: id, Path: path, Names: names })
-            }
-
-            return all_dirs, nil
-        }()
-        if err != nil {
-            return nil, fmt.Errorf("failed to scan directories; %w", err)
-        }
-
-        // Listing the contents of all registered directories, in parallel.
-        dircontents := make([]map[string]*Candidate, len(all_dirs))
-        dirfailures := make([][]string, len(all_dirs))
-
-        var wg sync.WaitGroup
-        wg.Add(len(all_dirs))
-
-        for i, dir := range all_dirs {
-            go func(i int, dir *Directory) {
-                defer wg.Done()
-
-                curcontents := map[string]*Candidate{}
-                curfailures := []string{}
-                curnames := map[string]bool{}
-                for _, n := range dir.Names {
-                    curnames[n] = true
-                }
-
-                filepath.WalkDir(dir.Path, func(path string, d fs.DirEntry, err error) error {
-                    // Just skip any directories that we can't access.
-                    if err != nil {
-                        curfailures = append(curfailures, fmt.Sprintf("failed to walk %q; %v", path, err))
-                        return nil
-                    }
-                    if d.IsDir() {
-                        return nil
-                    }
-                    _, ok := curnames[filepath.Base(path)]
-                    if !ok {
-                        return nil
-                    }
-                    info, err := d.Info()
-                    if err != nil {
-                        curfailures = append(curfailures, fmt.Sprintf("failed to stat %q; %v", path, err))
-                        return nil
-                    }
-                    curcontents[path] = &Candidate{ Directory: dir.Id, Info: info }
-                    return nil
-                })
-
-                dircontents[i] = curcontents 
-                dirfailures[i] = curfailures
-            }(i, dir)
-        }
-
-        wg.Wait()
-        for _, d := range dircontents {
-            for k, v := range d {
-                all_contents[k] = v
-            }
-        }
-
-        for _, f := range dirfailures {
-            all_failures = append(all_failures, f...)
-        }
-    }
-
-    /***********************************
-     ******* STAGE 2: update scan ******
-     ***********************************/
-
-    var update_assets []*loadedMetadata
-    var purge_paths []string
-    {
-        // Scan through all registered paths to check if any of these
-        // already exist. This is again wrapped inside a function so that 'rows'
-        // are closed before further ops.
-        update_paths, update_stats, purge_paths_raw, err := func() ([]string, []fs.FileInfo, []string, error) {
-            rows, err := db.Query("SELECT path, time from paths") 
-            if err != nil {
-                return nil, nil, nil, fmt.Errorf("failed to query the 'paths' table; %w", err)
-            }
-            defer rows.Close()
-
-            update_paths := []string{}
-            update_stats := []fs.FileInfo{}
-            purge_paths := []string{}
-
-            for rows.Next() {
-                var path string
-                var time int64
-                if err := rows.Scan(&path, &time); err != nil {
-                    return nil, nil, nil, fmt.Errorf("failed to traverse rows of the 'paths' table; %w", err)
-                }
-
-                candidate, ok := all_contents[path]
-                if !ok {
-                    purge_paths = append(purge_paths, path)
-                    continue
-                }
-                delete(all_contents, path) // indicate that this does not need to be updated anymore.
-
-                newtime := candidate.Info.ModTime().Unix()
-                if newtime == time {
-                    continue
-                }
-
-                // No need to track the directory ID, as that is already present in the row.
-                update_paths = append(update_paths, path)
-                update_stats = append(update_stats, candidate.Info)
-            }
-
-            return update_paths, update_stats, purge_paths, nil
-        }()
-        if err != nil {
-            return nil, err
-        }
-
-        update_assets = loadMetadata(update_paths, update_stats)
-        purge_paths = purge_paths_raw
-    }
-
-    /********************************
-     ******* STAGE 3: new scan ******
-     ********************************/
-
-    var new_assets []*loadedMetadata
     new_ids := []int64{}
-    {
-        new_stats := []fs.FileInfo{}
-        new_paths := []string{}
-        
-        for k, v := range all_contents {
-            new_paths = append(new_paths, k)
-            new_ids = append(new_ids, v.Directory)
-            new_stats = append(new_stats, v.Info)
-        }
-
-        new_assets = loadMetadata(new_paths, new_stats)
+    new_stats := []fs.FileInfo{}
+    new_paths := []string{}    
+    for k, v := range dir_contents {
+        new_paths = append(new_paths, k)
+        new_ids = append(new_ids, v.Parent)
+        new_stats = append(new_stats, v.Info)
     }
-
-    /**************************************************
-     ******* STAGE 4a: database insert (updates) ******
-     **************************************************/
+    new_assets := loadMetadata(new_paths, new_stats)
 
     atx, err := createTransaction(db)
     if err != nil {
@@ -699,10 +691,6 @@ func updatePaths(db *sql.DB, tokenizer* unicodeTokenizer) ([]string, error) {
         }
     }
 
-    /***********************************************
-     ******* STAGE 4b: database inserts (new) ******
-     ***********************************************/
-
     {
         pstmt, err := atx.Tx.Prepare("INSERT INTO paths(path, did, user, time, metadata) VALUES(?, ?, ?, ?, ?) RETURNING pid")
         if err != nil {
@@ -727,10 +715,6 @@ func updatePaths(db *sql.DB, tokenizer* unicodeTokenizer) ([]string, error) {
             all_failures = append(all_failures, tokfails...)
         }
     }
-
-    /****************************************
-     ******* STAGE 4c: database purges ******
-     ****************************************/
 
     {
         delstmt, err := atx.Tx.Prepare("DELETE FROM paths WHERE path = ?")
