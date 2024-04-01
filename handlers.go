@@ -367,7 +367,11 @@ func newQueryHandler(db *sql.DB, tokenizer *unicodeTokenizer, wild_tokenizer *un
         respbody := map[string]interface{} { "results": res }
         if len(res) == limit {
             last := &(res[limit-1])
-            respbody["next"] = endpoint + "?scroll=" + strconv.FormatInt(last.Time, 10) + "," + strconv.FormatInt(last.Pid, 10)
+            next := endpoint + "?scroll=" + strconv.FormatInt(last.Time, 10) + "," + strconv.FormatInt(last.Pid, 10)
+            if translate {
+                next += "&translate=true"
+            }
+            respbody["next"] = next
         }
 
         dumpJsonResponse(w, http.StatusOK, respbody)
