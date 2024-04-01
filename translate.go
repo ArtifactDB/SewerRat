@@ -6,8 +6,8 @@ import (
     "unicode"
 )
 
-func translateStringQuery(query string) (*searchClause, error) {
-    out, _, err := translateStringQueryInternal([]rune(query), 0, false)
+func translateTextQuery(query string) (*searchClause, error) {
+    out, _, err := translateTextQueryInternal([]rune(query), 0, false)
     return out, err
 }
 
@@ -34,7 +34,7 @@ func isWordEqualTo(word []rune, target string) bool {
     return true
 }
 
-func translateStringQueryInternal(query []rune, at int, open_par bool) (*searchClause, int, error) {
+func translateTextQueryInternal(query []rune, at int, open_par bool) (*searchClause, int, error) {
     var status translationStatus 
     status.Word = []rune{}
     status.Words = [][]rune{}
@@ -60,7 +60,7 @@ func translateStringQueryInternal(query []rune, at int, open_par bool) (*searchC
                 return nil, 0, fmt.Errorf("search clauses must be separated by AND or OR at position %d", at)
             }
 
-            nested, at2, err := translateStringQueryInternal(query, at + 1, true)
+            nested, at2, err := translateTextQueryInternal(query, at + 1, true)
             if err != nil {
                 return nil, 0, err
             }
@@ -226,4 +226,33 @@ func translateAddOperation(status *translationStatus, at int) error {
     status.Operations = append(status.Operations, string(status.Word))
     status.Word = []rune{}
     return nil
+}
+
+func translateQuery(query *searchClause) (*searchClause, error) {
+    if query.Type == "text" {
+        out, err := translateTextQuery(query.Text)
+        return out, err
+    }
+
+    if query.Type == "and" || query.Type == "or" {
+        out_child := []*searchClause{}
+        for _, x := range query.Children {
+            out, err := translateQuery(x)
+            if err != nil {
+                return nil, err
+            }
+            out_child = append(out_child, out)
+        }
+        return &searchClause{ Type: query.Type, Children: out_child }, nil
+    }
+
+    if query.Type == "not" {
+        out, err := translateQuery(query.Child)
+        if err != nil {
+            return nil, err
+        }
+        return &searchClause{ Type: query.Type, Child: out }, nil
+    }
+
+    return query, nil
 }

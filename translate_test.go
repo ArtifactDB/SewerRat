@@ -5,8 +5,8 @@ import (
     "testing"
 )
 
-func TestTranslateStringQuerySimple(t *testing.T) {
-    out, err := translateStringQuery("foobar")
+func TestTranslateTextQuerySimple(t *testing.T) {
+    out, err := translateTextQuery("foobar")
     if err != nil {
         t.Fatal(err)
     }
@@ -15,7 +15,7 @@ func TestTranslateStringQuerySimple(t *testing.T) {
     }
 
     // Works with spaces.
-    out, err = translateStringQuery("foo\nbar   whee")
+    out, err = translateTextQuery("foo\nbar   whee")
     if err != nil {
         t.Fatal(err)
     }
@@ -24,7 +24,7 @@ func TestTranslateStringQuerySimple(t *testing.T) {
     }
 
     // Works with fields.
-    out, err = translateStringQuery("stuff:blah")
+    out, err = translateTextQuery("stuff:blah")
     if err != nil {
         t.Fatal(err)
     }
@@ -33,7 +33,7 @@ func TestTranslateStringQuerySimple(t *testing.T) {
     }
 
     // Works with a space between the colon.
-    out, err = translateStringQuery("stuff: yay blah")
+    out, err = translateTextQuery("stuff: yay blah")
     if err != nil {
         t.Fatal(err)
     }
@@ -42,7 +42,7 @@ func TestTranslateStringQuerySimple(t *testing.T) {
     }
 
     // Recognizes partial hits.
-    out, err = translateStringQuery("foo%")
+    out, err = translateTextQuery("foo%")
     if err != nil {
         t.Fatal(err)
     }
@@ -51,14 +51,14 @@ func TestTranslateStringQuerySimple(t *testing.T) {
     }
 
     // Fails correctly.
-    out, err = translateStringQuery("\n")
+    out, err = translateTextQuery("\n")
     if err == nil || strings.Index(err.Error(), "no search terms") < 0 {
         t.Fatal("should have failed")
     }
 }
 
-func TestTranslateStringQueryNot(t *testing.T) {
-    out, err := translateStringQuery("NOT foobar")
+func TestTranslateTextQueryNot(t *testing.T) {
+    out, err := translateTextQuery("NOT foobar")
     if err != nil {
         t.Fatal(err)
     }
@@ -67,7 +67,7 @@ func TestTranslateStringQueryNot(t *testing.T) {
     }
 
     // Works with multiple words.
-    out, err = translateStringQuery("NOT foo bar")
+    out, err = translateTextQuery("NOT foo bar")
     if err != nil {
         t.Fatal(err)
     }
@@ -76,7 +76,7 @@ func TestTranslateStringQueryNot(t *testing.T) {
     }
 
     // Adding some parentheses and spaces.
-    out, err = translateStringQuery("NOT ( foobar )")
+    out, err = translateTextQuery("NOT ( foobar )")
     if err != nil {
         t.Fatal(err)
     }
@@ -85,24 +85,24 @@ func TestTranslateStringQueryNot(t *testing.T) {
     }
 
     // Fails correctly.
-    out, err = translateStringQuery("NOT ")
+    out, err = translateTextQuery("NOT ")
     if err == nil || strings.Index(err.Error(), "no search terms") < 0 {
         t.Fatal("should have failed")
     }
 
-    out, err = translateStringQuery("foo NOT bar") // ... should be foo AND NOT bar
+    out, err = translateTextQuery("foo NOT bar") // ... should be foo AND NOT bar
     if err == nil || strings.Index(err.Error(), "illegal placement") < 0 {
         t.Fatal("should have failed")
     }
 
-    out, err = translateStringQuery("(foo) NOT (bar)") // ... should be (foo) AND NOT (bar)
+    out, err = translateTextQuery("(foo) NOT (bar)") // ... should be (foo) AND NOT (bar)
     if err == nil || strings.Index(err.Error(), "illegal placement") < 0 {
         t.Fatal("should have failed")
     }
 }
 
-func TestTranslateStringQueryAnd(t *testing.T) {
-    out, err := translateStringQuery("foo AND bar")
+func TestTranslateTextQueryAnd(t *testing.T) {
+    out, err := translateTextQuery("foo AND bar")
     if err != nil {
         t.Fatal(err)
     }
@@ -111,7 +111,7 @@ func TestTranslateStringQueryAnd(t *testing.T) {
     }
 
     // Works with multiple words and conditions.
-    out, err = translateStringQuery("foo bar AND whee stuff AND other")
+    out, err = translateTextQuery("foo bar AND whee stuff AND other")
     if err != nil {
         t.Fatal(err)
     }
@@ -123,7 +123,7 @@ func TestTranslateStringQueryAnd(t *testing.T) {
     }
 
     // Works with parentheses.
-    out, err = translateStringQuery("(foo) AND (bar)")
+    out, err = translateTextQuery("(foo) AND (bar)")
     if err != nil {
         t.Fatal(err)
     }
@@ -132,24 +132,24 @@ func TestTranslateStringQueryAnd(t *testing.T) {
     }
 
     // Fails correctly.
-    out, err = translateStringQuery("AND")
+    out, err = translateTextQuery("AND")
     if err == nil || strings.Index(err.Error(), "trailing") < 0 {
         t.Fatal("should have failed")
     }
 
-    out, err = translateStringQuery("asdasd AND")
+    out, err = translateTextQuery("asdasd AND")
     if err == nil || strings.Index(err.Error(), "trailing") < 0 {
         t.Fatal("should have failed")
     }
 
-    out, err = translateStringQuery("AND asdasd")
+    out, err = translateTextQuery("AND asdasd")
     if err == nil || strings.Index(err.Error(), "no search terms") < 0 {
         t.Fatal("should have failed")
     }
 }
 
-func TestTranslateStringQueryOr(t *testing.T) {
-    out, err := translateStringQuery("foo OR bar")
+func TestTranslateTextQueryOr(t *testing.T) {
+    out, err := translateTextQuery("foo OR bar")
     if err != nil {
         t.Fatal(err)
     }
@@ -158,7 +158,7 @@ func TestTranslateStringQueryOr(t *testing.T) {
     }
 
     // Works with multiple words and conditions.
-    out, err = translateStringQuery("foo bar OR whee stuff OR other")
+    out, err = translateTextQuery("foo bar OR whee stuff OR other")
     if err != nil {
         t.Fatal(err)
     }
@@ -170,7 +170,7 @@ func TestTranslateStringQueryOr(t *testing.T) {
     }
 
     // Works with parentheses.
-    out, err = translateStringQuery("(foo) OR (bar)")
+    out, err = translateTextQuery("(foo) OR (bar)")
     if err != nil {
         t.Fatal(err)
     }
@@ -179,24 +179,24 @@ func TestTranslateStringQueryOr(t *testing.T) {
     }
 
     // Fails correctly.
-    out, err = translateStringQuery("OR")
+    out, err = translateTextQuery("OR")
     if err == nil || strings.Index(err.Error(), "trailing") < 0 {
         t.Fatal("should have failed")
     }
 
-    out, err = translateStringQuery("asdasd OR")
+    out, err = translateTextQuery("asdasd OR")
     if err == nil || strings.Index(err.Error(), "trailing") < 0 {
         t.Fatal("should have failed")
     }
 
-    out, err = translateStringQuery("OR asdasd")
+    out, err = translateTextQuery("OR asdasd")
     if err == nil || strings.Index(err.Error(), "no search terms") < 0 {
         t.Fatal("should have failed")
     }
 }
 
-func TestTranslateStringQueryComplex(t *testing.T) {
-    out, err := translateStringQuery("foo AND bar OR NOT whee")
+func TestTranslateTextQueryComplex(t *testing.T) {
+    out, err := translateTextQuery("foo AND bar OR NOT whee")
     if err != nil {
         t.Fatal(err)
     }
@@ -208,7 +208,7 @@ func TestTranslateStringQueryComplex(t *testing.T) {
         t.Fatal("unexpected complex query")
     }
 
-    out, err = translateStringQuery("foo AND (bar OR NOT (whee))")
+    out, err = translateTextQuery("foo AND (bar OR NOT (whee))")
     if err != nil {
         t.Fatal(err)
     }
@@ -218,5 +218,50 @@ func TestTranslateStringQueryComplex(t *testing.T) {
         out.Children[1].Children[0].Type != "text" || out.Children[1].Children[0].Text != "bar" || 
         out.Children[1].Children[1].Type != "not" || out.Children[1].Children[1].Child.Type != "text" || out.Children[1].Children[1].Child.Text != "whee" {
         t.Fatal("unexpected complex query")
+    }
+}
+
+func TestTranslateQuery(t *testing.T) {
+    out, err := translateQuery(&searchClause{ Type: "text", Text: "(foo AND bar) OR (NOT whee)" })
+    if err != nil {
+        t.Fatal(err)
+    }
+    if out.Type != "or" || len(out.Children) != 2 || 
+        out.Children[0].Type != "and" || len(out.Children[0].Children) != 2 || 
+        out.Children[0].Children[0].Type != "text" || out.Children[0].Children[0].Text != "foo" || 
+        out.Children[0].Children[1].Type != "text" || out.Children[0].Children[1].Text != "bar" ||
+        out.Children[1].Type != "not" || out.Children[1].Child.Type != "text" || out.Children[1].Child.Text != "whee" {
+        t.Fatal("unexpected translation of a full query")
+    }
+
+    // Works with AND operations.
+    out, err = translateQuery(&searchClause{ Type: "and", Children: []*searchClause{ &searchClause{ Type: "user", User: "Aaron" }, &searchClause{ Type: "text", Text: "NOT whee" } } })
+    if err != nil {
+        t.Fatal(err)
+    }
+    if out.Type != "and" || len(out.Children) != 2 || 
+        out.Children[0].Type != "user" ||
+        out.Children[1].Type != "not" || out.Children[1].Child.Type != "text" || out.Children[1].Child.Text != "whee" {
+        t.Fatal("unexpected translation of a full query")
+    }
+
+    // Works with OR operations.
+    out, err = translateQuery(&searchClause{ Type: "or", Children: []*searchClause{ &searchClause{ Type: "text", Text: "NOT whee" }, &searchClause{ Type: "time", Time: 123456 } } })
+    if err != nil {
+        t.Fatal(err)
+    }
+    if out.Type != "or" || len(out.Children) != 2 || 
+        out.Children[0].Type != "not" || out.Children[0].Child.Type != "text" || out.Children[0].Child.Text != "whee" ||
+        out.Children[1].Type != "time" {
+        t.Fatal("unexpected translation of a full query")
+    }
+
+    // Works with NOT operations.
+    out, err = translateQuery(&searchClause{ Type: "not", Child: &searchClause{ Type: "text", Text: "aaron OR foo" } })
+    if err != nil {
+        t.Fatal(err)
+    }
+    if out.Type != "not" || out.Child.Type != "or" {
+        t.Fatal("unexpected translation of a full query")
     }
 }

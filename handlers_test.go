@@ -580,6 +580,27 @@ func TestQueryHandler(t *testing.T) {
         }
     })
 
+    t.Run("translated", func (t *testing.T) {
+        req, err := http.NewRequest("POST", "/query?translate=true", strings.NewReader(`{ "type": "text", "text": "lamb OR chicken" }`))
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        rr := httptest.NewRecorder()
+        handler.ServeHTTP(rr, req)
+        if rr.Code != http.StatusOK {
+            t.Fatalf("should have succeeded")
+        }
+
+        all_paths, scroll := validateSearchResults(rr.Body)
+        if scroll != "" {
+            t.Fatalf("unexpected scroll %v", scroll)
+        }
+        if len(all_paths) != 2 || all_paths[0] != filepath.Join(to_add, "stuff/other.json") || all_paths[1] != filepath.Join(to_add, "metadata.json") {
+            t.Fatalf("unexpected paths %v", all_paths)
+        }
+    })
+
     t.Run("scroll", func (t *testing.T) {
         dummy_query := `{ "type": "text", "text": "   " }`
 
