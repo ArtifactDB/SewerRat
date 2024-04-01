@@ -57,7 +57,7 @@ func translateStringQueryInternal(query []rune, at int, open_par bool) (*searchC
                 status.Negation = true
                 status.Word = []rune{}
             } else if len(status.Word) > 0 || len(status.Words) > 0 {
-                return nil, 0, fmt.Errorf("search clauses must be separated by AND or OR at position %i", at)
+                return nil, 0, fmt.Errorf("search clauses must be separated by AND or OR at position %d", at)
             }
 
             nested, at2, err := translateStringQueryInternal(query, at + 1, true)
@@ -66,17 +66,20 @@ func translateStringQueryInternal(query []rune, at int, open_par bool) (*searchC
             }
 
             at = at2
+            if status.Negation {
+                nested = &searchClause{ Type: "not", Child: nested }
+                status.Negation = false
+            }
             status.Clauses = append(status.Clauses, nested)
-            status.Negation = false
             continue
         }
 
         if c == ')' {
             if !open_par {
-                return nil, 0, fmt.Errorf("unmatched closing parenthesis at position %i", at)
+                return nil, 0, fmt.Errorf("unmatched closing parenthesis at position %d", at)
             }
             closing_par = true
-            at += 11 
+            at++
             break
         }
 
@@ -87,6 +90,9 @@ func translateStringQueryInternal(query []rune, at int, open_par bool) (*searchC
                     return nil, 0, err
                 }
             } else if isWordEqualTo(status.Word, "NOT") {
+                if len(status.Words) > 0 || len(status.Operations) < len(status.Clauses) {
+                    return nil, 0, fmt.Errorf("illegal placement of NOT at position %d", at) 
+                }
                 status.Negation = true
                 status.Word = []rune{}
             } else if len(status.Word) > 0 {
@@ -97,11 +103,14 @@ func translateStringQueryInternal(query []rune, at int, open_par bool) (*searchC
             status.Word = append(status.Word, c)
         }
 
-        at += 1
+        at++
     }
 
     if len(status.Operations) == len(status.Clauses) {
         if len(status.Word) > 0 {
+            if isWordEqualTo(status.Word, "AND") || isWordEqualTo(status.Word, "OR") {
+                return nil, 0, fmt.Errorf("trailing AND/OR at position %d", at)
+            }
             status.Words = append(status.Words, status.Word)
         }
         err := translateTextClause(&status, at)
@@ -111,7 +120,7 @@ func translateStringQueryInternal(query []rune, at int, open_par bool) (*searchC
     }
 
     if open_par && !closing_par {
-        return nil, 0, fmt.Errorf("unmatched opening parenthesis at position %i", original - 1)
+        return nil, 0, fmt.Errorf("unmatched opening parenthesis at position %d", original - 1)
     }
 
     // Finding the stretches of ANDs first.
@@ -128,11 +137,12 @@ func translateStringQueryInternal(query []rune, at int, open_par bool) (*searchC
         }
         tmp_clauses = append(tmp_clauses, active_clauses)
 
-        for t, tmp := range tmp_clauses {
+        status.Clauses = []*searchClause{}
+        for _, tmp := range tmp_clauses {
             if len(tmp) > 1 {
-                status.Clauses = append(status.Clauses, &searchClause{ Type: "and", Children: tmp_clauses[t] })
+                status.Clauses = append(status.Clauses, &searchClause{ Type: "and", Children: tmp })
             } else {
-                status.Clauses = append(status.Clauses, tmp_clauses[t][0])
+                status.Clauses = append(status.Clauses, tmp[0])
             }
         }
     }
@@ -148,11 +158,11 @@ func translateStringQueryInternal(query []rune, at int, open_par bool) (*searchC
 }
 
 func translateTextClause(status *translationStatus, at int) error {
-    var new_component searchClause
+    new_component := &searchClause{}
     new_component.Type = "text"
 
     if len(status.Words) == 0 {
-        return fmt.Errorf("no search terms at position %i", at)
+        return fmt.Errorf("no search terms at position %d", at)
     }
 
     first_word := status.Words[0]
@@ -163,7 +173,7 @@ func translateTextClause(status *translationStatus, at int) error {
         }
     }
     if fi == 0 {
-        return fmt.Errorf("search field should be non-empty for terms ending at %i", at)
+        return fmt.Errorf("search field should be non-empty for terms ending at %d", at)
     }
 
     if fi > 0 {
@@ -171,7 +181,7 @@ func translateTextClause(status *translationStatus, at int) error {
         leftover := first_word[fi+1:]
         if len(leftover) == 0 {
             if len(status.Words) == 1 {
-                return fmt.Errorf("no search terms at position %i after removing the search field", at)
+                return fmt.Errorf("no search terms at position %d after removing the search field", at)
             }
             status.Words = status.Words[1:]
         } else {
@@ -189,18 +199,19 @@ func translateTextClause(status *translationStatus, at int) error {
     }
 
     if status.Negation {
-        new_component = searchClause{ Type: "not", Child: &new_component }
+        // Two-step replacement, otherwise it becomes a circular reference.
+        new_component = &searchClause{ Type: "not", Child: new_component }
         status.Negation = false
     }
 
-    status.Clauses = append(status.Clauses, &new_component)
+    status.Clauses = append(status.Clauses, new_component)
     status.Words = [][]rune{}
     return nil
 }
 
 func translateAddOperation(status *translationStatus, at int) error {
     if len(status.Operations) > len(status.Clauses) {
-        return fmt.Errorf("multiple AND or OR keywords at position %i", at)
+        return fmt.Errorf("multiple AND or OR keywords at position %d", at)
     }
 
     if len(status.Operations) == len(status.Clauses) {
