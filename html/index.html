@@ -25,7 +25,6 @@
     }
   </style>
 
-  <script type="text/javascript" src="parseQuery.js"></script>
   <script type="text/javascript">
     var query_body = null;
 
@@ -36,12 +35,13 @@
         errdiv.replaceChildren();
 
         const metadiv = self.document.getElementById('metadata');
-        try {
-            let parsed = parseQuery(metadiv.value);
-            all_clauses.push(parsed.metadata);
-        } catch (e) {
-            errdiv.appendChild(self.document.createTextNode(e.message));
-            return false;
+        if (metadiv.value != "") {
+            try {
+                all_clauses.push({ type: "text", text: metadiv.value })
+            } catch (e) {
+                errdiv.appendChild(self.document.createTextNode(e.message));
+                return false;
+            }
         }
 
         const user = self.document.getElementById('user');
@@ -192,7 +192,7 @@
         search.setAttribute("disabled", "");
 
         populateQueryBody();
-        populateSearchResults("/query", true)
+        populateSearchResults("/query?translate=true", true)
         return false;
     }
 
@@ -255,14 +255,14 @@
           <br><br>
           On a similar note, the <code>NOT</code> keyword can be used for unary negation.
           This should be put before any search terms, e.g., <code>(NOT a b) AND (c d)</code>.
-          If there are no parenthese, any <code>NOT</code> will take precedence over the other boolean operations,
+          If there are no parentheses, any <code>NOT</code> will take precedence over the other boolean operations,
           i.e., the above query is the same as <code>NOT a b AND c d</code>.
           <br><br>
           Even more advanced users can prefix any sequence of search terms with the name of a metadata field, 
           to only search for matches within that field of the metadata file, e.g.,
           <code>(title: prostate cancer) AND (genome: GRCh38 OR genome: GRCm38)</code>.
           Note that this does not extend to the <code>AND</code>, <code>OR</code> and <code>NOT</code> keywords,
-          i.e., <code>title:foo OR bar</code> will not limit the search for <code>bar</code> to the <code>title</code> field.
+          e.g., <code>title:foo OR bar</code> will not limit the search for <code>bar</code> to the <code>title</code> field.
           <br><br>
           Extremely advanced users can attach a <code>%</code> wildcard to any term to enable a partial search,
           e.g., <code>neur%</code> will match files with <code>neuron</code>, <code>neural</code>, <code>neurological</code>, etc.

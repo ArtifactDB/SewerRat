@@ -142,6 +142,72 @@ The API returns a request body that contains a JSON object with the following pr
 Callers can control the number of results to return in each page by setting the `limit=` query parameter.
 This should be a positive integer that is no greater than 100.
 
+## Using a human-readable text query syntax
+
+For text searches, we support a more human-readable syntax for boolean operations in the query.
+The search string below will look for all metadata documents that match `foo` or `bar` but not `whee`:
+
+```
+(foo OR bar) AND NOT whee
+```
+
+The `AND`, `OR` and `NOT` (note the all-caps!) are automatically translated to the corresponding search clauses.
+This can be combined with parentheses to control precedence; otherwise, `AND` takes precedence over `OR`, and `NOT` takes precedence over both.
+Note that any sequence of adjacent text terms are implicitly `AND`'d together, so the two expressions below are equivalent:
+
+```
+foo bar whee
+foo AND bar AND whee
+```
+
+Users can prefix any sequence of text terms with the name of a metadata field, to only search for matches within that field of the metadata file.
+For example:
+
+```
+(title: prostate cancer) AND (genome: GRCh38 OR genome: GRCm38)
+```
+
+Note that this does not extend to the `AND`, `OR` and `NOT` keywords,
+e.g., `title:foo OR bar` will not limit the search for `bar` to the `title` field.
+
+If a `%` wildcard is present in a search term, its local search clause is set to perform a partial search.
+
+The human-friendly mode can be enabled by setting the `translate=true` query parameter in the request to the `/query` endpoint.
+The structure of the request body is unchanged except that any `text` field is assumed to contain a search string and will be translated into the relevant search clause.
+
+```shell
+curl -X POST -L ${SEWER_RAT_URL}/query?translate=true \
+    -H "Content-Type: application/json" \
+    -d '{ "type": "text", "text": "Aaron OR stuff" }' | jq
+## {
+##   "results": [
+##     {
+##       "path": "/Users/luna/Programming/ArtifactDB/SewerRat/scripts/test/sub/B.json",
+##       "user": "luna",
+##       "time": 1711754321,
+##       "metadata": {
+##         "foo": "bar",
+##         "gunk": [
+##           "stuff",
+##           "blah"
+##         ]
+##       }
+##     },
+##     {
+##       "path": "/Users/luna/Programming/ArtifactDB/SewerRat/scripts/test/sub/A.json",
+##       "user": "luna",
+##       "time": 1711754321,
+##       "metadata": {
+##         "authors": {
+##           "first": "Aaron",
+##           "last": "Lun"
+##         }
+##       }
+##     }
+##   ]
+## }
+```
+
 ## Spinning up an instance
 
 Clone this repository and build the binary.

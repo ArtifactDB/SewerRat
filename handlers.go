@@ -327,20 +327,32 @@ func newQueryHandler(db *sql.DB, tokenizer *unicodeTokenizer, wild_tokenizer *un
             limit = limit0
         }
 
+        translate := false
+        if params.Has("translate") {
+            translate = strings.ToLower(params.Get("translate")) == "true"
+        }
+
         if r.Body == nil {
             dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": "expected a non-empty request body" })
             return
         }
-        query := searchClause{}
+        query := &searchClause{}
         restricted := http.MaxBytesReader(w, r.Body, 1048576)
         dec := json.NewDecoder(restricted)
-        err := dec.Decode(&query)
+        err := dec.Decode(query)
         if err != nil {
             dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": fmt.Sprintf("failed to parse response body; %v", err) })
             return
         }
 
-        san, err := sanitizeQuery(&query, tokenizer, wild_tokenizer)
+        if translate {
+            query, err = translateQuery(query)
+            if err != nil {
+                dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": fmt.Sprintf("failed to translate text query; %v", err) })
+            }
+        }
+
+        san, err := sanitizeQuery(query, tokenizer, wild_tokenizer)
         if err != nil {
             dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": fmt.Sprintf("failed to sanitize an invalid query; %v", err) })
             return
@@ -355,7 +367,11 @@ func newQueryHandler(db *sql.DB, tokenizer *unicodeTokenizer, wild_tokenizer *un
         respbody := map[string]interface{} { "results": res }
         if len(res) == limit {
             last := &(res[limit-1])
-            respbody["next"] = endpoint + "?scroll=" + strconv.FormatInt(last.Time, 10) + "," + strconv.FormatInt(last.Pid, 10)
+            next := endpoint + "?scroll=" + strconv.FormatInt(last.Time, 10) + "," + strconv.FormatInt(last.Pid, 10)
+            if translate {
+                next += "&translate=true"
+            }
+            respbody["next"] = next
         }
 
         dumpJsonResponse(w, http.StatusOK, respbody)
