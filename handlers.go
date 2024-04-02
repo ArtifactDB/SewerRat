@@ -320,11 +320,13 @@ func newQueryHandler(db *sql.DB, tokenizer *unicodeTokenizer, wild_tokenizer *un
 
         if params.Has("limit") {
             limit0, err := strconv.Atoi(params.Get("limit"))
-            if err != nil || limit0 <= 0 || limit0 > limit {
+            if err != nil || limit0 <= 0 {
                 dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": "invalid 'limit'" })
                 return
             }
-            limit = limit0
+            if (limit0 < limit) {
+                limit = limit0
+            }
         }
 
         translate := false

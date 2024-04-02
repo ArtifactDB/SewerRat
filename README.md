@@ -140,7 +140,8 @@ The API returns a request body that contains a JSON object with the following pr
   If `next` is not present, callers may assume that all results have already been obtained.
 
 Callers can control the number of results to return in each page by setting the `limit=` query parameter.
-This should be a positive integer that is no greater than 100.
+This should be a positive integer, up to a maximum of 100.
+Any value greater than 100 is ignored.
 
 ## Using a human-readable text query syntax
 
