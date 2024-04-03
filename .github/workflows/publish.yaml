@@ -31,6 +31,6 @@ jobs:
           goos: ${{ matrix.os }}
           goarch: ${{ matrix.arch }}
           release_tag: ${{ github.ref_name }}
-          asset_name: gobbler-${{ matrix.os }}-${{ matrix.arch }}
+          asset_name: SewerRat-${{ matrix.os }}-${{ matrix.arch }}
           overwrite: true
           compress_assets: false
