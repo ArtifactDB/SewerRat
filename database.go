@@ -786,7 +786,7 @@ type queryResult struct {
     Path string `json:"path"`
     User string `json:"user"`
     Time int64 `json:"time"`
-    Metadata json.RawMessage `json:"metadata"`
+    Metadata json.RawMessage `json:"metadata,omitempty"`
 }
 
 type scrollPosition struct {
@@ -842,6 +842,44 @@ func queryTokens(db * sql.DB, query *searchClause, scroll *scrollPosition, page_
             return nil, fmt.Errorf("failed to extract row; %w", err)
         }
         output = append(output, queryResult{ Pid: pid, Path: path, User: user, Time: time, Metadata: []byte(metadata) })
+    }
+
+    return output, nil
+}
+
+/**********************************************************************/
+
+func retrievePath(db * sql.DB, path string, include_metadata bool) (*queryResult, error) {
+    hot := ""
+    if include_metadata {
+        hot = ", json_extract(paths.metadata, '$')"
+    }
+    full := fmt.Sprintf("SELECT paths.user, paths.time%s FROM paths WHERE paths.path = ?", hot)
+
+    output := &queryResult{}
+    var user string
+    var time int64
+    var metadata string
+
+    var err error
+    row := db.QueryRow(full, path)
+    if include_metadata {
+        err = row.Scan(&user, &time, &metadata)
+    } else {
+        err = row.Scan(&user, &time)
+    }
+
+    if errors.Is(err, sql.ErrNoRows) {
+        return nil, nil
+    } else if err != nil {
+        return nil, err
+    }
+
+    output.Path = path
+    output.User = user
+    output.Time = time
+    if include_metadata {
+        output.Metadata = []byte(metadata)
     }
 
     return output, nil

@@ -66,6 +66,39 @@ deregisterSewerRat test
 
 ## Querying the index
 
+### Retrieving a single path
+
+We can obtain metadata for a single path by making a GET request to the `/retrieve` endpoint of the SewerRat API,
+where the URL-encoded path of interest is provided as a query parameter.
+
+```shell
+path=/Users/luna/Programming/ArtifactDB/SewerRat/scripts/test/A.json
+curl -L ${SEWER_RAT_URL}/retrieve -G --data-urlencode "path=${path}" | jq
+## {
+##   "path": "/Users/luna/Programming/ArtifactDB/SewerRat/scripts/test/A.json",
+##   "user": "luna",
+##   "time": 1711754321,
+##   "metadata": {
+##     "title": "YAY",
+##     "description": "whee"
+##   }
+## }
+```
+
+This returns an object containing:
+
+- `path`, a string containing the path to the file.
+- `user`, the identity of the file owner.
+- `time`, the Unix time of most recent file modification.
+- `metadata`, the contents of the file.
+
+If we don't actually need the metadata (e.g., we just want to check if the file exists),
+we can skip it by setting the `metadata=false` URL query parameter in our request.
+
+If the path doesn't exist in the index, a standard 404 error is returned.
+
+### Free-text search
+
 We can query the SewerRat index to find files of interest based on the contents of the metadata, the user name of the file owner, the modification date, or any combination thereof.
 This is done by making a POST request to the `/query` endpoint of the SewerRat API, where the request body contains the JSON-encoded search parameters:
 
@@ -76,7 +109,7 @@ curl -X POST -L ${SEWER_RAT_URL}/query \
 ## {
 ##   "results": [
 ##     {
-##       "path": "/Users/luna/Programming/GenomicsPlatform/SewerRat/scripts/test/sub/A.json",
+##       "path": "/Users/luna/Programming/ArtifactDB/SewerRat/scripts/test/sub/A.json",
 ##       "user": "luna",
 ##       "time": 1709320903,
 ##       "metadata": {
@@ -143,7 +176,7 @@ Callers can control the number of results to return in each page by setting the 
 This should be a positive integer, up to a maximum of 100.
 Any value greater than 100 is ignored.
 
-## Using a human-readable text query syntax
+### Human-readable syntax for text queries
 
 For text searches, we support a more human-readable syntax for boolean operations in the query.
 The search string below will look for all metadata documents that match `foo` or `bar` but not `whee`:

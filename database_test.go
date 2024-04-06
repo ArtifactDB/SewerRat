@@ -1524,3 +1524,86 @@ func TestQueryTokens(t *testing.T) {
         }
     })
 }
+
+func TestRetrievePath(t *testing.T) {
+    tmp, err := os.MkdirTemp("", "")
+    if err != nil {
+        t.Fatalf(err.Error())
+    }
+    defer os.RemoveAll(tmp)
+
+    dbpath := filepath.Join(tmp, "db.sqlite3")
+    dbconn, err := initializeDatabase(dbpath)
+    if err != nil {
+        t.Fatalf(err.Error())
+    }
+    defer dbconn.Close()
+
+    tokr, err := newUnicodeTokenizer(false)
+    if err != nil {
+        t.Fatalf(err.Error())
+    }
+
+    // Mocking up some contents.
+    to_add := filepath.Join(tmp, "to_add")
+    err = mockDirectory(to_add)
+    if err != nil {
+        t.Fatalf(err.Error())
+    }
+
+    comments, err := addDirectory(dbconn, to_add, map[string]bool{ "metadata.json": true, "other.json": true }, "myself", tokr)
+    if err != nil {
+        t.Fatalf(err.Error())
+    }
+    if len(comments) > 0 {
+        t.Fatalf("unexpected comments from the directory addition %v", comments)
+    }
+
+    self, err := user.Current()
+    if err != nil {
+        t.Fatal(err)
+    }
+
+    t.Run("ok with metadata", func(t *testing.T) {
+        res, err := retrievePath(dbconn, filepath.Join(to_add, "metadata.json"), true)
+        if err != nil {
+            t.Fatal(err)
+        }
+        if res == nil {
+            t.Fatal("should have found one matching path")
+        }
+        if res.User != self.Username || res.Time == 0 {
+            t.Fatal("unexpected results for time and user")
+        }
+        meta := string(res.Metadata)
+        if !strings.HasPrefix(meta, "{") || !strings.HasSuffix(meta, "}") {
+            t.Fatal("expected a JSON object in the metadata")
+        }
+    })
+
+    t.Run("ok without metadata", func(t *testing.T) {
+        res, err := retrievePath(dbconn, filepath.Join(to_add, "metadata.json"), false)
+        if err != nil {
+            t.Fatal(err)
+        }
+        if res == nil {
+            t.Fatal("should have found one matching path")
+        }
+        if res.User != self.Username || res.Time == 0 {
+            t.Fatal("unexpected results for time and user")
+        }
+        if res.Metadata != nil {
+            t.Fatal("expected metadata to be ignored")
+        }
+    })
+
+    t.Run("missing", func(t *testing.T) {
+        res, err := retrievePath(dbconn, "missing.json", false)
+        if err != nil {
+            t.Fatal(err)
+        }
+        if res != nil {
+            t.Fatal("should not have matched anything")
+        }
+    })
+}

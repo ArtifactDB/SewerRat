@@ -43,6 +43,7 @@ func main() {
     http.HandleFunc("/deregister/start", newDeregisterStartHandler(db, verifier))
     http.HandleFunc("/deregister/finish", newDeregisterFinishHandler(db, verifier))
     http.HandleFunc("/query", newQueryHandler(db, tokenizer, wild_tokenizer, "/query"))
+    http.HandleFunc("/retrieve", newRetrieveHandler(db))
 
     // Adding a hour job that purges various old verification sessions.
     {

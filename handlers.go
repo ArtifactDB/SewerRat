@@ -8,6 +8,7 @@ import (
     "path/filepath"
 
     "net/http"
+    "net/url"
     "encoding/json"
     "errors"
     "strings"
@@ -381,3 +382,51 @@ func newQueryHandler(db *sql.DB, tokenizer *unicodeTokenizer, wild_tokenizer *un
     }
 }
 
+/**********************************************************************/
+
+func newRetrieveHandler(db *sql.DB) func(http.ResponseWriter, *http.Request) {
+    return func(w http.ResponseWriter, r *http.Request) {
+        if r.Method == "OPTIONS" {
+            w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
+            w.Header().Set("Access-Control-Allow-Origin", "*")
+            w.Header().Set("Access-Control-Allow-Headers", "*")
+            w.WriteHeader(http.StatusNoContent)
+            return
+        }
+
+        if r.Method != "GET" {
+            dumpJsonResponse(w, http.StatusMethodNotAllowed, map[string]string{ "status": "ERROR", "reason": "expected a GET request" })
+            return
+        }
+
+        params := r.URL.Query()
+        if !params.Has("path") {
+            dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": fmt.Sprintf("expected a 'path' query parameter") })
+        }
+
+        path, err := url.QueryUnescape(params.Get("path"))
+        if err != nil {
+            dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": fmt.Sprintf("path is not properly URL-encoded; %v", err) })
+            return
+        }
+
+        use_metadata := true
+        if params.Has("metadata") {
+            use_metadata = (strings.ToLower(params.Get("metadata")) != "false")
+        }
+
+        res, err := retrievePath(db, path, use_metadata)
+        if err != nil {
+            dumpJsonResponse(w, http.StatusInternalServerError, map[string]string{ "status": "ERROR", "reason": fmt.Sprintf("failed to retrieve path; %v", err) })
+            return
+        }
+
+        if res == nil {
+            dumpJsonResponse(w, http.StatusNotFound, map[string]string{ "status": "ERROR", "reason": "path is not registered" })
+            return
+        }
+
+        dumpJsonResponse(w, http.StatusOK, res)
+        return
+    }
+}
