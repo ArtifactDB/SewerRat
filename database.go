@@ -819,7 +819,7 @@ func queryTokens(db * sql.DB, query *searchClause, scroll *scrollPosition, page_
         parameters = append(parameters, scroll.Time)
         parameters = append(parameters, scroll.Pid)
     }
-    full += " ORDER BY paths.time, paths.pid DESC"
+    full += " ORDER BY paths.time DESC, paths.pid DESC"
     if page_limit > 0 {
         full += " LIMIT " + strconv.Itoa(page_limit)
     }
