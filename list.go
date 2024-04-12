@@ -4,12 +4,27 @@ import (
     "fmt"
     "io/fs"
     "path/filepath"
+    "os"
 )
+
+func safeWalkDir(dir string, fn fs.WalkDirFunc) error {
+    info, err := os.Lstat(dir)
+    if err != nil {
+        return err
+    }
+
+    // Just skipping the path if it turns out to be a symbolic link.
+    if info.Mode() & fs.ModeSymlink != 0 {
+        return nil
+    }
+
+    return filepath.WalkDir(dir, fn)
+}
 
 func listFiles(dir string, recursive bool) ([]string, error) {
     to_report := []string{}
 
-    err := filepath.WalkDir(dir, func(path string, info fs.DirEntry, err error) error {
+    err := safeWalkDir(dir, func(path string, info fs.DirEntry, err error) error {
         if err != nil {
             return err
         }
@@ -19,6 +34,10 @@ func listFiles(dir string, recursive bool) ([]string, error) {
             if recursive || dir == path {
                 return nil
             }
+        }
+
+        if info.Type() & fs.ModeSymlink != 0 {
+            return nil
         }
 
         rel, err := filepath.Rel(dir, path)

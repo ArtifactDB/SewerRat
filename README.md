@@ -374,3 +374,10 @@ The only exception is when the caller requests deregistration of a directory tha
 In this case, `/deregister/start` may return a `SUCCESS` status instead of `PENDING`, after which `/deregister/finish` does not need to be called.
 
 On error, the request body will contain an `ERROR` status with the `reason` string property containing the reason for the failure.
+
+## Further comments
+
+Any symbolic links inside the registered directory are ignored during indexing and by the `/list` and `/retrieve` endpoints.
+This is done as a security precaution as such links may redirect to files outside of the directory that were not intended for sharing.
+It is also forbidden to register a symbolic link referencing a directory, as the link target could change after registration without the accompanying re-authorization.
+(However, symbolic links in the `dirname` of the to-be-registered directory are still allowed.)

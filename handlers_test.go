@@ -133,6 +133,28 @@ func TestRegisterHandlers(t *testing.T) {
         }
     })
 
+    t.Run("register start failure", func(t *testing.T) {
+        handler := http.HandlerFunc(newRegisterStartHandler(verifier))
+
+        tmp, err := os.MkdirTemp("", "")
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        to_add2 := filepath.Join(tmp, "symlink")
+        err = os.Symlink(to_add, to_add2)
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        req := createJsonRequest("POST", "/register/start", map[string]interface{}{ "path": to_add2 }, t)
+        rr := httptest.NewRecorder()
+        handler.ServeHTTP(rr, req)
+        if rr.Code != http.StatusBadRequest {
+            t.Fatalf("registration of a symlink should have failed")
+        }
+    })
+
     quickRegisterStart := func() string {
         handler := http.HandlerFunc(newRegisterStartHandler(verifier))
         req := createJsonRequest("POST", "/register/start", map[string]interface{}{ "path": to_add }, t)
@@ -1044,4 +1066,3 @@ func TestListFilesHandler(t *testing.T) {
         }
     })
 }
-

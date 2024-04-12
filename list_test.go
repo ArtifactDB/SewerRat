@@ -32,24 +32,83 @@ func TestListFiles(t *testing.T) {
     }
 
     // Checking that we pull out all the files.
-    all, err := listFiles(dir, true)
-    if (err != nil) {
-        t.Fatal(err)
-    }
+    t.Run("basic", func(t *testing.T) {
+        all, err := listFiles(dir, true)
+        if (err != nil) {
+            t.Fatal(err)
+        }
 
-    sort.Strings(all)
-    if len(all) != 2 || all[0] != "A" || all[1] != "sub/B" {
-        t.Errorf("unexpected results from the listing (%q)", all)
-    }
+        sort.Strings(all)
+        if len(all) != 2 || all[0] != "A" || all[1] != "sub/B" {
+            t.Errorf("unexpected results from the listing (%q)", all)
+        }
+    })
 
     // Checking that the directories are properly listed.
-    all, err = listFiles(dir, false)
-    if (err != nil) {
+    t.Run("non-recursive", func(t *testing.T) {
+        all, err := listFiles(dir, false)
+        if (err != nil) {
+            t.Fatal(err)
+        }
+
+        sort.Strings(all)
+        if len(all) != 2 || all[0] != "A" || all[1] != "sub/" {
+            t.Errorf("unexpected results from the listing (%q)", all)
+        }
+    })
+
+    // Checking that we skip top-level symbolic links.
+    parent_symdir, err := os.MkdirTemp("", "")
+    if err != nil {
         t.Fatal(err)
     }
 
-    sort.Strings(all)
-    if len(all) != 2 || all[0] != "A" || all[1] != "sub/" {
-        t.Errorf("unexpected results from the listing (%q)", all)
+    symdir := filepath.Join(parent_symdir, "symlink")
+    err = os.Symlink(dir, symdir)
+    if err != nil {
+        t.Fatal(err)
     }
+
+    t.Run("skip symbolic top-level", func(t *testing.T) {
+        all, err := listFiles(symdir, false)
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        if len(all) != 0 {
+            t.Error("should not list symbolic links")
+        }
+    })
+
+    // Checking that we skip symbolic links inside the directory.
+    more_symdir, err := os.MkdirTemp("", "")
+    if err != nil {
+        t.Fatal(err)
+    }
+
+    err = os.Symlink(filepath.Join(dir, "A"), filepath.Join(more_symdir, "A"))
+    if err != nil {
+        t.Fatal(err)
+    }
+
+    err = os.Link(filepath.Join(dir, "A"), filepath.Join(more_symdir, "extra"))
+    if err != nil {
+        t.Fatal(err)
+    }
+
+    err = os.Symlink(filepath.Join(dir, "sub"), filepath.Join(more_symdir, "sub"))
+    if err != nil {
+        t.Fatal(err)
+    }
+
+    t.Run("skip symbolic nested", func(t *testing.T) {
+        all, err := listFiles(more_symdir, true)
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        if !equalStringArrays(all, []string{ "extra" }) {
+            t.Error("should not list symbolic links")
+        }
+    })
 }

@@ -28,7 +28,7 @@ func TestInitializeDatabase(t *testing.T) {
         }
         defer dbconn.Close()
 
-        if _, err := os.Stat(dbpath); err != nil {
+        if _, err := os.Lstat(dbpath); err != nil {
             t.Fatalf("database file doesn't seem to exist; %v", err)
         }
 
@@ -396,6 +396,61 @@ func TestAddDirectory(t *testing.T) {
         }
         if len(comments) != 1 || !strings.Contains(comments[0], "stuff") {
             t.Fatalf("unexpected (lack of) comments from the directory addition %v", comments)
+        }
+    })
+
+    // Making up a directory of symbolic links.
+    symdir := filepath.Join(tmp, "symlink")
+    err = os.MkdirAll(symdir, 0700)
+    if err != nil {
+        t.Fatalf("failed to create a symlink directory; %v", err)
+    }
+
+    err = os.Symlink(filepath.Join(to_add, "metadata.json"), filepath.Join(symdir, "metadata.json"))
+    if err != nil {
+        t.Fatalf("failed to create a symlink; %v", err)
+    }
+
+    err = os.Link(filepath.Join(to_add, "whee", "other.json"), filepath.Join(symdir, "other.json"))
+    if err != nil {
+        t.Fatalf("failed to create a hardlink; %v", err)
+    }
+
+    err = os.Symlink(filepath.Join(to_add, "stuff"), filepath.Join(symdir, "stuff"))
+    if err != nil {
+        t.Fatalf("failed to create a symlink; %v", err)
+    }
+
+    t.Run("symlink protection", func(t *testing.T) {
+        dbconn, err := initializeDatabase(dbpath)
+        if err != nil {
+            t.Fatalf(err.Error())
+        }
+        defer dbconn.Close()
+        defer os.Remove(dbpath)
+
+        comments, err := addDirectory(dbconn, symdir, map[string]bool{ "metadata.json": true, "other.json": true }, "myself", tokr)
+        if err != nil {
+            t.Fatal(err)
+        }
+        has_link_comment := false
+        for _, c := range comments {
+            if strings.Contains(c, "symbolic link") {
+                has_link_comment = true
+            }
+        }
+        if !has_link_comment {
+            t.Fatalf("expected at least one comment about symbol link failure %v", comments)
+        }
+
+        all_paths, err := listPaths(dbconn, tmp)
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        // All symlink paths to directories/files are ignored.
+        if !equalStringArrays(all_paths, []string{ "symlink/other.json" }) {
+            t.Fatalf("unexpected paths %v", all_paths)
         }
     })
 }
@@ -1659,7 +1714,7 @@ func TestIsSubpathRegistered(t *testing.T) {
             t.Fatal("should have found one matching path")
         }
 
-        found, err = isSubpathRegistered(dbconn, filepath.Join(to_add, "stuff", "other.metadata"))
+        found, err = isSubpathRegistered(dbconn, filepath.Join(to_add, "stuff", "other.json"))
         if err != nil {
             t.Fatal(err)
         }
@@ -1669,6 +1724,7 @@ func TestIsSubpathRegistered(t *testing.T) {
     })
 
     t.Run("absent", func(t *testing.T) {
+        // Directory is absent.
         found, err := isSubpathRegistered(dbconn, to_add + "_missing")
         if err != nil {
             t.Fatal(err)
@@ -1677,15 +1733,34 @@ func TestIsSubpathRegistered(t *testing.T) {
             t.Fatal("should not have found a matching path")
         }
 
-        found, err = isSubpathRegistered(dbconn, filepath.Join(to_add + "/../unauthorized"))
+        // Directory is present but not registered.
+        found, err = isSubpathRegistered(dbconn, tmp)
         if err != nil {
             t.Fatal(err)
         }
         if found {
             t.Fatal("should not have found a matching path")
         }
+    })
 
-        found, err = isSubpathRegistered(dbconn, tmp)
+    t.Run("parent breakout", func(t *testing.T) {
+        found, err := isSubpathRegistered(dbconn, to_add + "/stuff/..")
+        if err != nil {
+            t.Fatal(err)
+        }
+        if found {
+            t.Fatal("should not have found a matching path")
+        }
+    })
+
+    slink := filepath.Join(to_add, "whee", "metadata.json")
+    err = os.Symlink(filepath.Join(to_add, "stuff", "metadata.json"), slink)
+    if err != nil {
+        t.Fatal(err)
+    }
+
+    t.Run("symlink breakout", func(t *testing.T) {
+        found, err := isSubpathRegistered(dbconn, slink)
         if err != nil {
             t.Fatal(err)
         }

@@ -6,6 +6,7 @@ import (
 
     "os"
     "path/filepath"
+    "io/fs"
 
     "net/http"
     "net/url"
@@ -69,6 +70,15 @@ func newRegisterStartHandler(verifier *verificationRegistry) func(http.ResponseW
         err = validatePath(regpath)
         if err != nil {
             dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": err.Error() })
+            return
+        }
+
+        info, err := os.Lstat(regpath)
+        if err != nil {
+            dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": fmt.Sprintf("failed to stat; %v", err) })
+            return
+        } else if info.Mode() & fs.ModeSymlink != 0 {
+            dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": "cannot register a symbolic link" })
             return
         }
 
@@ -143,8 +153,11 @@ func newRegisterFinishHandler(db *sql.DB, verifier *verificationRegistry, tokeni
             return
         }
 
+        // Make sure to use Lstat here, not Stat; otherwise, someone could
+        // create a symlink to a file owned by someone else and pretend to be
+        // that person when registering a directory.
         expected_path := filepath.Join(regpath, expected_code)
-        code_info, err := os.Stat(expected_path)
+        code_info, err := os.Lstat(expected_path)
         if errors.Is(err, os.ErrNotExist) {
             dumpJsonResponse(w, http.StatusUnauthorized, map[string]string{ "status": "ERROR", "reason": fmt.Sprintf("verification failed for %q; %v", regpath, err) })
             return
@@ -199,7 +212,7 @@ func newDeregisterStartHandler(db *sql.DB, verifier *verificationRegistry) func(
         }
 
         // If the directory doesn't exist, then we don't need to attempt to create a verification code.
-        if _, err := os.Stat(regpath); errors.Is(err, os.ErrNotExist) {
+        if _, err := os.Lstat(regpath); errors.Is(err, os.ErrNotExist) {
             err := deleteDirectory(db, regpath)
             if err != nil {
                 dumpJsonResponse(w, http.StatusInternalServerError, map[string]string{ "status": "ERROR", "reason": fmt.Sprintf("failed to deregister %q; %v", regpath, err) })
@@ -258,7 +271,7 @@ func newDeregisterFinishHandler(db *sql.DB, verifier *verificationRegistry) func
         }
 
         expected_path := filepath.Join(regpath, expected_code)
-        _, err = os.Stat(expected_path)
+        _, err = os.Lstat(expected_path)
         if errors.Is(err, os.ErrNotExist) {
             dumpJsonResponse(w, http.StatusUnauthorized, map[string]string{ "status": "ERROR", "reason": fmt.Sprintf("verification failed for %q; %v", regpath, err) })
             return
@@ -464,7 +477,8 @@ func newRetrieveFileHandler(db *sql.DB) func(http.ResponseWriter, *http.Request)
             return
         }
 
-        info, err := os.Stat(path)
+        // Note that isSubpathRegistered already checks for links at every step of the path.
+        info, err := os.Lstat(path)
         if errors.Is(err, os.ErrNotExist) {
             dumpJsonResponse(w, http.StatusNotFound, map[string]string{ "status": "ERROR", "reason": "path does not exist" })
             return
@@ -513,7 +527,8 @@ func newListFilesHandler(db *sql.DB) func(http.ResponseWriter, *http.Request) {
             return
         }
 
-        info, err := os.Stat(path)
+        // isSubpathRegistered already checks for symlinks in the path.
+        info, err := os.Lstat(path)
         if errors.Is(err, os.ErrNotExist) {
             dumpJsonResponse(w, http.StatusNotFound, map[string]string{ "status": "ERROR", "reason": "path does not exist" })
             return

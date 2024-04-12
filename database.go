@@ -80,7 +80,7 @@ func createTransaction(db *sql.DB) (*ActiveTransaction, error) {
 
 func initializeDatabase(path string) (*sql.DB, error) {
     accessible := false
-    if _, err := os.Stat(path); err == nil {
+    if _, err := os.Lstat(path); err == nil {
         accessible = true
     }
 
@@ -252,9 +252,13 @@ func loadMetadata(paths []string, stats []fs.FileInfo) []*loadedMetadata {
             if stats != nil {
                 info = stats[i]
             } else {
-                raw_info, err := os.Stat(f)
+                raw_info, err := os.Lstat(f)
                 if err != nil {
                     assets[i].Failure = fmt.Errorf("failed to stat %q; %w", f, err)
+                    return
+                }
+                if raw_info.Mode() & fs.ModeSymlink != 0 {
+                    assets[i].Failure = fmt.Errorf("not following symbolic link at %q", f)
                     return
                 }
                 info = raw_info
@@ -283,11 +287,12 @@ func addDirectory(db *sql.DB, directory string, of_interest map[string]bool, use
     all_failures := []string{}
 
     paths := []string{}
-    filepath.WalkDir(directory, func(path string, d fs.DirEntry, err error) error {
+    safeWalkDir(directory, func(path string, d fs.DirEntry, err error) error {
         // Just skip any directories that we can't access.
         if err != nil {
             all_failures = append(all_failures, fmt.Sprintf("failed to walk %q; %v", path, err))
         }
+
         if !d.IsDir() {
             if _, ok := of_interest[d.Name()]; ok {
                 paths = append(paths, path)
@@ -510,15 +515,17 @@ func scanDirectories(db *sql.DB) (map[string]*directoryEntry, []string, error) {
                 curnames[n] = true
             }
 
-            filepath.WalkDir(dir.Path, func(path string, d fs.DirEntry, err error) error {
-                // Just skip any directories that we can't access.
+            // Just skip any directories that we can't access, no need to check the error.
+            safeWalkDir(dir.Path, func(path string, d fs.DirEntry, err error) error {
                 if err != nil {
                     curfailures = append(curfailures, fmt.Sprintf("failed to walk %q; %v", path, err))
                     return nil
                 }
+
                 if d.IsDir() {
                     return nil
                 }
+
                 _, ok := curnames[filepath.Base(path)]
                 if !ok {
                     return nil
@@ -743,7 +750,7 @@ func updatePaths(db *sql.DB, tokenizer* unicodeTokenizer) ([]string, error) {
 
 func backupDatabase(db *sql.DB, path string) error {
     var existing bool
-    _, err := os.Stat(path)
+    _, err := os.Lstat(path)
     if err == nil {
         existing = true
         err = os.Rename(path, path + ".backup")
@@ -888,22 +895,42 @@ func retrievePath(db * sql.DB, path string, include_metadata bool) (*queryResult
 /**********************************************************************/
 
 func isSubpathRegistered(db * sql.DB, path string) (bool, error) {
-    collected := []interface{}{ path }
-    query := "?"
+    collected := []interface{}{}
     for {
-        base := filepath.Base(path)
-        if base == ".." { // nice try.
-            return false, nil
+        // If we encounter a symlink, we can assume that neither it or its
+        // parent directories can be a registered directory, as it is forbidden
+        // to access symlinks inside a registered directory that might cause
+        // breakouts; so we stop. Note that this still allows the registered 
+        // directory itself to have a symlink among its parents, which is ok.
+        //
+        // Also note that we don't break if there's an error in the Lstat; 
+        // we let the caller to decide what to do with missing files.
+        info, err := os.Lstat(path)
+        if err == nil && info.Mode() & fs.ModeSymlink != 0 { 
+            break
         }
+
+        // Same logic as above, but for '..' that can cause breakouts.
+        base := filepath.Base(path)
+        if base == ".." {
+            break
+        }
+
+        collected = append(collected, path)
 
         newpath := filepath.Dir(path)
         if newpath == path {
             break
         }
-
-        collected = append(collected, newpath)
-        query += ", ?"
         path = newpath
+    }
+
+    if len(collected) == 0 {
+        return false, nil
+    }
+    query := "?"
+    for i := 1; i < len(collected); i++ {
+        query += ", ?"
     }
 
     q := fmt.Sprintf("SELECT COUNT(1) FROM dirs WHERE path IN (%s)", query)
