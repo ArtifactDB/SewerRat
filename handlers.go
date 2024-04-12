@@ -42,6 +42,9 @@ func validatePath(path string) error {
     if !filepath.IsAbs(path) {
         return errors.New("'path' should be an absolute path")
     }
+    if strings.HasSuffix(path, "/") {
+        return errors.New("'path' should not have a trailing slash ")
+    }
     return nil
 }
 

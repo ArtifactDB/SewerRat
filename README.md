@@ -335,7 +335,8 @@ Developers can copy this page and change the `base_url` to point to their produc
 
 We previously glossed over the registration process by presenting users with the `registerSewerRat` function.
 The process itself is slightly involved but it should still be simple enough to implement in any language.
-First, we make a call to the `/register/start` endpoint with a request body that contains `path`, the absolute path to our directory that we want to register.
+First, we make a call to the `/register/start` endpoint with a request body that contains `path`, the path to our directory that we want to register.
+`path` should be an absolute path without any trailing slash - the directory itself should be world-readable, and we should have at least write access to it.
 
 ```shell
 PWD=$(pwd)

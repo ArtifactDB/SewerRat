@@ -46,6 +46,11 @@ func TestValidateRequestPath(t *testing.T) {
     if err == nil || !strings.Contains(err.Error(), "absolute path") {
         t.Fatalf("expected an absolute path error")
     }
+
+    err = validatePath("/whee/foobar/")
+    if err == nil || !strings.Contains(err.Error(), "trailing slash") {
+        t.Fatalf("expected a trailing slash error")
+    }
 }
 
 func decodeStringyResponse(input io.Reader, t *testing.T) map[string]string {
