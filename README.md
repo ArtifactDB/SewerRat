@@ -68,12 +68,12 @@ deregisterSewerRat test
 
 ### Retrieving a single path
 
-We can obtain metadata for a single path by making a GET request to the `/retrieve` endpoint of the SewerRat API,
+We can obtain metadata for a single path by making a GET request to the `/retrieve/metadata` endpoint of the SewerRat API,
 where the URL-encoded path of interest is provided as a query parameter.
 
 ```shell
 path=/Users/luna/Programming/ArtifactDB/SewerRat/scripts/test/A.json
-curl -L ${SEWER_RAT_URL}/retrieve -G --data-urlencode "path=${path}" | jq
+curl -L ${SEWER_RAT_URL}/retrieve/metadata -G --data-urlencode "path=${path}" | jq
 ## {
 ##   "path": "/Users/luna/Programming/ArtifactDB/SewerRat/scripts/test/A.json",
 ##   "user": "luna",

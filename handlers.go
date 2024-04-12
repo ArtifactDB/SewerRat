@@ -280,16 +280,23 @@ func newDeregisterFinishHandler(db *sql.DB, verifier *verificationRegistry) func
 
 /**********************************************************************/
 
+func configureCors(w http.ResponseWriter, r *http.Request) bool {
+    if r.Method == "OPTIONS" {
+        w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
+        w.Header().Set("Access-Control-Allow-Origin", "*")
+        w.Header().Set("Access-Control-Allow-Headers", "*")
+        w.WriteHeader(http.StatusNoContent)
+        return true
+    } else {
+        return false
+    }
+}
+
 func newQueryHandler(db *sql.DB, tokenizer *unicodeTokenizer, wild_tokenizer *unicodeTokenizer, endpoint string) func(http.ResponseWriter, *http.Request) {
     return func(w http.ResponseWriter, r *http.Request) {
-        if r.Method == "OPTIONS" {
-            w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
-            w.Header().Set("Access-Control-Allow-Origin", "*")
-            w.Header().Set("Access-Control-Allow-Headers", "*")
-            w.WriteHeader(http.StatusNoContent)
+        if configureCors(w, r) {
             return
         }
-
         if r.Method != "POST" {
             dumpJsonResponse(w, http.StatusMethodNotAllowed, map[string]string{ "status": "ERROR", "reason": "expected a POST request" })
             return
@@ -384,16 +391,11 @@ func newQueryHandler(db *sql.DB, tokenizer *unicodeTokenizer, wild_tokenizer *un
 
 /**********************************************************************/
 
-func newRetrieveHandler(db *sql.DB) func(http.ResponseWriter, *http.Request) {
+func newRetrieveMetadataHandler(db *sql.DB) func(http.ResponseWriter, *http.Request) {
     return func(w http.ResponseWriter, r *http.Request) {
-        if r.Method == "OPTIONS" {
-            w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
-            w.Header().Set("Access-Control-Allow-Origin", "*")
-            w.Header().Set("Access-Control-Allow-Headers", "*")
-            w.WriteHeader(http.StatusNoContent)
+        if configureCors(w, r) {
             return
         }
-
         if r.Method != "GET" {
             dumpJsonResponse(w, http.StatusMethodNotAllowed, map[string]string{ "status": "ERROR", "reason": "expected a GET request" })
             return
@@ -403,7 +405,6 @@ func newRetrieveHandler(db *sql.DB) func(http.ResponseWriter, *http.Request) {
         if !params.Has("path") {
             dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": fmt.Sprintf("expected a 'path' query parameter") })
         }
-
         path, err := url.QueryUnescape(params.Get("path"))
         if err != nil {
             dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": fmt.Sprintf("path is not properly URL-encoded; %v", err) })
@@ -428,5 +429,107 @@ func newRetrieveHandler(db *sql.DB) func(http.ResponseWriter, *http.Request) {
 
         dumpJsonResponse(w, http.StatusOK, res)
         return
+    }
+}
+
+/**********************************************************************/
+
+func newRetrieveFileHandler(db *sql.DB) func(http.ResponseWriter, *http.Request) {
+    return func(w http.ResponseWriter, r *http.Request) {
+        if configureCors(w, r) {
+            return
+        }
+        if r.Method != "GET" {
+            dumpJsonResponse(w, http.StatusMethodNotAllowed, map[string]string{ "status": "ERROR", "reason": "expected a GET request" })
+            return
+        }
+
+        params := r.URL.Query()
+        if !params.Has("path") {
+            dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": fmt.Sprintf("expected a 'path' query parameter") })
+        }
+        path, err := url.QueryUnescape(params.Get("path"))
+        if err != nil {
+            dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": fmt.Sprintf("path is not properly URL-encoded; %v", err) })
+            return
+        }
+
+        okay, err := isSubpathRegistered(db, filepath.Dir(path))
+        if err != nil {
+            dumpJsonResponse(w, http.StatusInternalServerError, map[string]string{ "status": "ERROR", "reason": fmt.Sprintf("failed to check path registration; %v", err) })
+            return
+        }
+        if !okay {
+            dumpJsonResponse(w, http.StatusForbidden, map[string]string{ "status": "ERROR", "reason": "cannot retrieve file from an unregistered path" })
+            return
+        }
+
+        info, err := os.Stat(path)
+        if errors.Is(err, os.ErrNotExist) {
+            dumpJsonResponse(w, http.StatusNotFound, map[string]string{ "status": "ERROR", "reason": "path does not exist" })
+            return
+        } else if err != nil {
+            dumpJsonResponse(w, http.StatusInternalServerError, map[string]string{ "status": "ERROR", "reason": fmt.Sprintf("inaccessible path; %v", err) })
+            return
+        } else if info.IsDir() {
+            dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": "path should refer to a file, not a directory" })
+            return
+        }
+
+        http.ServeFile(w, r, path)
+    }
+}
+
+/**********************************************************************/
+
+func newListFilesHandler(db *sql.DB) func(http.ResponseWriter, *http.Request) {
+    return func(w http.ResponseWriter, r *http.Request) {
+        if configureCors(w, r) {
+            return
+        }
+        if r.Method != "GET" {
+            dumpJsonResponse(w, http.StatusMethodNotAllowed, map[string]string{ "status": "ERROR", "reason": "expected a GET request" })
+            return
+        }
+
+        params := r.URL.Query()
+        if !params.Has("path") {
+            dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": fmt.Sprintf("expected a 'path' query parameter") })
+        }
+        path, err := url.QueryUnescape(params.Get("path"))
+        if err != nil {
+            dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": fmt.Sprintf("path is not properly URL-encoded; %v", err) })
+            return
+        }
+        recursive := params.Get("recursive") == "true"
+
+        okay, err := isSubpathRegistered(db, path)
+        if err != nil {
+            dumpJsonResponse(w, http.StatusInternalServerError, map[string]string{ "status": "ERROR", "reason": fmt.Sprintf("failed to check path registration; %v", err) })
+            return
+        }
+        if !okay {
+            dumpJsonResponse(w, http.StatusForbidden, map[string]string{ "status": "ERROR", "reason": "cannot retrieve file from an unregistered path" })
+            return
+        }
+
+        info, err := os.Stat(path)
+        if errors.Is(err, os.ErrNotExist) {
+            dumpJsonResponse(w, http.StatusNotFound, map[string]string{ "status": "ERROR", "reason": "path does not exist" })
+            return
+        } else if err != nil {
+            dumpJsonResponse(w, http.StatusInternalServerError, map[string]string{ "status": "ERROR", "reason": fmt.Sprintf("inaccessible path; %v", err) })
+            return
+        } else if !info.IsDir() {
+            dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": "path should refer to a directory" })
+            return
+        }
+
+        listing, err := listFiles(path, recursive)
+        if err != nil {
+            dumpJsonResponse(w, http.StatusInternalServerError, map[string]string{ "status": "ERROR", "reason": fmt.Sprintf("failed to obtain listing; %v", err) })
+            return
+        }
+        dumpJsonResponse(w, http.StatusOK, listing)
     }
 }

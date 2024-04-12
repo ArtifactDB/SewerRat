@@ -884,3 +884,35 @@ func retrievePath(db * sql.DB, path string, include_metadata bool) (*queryResult
 
     return output, nil
 }
+
+/**********************************************************************/
+
+func isSubpathRegistered(db * sql.DB, path string) (bool, error) {
+    collected := []interface{}{ path }
+    query := "?"
+    for {
+        base := filepath.Base(path)
+        if base == ".." { // nice try.
+            return false, nil
+        }
+
+        newpath := filepath.Dir(path)
+        if newpath == path {
+            break
+        }
+
+        collected = append(collected, newpath)
+        query += ", ?"
+        path = newpath
+    }
+
+    q := fmt.Sprintf("SELECT COUNT(1) FROM dirs WHERE path IN (%s)", query)
+    row := db.QueryRow(q, collected...)
+    var num int
+    err := row.Scan(&num)
+
+    if err != nil {
+        return false, err
+    }
+    return num > 0, nil
+}

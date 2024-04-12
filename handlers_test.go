@@ -12,6 +12,7 @@ import (
     "net/http/httptest"
     "net/url"
     "encoding/json"
+    "sort"
 )
 
 func TestDumpJsonResponse(t *testing.T) {
@@ -646,7 +647,7 @@ func TestQueryHandler(t *testing.T) {
     })
 }
 
-func TestRetrieveHandler(t *testing.T) {
+func TestRetrieveMetadataHandler(t *testing.T) {
     tmp, err := os.MkdirTemp("", "")
     if err != nil {
         t.Fatalf(err.Error())
@@ -679,7 +680,7 @@ func TestRetrieveHandler(t *testing.T) {
         t.Fatal("no comments should be present")
     }
 
-    handler := http.HandlerFunc(newRetrieveHandler(dbconn))
+    handler := http.HandlerFunc(newRetrieveMetadataHandler(dbconn))
 
     self, err := user.Current()
     if err != nil {
@@ -749,7 +750,7 @@ func TestRetrieveHandler(t *testing.T) {
 
     t.Run("simple", func (t *testing.T) {
         candidate := filepath.Join(to_add, "metadata.json")
-        req, err := http.NewRequest("GET", "/retrieve?path=" + url.QueryEscape(candidate), nil)
+        req, err := http.NewRequest("GET", "/retrieve/metadata?path=" + url.QueryEscape(candidate), nil)
         if err != nil {
             t.Fatal(err)
         }
@@ -765,7 +766,7 @@ func TestRetrieveHandler(t *testing.T) {
 
     t.Run("no metadata", func (t *testing.T) {
         candidate := filepath.Join(to_add, "metadata.json")
-        req, err := http.NewRequest("GET", "/retrieve?path=" + url.QueryEscape(candidate) + "&metadata=false", nil)
+        req, err := http.NewRequest("GET", "/retrieve/metadata?path=" + url.QueryEscape(candidate) + "&metadata=false", nil)
         if err != nil {
             t.Fatal(err)
         }
@@ -780,7 +781,7 @@ func TestRetrieveHandler(t *testing.T) {
     })
 
     t.Run("missing", func (t *testing.T) {
-        req, err := http.NewRequest("GET", "/retrieve?path=missing.json&metadata=false", nil)
+        req, err := http.NewRequest("GET", "/retrieve/metadata?path=missing.json&metadata=false", nil)
         if err != nil {
             t.Fatal(err)
         }
@@ -792,3 +793,255 @@ func TestRetrieveHandler(t *testing.T) {
         }
     })
 }
+
+func TestRetrieveFileHandler(t *testing.T) {
+    tmp, err := os.MkdirTemp("", "")
+    if err != nil {
+        t.Fatalf(err.Error())
+    }
+    defer os.RemoveAll(tmp)
+
+    dbpath := filepath.Join(tmp, "db.sqlite3")
+    dbconn, err := initializeDatabase(dbpath)
+    if err != nil {
+        t.Fatalf(err.Error())
+    }
+    defer dbconn.Close()
+
+    tokr, err := newUnicodeTokenizer(false)
+    if err != nil {
+        t.Fatalf(err.Error())
+    }
+
+    to_add := filepath.Join(tmp, "to_add")
+    err = mockDirectory(to_add)
+    if err != nil {
+        t.Fatalf(err.Error())
+    }
+
+    // Here, nothing is actually indexed! So we can't get confused with the metadata retrievals.
+    comments, err := addDirectory(dbconn, to_add, map[string]bool{}, "myself", tokr)
+    if err != nil {
+        t.Fatal(err)
+    }
+    if len(comments) != 0 {
+        t.Fatal("no comments should be present")
+    }
+
+    handler := http.HandlerFunc(newRetrieveFileHandler(dbconn))
+
+    t.Run("success", func (t *testing.T) {
+        req, err := http.NewRequest("GET", "/retrieve/file?path=" + url.QueryEscape(filepath.Join(to_add, "metadata.json")), nil)
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        rr := httptest.NewRecorder()
+        handler.ServeHTTP(rr, req)
+        if rr.Code != http.StatusOK {
+            t.Fatalf("should have succeeded")
+        }
+
+        r := map[string]interface{}{}
+        dec := json.NewDecoder(rr.Body)
+        err = dec.Decode(&r)
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        foo, ok := r["foo"]
+        if !ok || foo != "Aaron had a little lamb" {
+            t.Fatal("unexpected result from file retrieval")
+        }
+    })
+
+    t.Run("not found", func (t *testing.T) {
+        req, err := http.NewRequest("GET", "/retrieve/file?path=" + url.QueryEscape(filepath.Join(to_add, "other.json")), nil)
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        rr := httptest.NewRecorder()
+        handler.ServeHTTP(rr, req)
+        if rr.Code != http.StatusNotFound {
+            t.Fatalf("should have failed with a 404")
+        }
+    })
+
+    t.Run("unregistered", func (t *testing.T) {
+        req, err := http.NewRequest("GET", "/retrieve/file?path=" + url.QueryEscape(filepath.Join(tmp, "metadata.json")), nil)
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        rr := httptest.NewRecorder()
+        handler.ServeHTTP(rr, req)
+        if rr.Code != http.StatusForbidden {
+            t.Fatalf("should have failed with a 403")
+        }
+    })
+
+    t.Run("is directory", func (t *testing.T) {
+        req, err := http.NewRequest("GET", "/retrieve/file?path=" + url.QueryEscape(filepath.Join(to_add, "stuff")), nil)
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        rr := httptest.NewRecorder()
+        handler.ServeHTTP(rr, req)
+        if rr.Code != http.StatusBadRequest {
+            t.Fatalf("should have failed with a 400")
+        }
+    })
+}
+
+func TestListFilesHandler(t *testing.T) {
+    tmp, err := os.MkdirTemp("", "")
+    if err != nil {
+        t.Fatalf(err.Error())
+    }
+    defer os.RemoveAll(tmp)
+
+    dbpath := filepath.Join(tmp, "db.sqlite3")
+    dbconn, err := initializeDatabase(dbpath)
+    if err != nil {
+        t.Fatalf(err.Error())
+    }
+    defer dbconn.Close()
+
+    tokr, err := newUnicodeTokenizer(false)
+    if err != nil {
+        t.Fatalf(err.Error())
+    }
+
+    to_add := filepath.Join(tmp, "to_add")
+    err = mockDirectory(to_add)
+    if err != nil {
+        t.Fatalf(err.Error())
+    }
+
+    comments, err := addDirectory(dbconn, to_add, map[string]bool{}, "myself", tokr)
+    if err != nil {
+        t.Fatal(err)
+    }
+    if len(comments) != 0 {
+        t.Fatal("no comments should be present")
+    }
+
+    handler := http.HandlerFunc(newListFilesHandler(dbconn))
+
+    t.Run("non-recursive", func (t *testing.T) {
+        req, err := http.NewRequest("GET", "/list?path=" + url.QueryEscape(to_add), nil)
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        rr := httptest.NewRecorder()
+        handler.ServeHTTP(rr, req)
+        if rr.Code != http.StatusOK {
+            t.Fatalf("should have succeeded (got %d)", rr.Code)
+        }
+
+        r := []string{}
+        dec := json.NewDecoder(rr.Body)
+        err = dec.Decode(&r)
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        sort.Strings(r)
+        if len(r) != 3 || r[0] != "metadata.json" || r[1] != "stuff/" || r[2] != "whee/" {
+            t.Fatalf("unexpected listing results %q", r)
+        }
+    })
+
+    t.Run("recursive", func (t *testing.T) {
+        req, err := http.NewRequest("GET", "/list?path=" + url.QueryEscape(to_add) + "&recursive=true", nil)
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        rr := httptest.NewRecorder()
+        handler.ServeHTTP(rr, req)
+        if rr.Code != http.StatusOK {
+            t.Fatalf("should have succeeded (got %d)", rr.Code)
+        }
+
+        r := []string{}
+        dec := json.NewDecoder(rr.Body)
+        err = dec.Decode(&r)
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        sort.Strings(r)
+        if len(r) != 4 || r[0] != "metadata.json" || r[1] != "stuff/metadata.json" || r[2] != "stuff/other.json" || r[3] != "whee/other.json" {
+            t.Fatalf("unexpected listing results %q", r)
+        }
+    })
+
+    t.Run("nested", func (t *testing.T) {
+        req, err := http.NewRequest("GET", "/list?path=" + url.QueryEscape(filepath.Join(to_add, "stuff")), nil)
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        rr := httptest.NewRecorder()
+        handler.ServeHTTP(rr, req)
+        if rr.Code != http.StatusOK {
+            t.Fatalf("should have succeeded (got %d)", rr.Code)
+        }
+
+        r := []string{}
+        dec := json.NewDecoder(rr.Body)
+        err = dec.Decode(&r)
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        sort.Strings(r)
+        if len(r) != 2 || r[0] != "metadata.json" || r[1] != "other.json" {
+            t.Fatalf("unexpected listing results %q", r)
+        }
+    })
+
+    t.Run("not found", func (t *testing.T) {
+        req, err := http.NewRequest("GET", "/list?path=" + url.QueryEscape(filepath.Join(to_add, "missing")), nil)
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        rr := httptest.NewRecorder()
+        handler.ServeHTTP(rr, req)
+        if rr.Code != http.StatusNotFound {
+            t.Fatalf("should have failed with a 404")
+        }
+    })
+
+    t.Run("unregistered", func (t *testing.T) {
+        req, err := http.NewRequest("GET", "/list?path=" + url.QueryEscape(tmp), nil)
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        rr := httptest.NewRecorder()
+        handler.ServeHTTP(rr, req)
+        if rr.Code != http.StatusForbidden {
+            t.Fatalf("should have failed with a 403")
+        }
+    })
+
+    t.Run("is file", func (t *testing.T) {
+        req, err := http.NewRequest("GET", "/list?path=" + url.QueryEscape(filepath.Join(to_add, "metadata.json")), nil)
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        rr := httptest.NewRecorder()
+        handler.ServeHTTP(rr, req)
+        if rr.Code != http.StatusBadRequest {
+            t.Fatalf("should have failed with a 400")
+        }
+    })
+}
+
