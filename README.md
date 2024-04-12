@@ -66,38 +66,7 @@ deregisterSewerRat test
 
 ## Querying the index
 
-### Retrieving a single path
-
-We can obtain metadata for a single path by making a GET request to the `/retrieve/metadata` endpoint of the SewerRat API,
-where the URL-encoded path of interest is provided as a query parameter.
-
-```shell
-path=/Users/luna/Programming/ArtifactDB/SewerRat/scripts/test/A.json
-curl -L ${SEWER_RAT_URL}/retrieve/metadata -G --data-urlencode "path=${path}" | jq
-## {
-##   "path": "/Users/luna/Programming/ArtifactDB/SewerRat/scripts/test/A.json",
-##   "user": "luna",
-##   "time": 1711754321,
-##   "metadata": {
-##     "title": "YAY",
-##     "description": "whee"
-##   }
-## }
-```
-
-This returns an object containing:
-
-- `path`, a string containing the path to the file.
-- `user`, the identity of the file owner.
-- `time`, the Unix time of most recent file modification.
-- `metadata`, the contents of the file.
-
-If we don't actually need the metadata (e.g., we just want to check if the file exists),
-we can skip it by setting the `metadata=false` URL query parameter in our request.
-
-If the path doesn't exist in the index, a standard 404 error is returned.
-
-### Free-text search
+### Making the request
 
 We can query the SewerRat index to find files of interest based on the contents of the metadata, the user name of the file owner, the modification date, or any combination thereof.
 This is done by making a POST request to the `/query` endpoint of the SewerRat API, where the request body contains the JSON-encoded search parameters:
@@ -122,6 +91,25 @@ curl -X POST -L ${SEWER_RAT_URL}/query \
 ##   ]
 ## }
 ```
+
+The request body should be a JSON-formatted "search clause", see [below](#defining-search-clauses) for details.
+The response is a JSON object with the following properties:
+
+- `results`, an array of objects containing the matching metadata files, sorted by decreasing modification time.
+   Each object has the following properties:
+   - `path`, a string containing the path to the file.
+   - `user`, the identity of the file owner.
+   - `time`, the Unix time of most recent file modification.
+   - `metadata`, the contents of the file.
+- (optional) `next`, a string containing the endpoint to use for the next page of results.
+  A request to this endpoint should use the exact same request body to correctly obtain the next page.
+  If `next` is not present, callers may assume that all results have already been obtained.
+
+Callers can control the number of results to return in each page by setting the `limit=` query parameter.
+This should be a positive integer, up to a maximum of 100.
+Any value greater than 100 is ignored.
+
+### Defining search clauses
 
 The request body should be a "search clause", a JSON object with the `type` string property.
 The nature of the search depends on the value of `type`:
@@ -159,22 +147,6 @@ The nature of the search depends on the value of `type`:
 - For `"not"`, SewerRat negates the filter.
   The search clause should contain the `child` property, which contains the search clause to be negated.
   A file is only considered to be a match if it does not match the clause in `child`.
-
-The API returns a request body that contains a JSON object with the following properties:
-
-- `results`, an array of objects containing the matching metadata files, sorted by decreasing modification time.
-   Each object has the following properties:
-   - `path`, a string containing the path to the file.
-   - `user`, the identity of the file owner.
-   - `time`, the Unix time of most recent file modification.
-   - `metadata`, the contents of the file.
-- (optional) `next`, a string containing the endpoint to use for the next page of results.
-  A request to this endpoint should use the exact same request body to correctly obtain the next page.
-  If `next` is not present, callers may assume that all results have already been obtained.
-
-Callers can control the number of results to return in each page by setting the `limit=` query parameter.
-This should be a positive integer, up to a maximum of 100.
-Any value greater than 100 is ignored.
 
 ### Human-readable syntax for text queries
 
@@ -241,6 +213,86 @@ curl -X POST -L ${SEWER_RAT_URL}/query?translate=true \
 ##   ]
 ## }
 ```
+
+## Accessing registered directories
+
+### Motivation
+
+In general, users are expected to be operating on the same filesystem as the SewerRat API.
+This makes it trivial to access the contents of directories registered with SewerRat, as we expect each registered directory to be world-readable.
+For remote applications, the situation is more complicated as they are able to query the SewerRat index but cannot directly read from the filesystem.
+This section describes some API endpoints that fill this gap for remote access.
+
+### Listing directory contents 
+
+We can list the contents of a directory by making a GET request to the `/list` endpoint of the SewerRat API,
+where the URL-encoded path to the directory of interest is provided as a query parameter.
+
+```shell
+path=/Users/luna/Programming/ArtifactDB/SewerRat/scripts/test/
+curl -L ${SEWER_RAT_URL}/list -G --data-urlencode "path=${path}" --data "recursive=true" | jq
+## [
+##   "A.json",
+##   "hello.txt",
+##   "sub/A.json",
+##   "sub/B.json"
+## ]
+```
+
+All returned paths are relative to the specified `path`.
+The `recursive=` parameter specifies whether a recursive listing should be performed.
+If true, all paths refer to files; otherwise, the names of directories may be returned and will be suffixed with `/`.
+
+If the path doesn't exist in the index, a standard 404 error is returned.
+
+### Fetching file contents
+
+We can obtain the contents for a path inside any registered directory by making a GET request to the `/retrieve/file` endpoint of the SewerRat API,
+where the URL-encoded path of interest is provided as a query parameter.
+This isn't limited to the registered metadata files - any file inside a registered directory can be extracted in this manner.
+
+```shell
+# Mocking up a non-metadata file.
+echo "HELLO" > test/hello.txt
+
+# Fetching it:
+path=/Users/luna/Programming/ArtifactDB/SewerRat/scripts/test/hello.txt
+curl -L ${SEWER_RAT_URL}/retrieve/file -G --data-urlencode "path=${path}"
+## HELLO
+```
+
+If the path doesn't exist in the index, a standard 404 error is returned.
+
+### Fetching metadata
+
+For the special case of a metadata file, we can alternatively obtain its contents by making a GET request to the `/retrieve/metadata` endpoint of the SewerRat API,
+where the URL-encoded path of interest is provided as a query parameter.
+
+```shell
+path=/Users/luna/Programming/ArtifactDB/SewerRat/scripts/test/A.json
+curl -L ${SEWER_RAT_URL}/retrieve/metadata -G --data-urlencode "path=${path}" | jq
+## {
+##   "path": "/Users/luna/Programming/ArtifactDB/SewerRat/scripts/test/A.json",
+##   "user": "luna",
+##   "time": 1711754321,
+##   "metadata": {
+##     "title": "YAY",
+##     "description": "whee"
+##   }
+## }
+```
+
+This returns an object containing:
+
+- `path`, a string containing the path to the file.
+- `user`, the identity of the file owner.
+- `time`, the Unix time of most recent file modification.
+- `metadata`, the contents of the file.
+
+If we don't actually need the metadata (e.g., we just want to check if the file exists),
+we can skip it by setting the `metadata=false` URL query parameter in our request.
+
+If the path doesn't exist in the index, a 404 error is returned.
 
 ## Spinning up an instance
 
