@@ -1607,3 +1607,90 @@ func TestRetrievePath(t *testing.T) {
         }
     })
 }
+
+func TestIsSubpathRegistered(t *testing.T) {
+    tmp, err := os.MkdirTemp("", "")
+    if err != nil {
+        t.Fatalf(err.Error())
+    }
+    defer os.RemoveAll(tmp)
+
+    dbpath := filepath.Join(tmp, "db.sqlite3")
+    dbconn, err := initializeDatabase(dbpath)
+    if err != nil {
+        t.Fatalf(err.Error())
+    }
+    defer dbconn.Close()
+
+    tokr, err := newUnicodeTokenizer(false)
+    if err != nil {
+        t.Fatalf(err.Error())
+    }
+
+    // Mocking up some contents.
+    to_add := filepath.Join(tmp, "to_add")
+    err = mockDirectory(to_add)
+    if err != nil {
+        t.Fatalf(err.Error())
+    }
+
+    comments, err := addDirectory(dbconn, to_add, map[string]bool{ "metadata.json": true, "other.json": true }, "myself", tokr)
+    if err != nil {
+        t.Fatalf(err.Error())
+    }
+    if len(comments) > 0 {
+        t.Fatalf("unexpected comments from the directory addition %v", comments)
+    }
+
+    t.Run("present", func(t *testing.T) {
+        found, err := isSubpathRegistered(dbconn, to_add)
+        if err != nil {
+            t.Fatal(err)
+        }
+        if !found {
+            t.Fatal("should have found one matching path")
+        }
+
+        found, err = isSubpathRegistered(dbconn, filepath.Join(to_add, "stuff"))
+        if err != nil {
+            t.Fatal(err)
+        }
+        if !found {
+            t.Fatal("should have found one matching path")
+        }
+
+        found, err = isSubpathRegistered(dbconn, filepath.Join(to_add, "stuff", "other.metadata"))
+        if err != nil {
+            t.Fatal(err)
+        }
+        if !found {
+            t.Fatal("should have found one matching path")
+        }
+    })
+
+    t.Run("absent", func(t *testing.T) {
+        found, err := isSubpathRegistered(dbconn, to_add + "_missing")
+        if err != nil {
+            t.Fatal(err)
+        }
+        if found {
+            t.Fatal("should not have found a matching path")
+        }
+
+        found, err = isSubpathRegistered(dbconn, filepath.Join(to_add + "/../unauthorized"))
+        if err != nil {
+            t.Fatal(err)
+        }
+        if found {
+            t.Fatal("should not have found a matching path")
+        }
+
+        found, err = isSubpathRegistered(dbconn, tmp)
+        if err != nil {
+            t.Fatal(err)
+        }
+        if found {
+            t.Fatal("should not have found a matching path")
+        }
+    })
+}
