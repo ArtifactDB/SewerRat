@@ -7,6 +7,7 @@ import (
     "os"
     "path/filepath"
     "io/fs"
+    "syscall"
 
     "net/http"
     "net/url"
@@ -48,6 +49,69 @@ func validatePath(path string) error {
     return nil
 }
 
+type httpError struct {
+    Status int
+    Reason error
+}
+
+func (r *httpError) Error() string {
+    return r.Reason.Error()
+}
+
+func (r *httpError) Unwrap() error {
+    return r.Reason
+}
+
+func newHttpError(status int, reason error) *httpError {
+    return &httpError{ Status: status, Reason: reason }
+}
+
+func dumpHttpErrorResponse(w http.ResponseWriter, err error) {
+    status_code := http.StatusInternalServerError
+    var http_err *httpError
+    if errors.As(err, &http_err) {
+        status_code = http_err.Status
+    }
+    dumpJsonResponse(w, status_code, map[string]interface{}{ "status": "ERROR", "reason": err.Error() })
+}
+
+func dumpVerifierProvisionError(err error, w http.ResponseWriter) {
+    if errors.Is(err, os.ErrPermission) {
+        err = newHttpError(http.StatusBadRequest, err)
+    }
+    dumpHttpErrorResponse(w, err)
+}
+
+func checkVerificationCode(path string, verifier *verificationRegistry) (fs.FileInfo, error) {
+    expected_code, ok := verifier.Pop(path)
+    if !ok {
+        return nil, newHttpError(http.StatusBadRequest, fmt.Errorf("no verification code available for %q", path))
+    }
+
+    // Make sure to use Lstat here, not Stat; otherwise, someone could
+    // create a symlink to a file owned by someone else and pretend to be
+    // that person when registering a directory.
+    expected_path := filepath.Join(path, expected_code)
+    code_info, err := os.Lstat(expected_path)
+    if errors.Is(err, os.ErrNotExist) {
+        return nil, newHttpError(http.StatusUnauthorized, fmt.Errorf("verification failed for %q; %v", path, err))
+    } else if err != nil {
+        return nil, fmt.Errorf("failed to inspect verification code for %q; %v", path, err)
+    }
+
+    // Similarly, prohibit hard links to avoid spoofing identities. Admittedly,
+    // if a user has write access to create a hard link in the directory, then
+    // they would be able to (de)register the directory themselves anyway.
+    s, ok := code_info.Sys().(*syscall.Stat_t)
+    if !ok {
+        return nil, fmt.Errorf("failed to convert into a syscall.Stat_t; %v", err)
+    } else if int(s.Nlink) > 1 {
+        return nil, newHttpError(http.StatusBadRequest, fmt.Errorf("verification path has multiple hard links; %v", err))
+    }
+
+    return code_info, nil
+}
+
 /**********************************************************************/
 
 func newRegisterStartHandler(verifier *verificationRegistry) func(http.ResponseWriter, *http.Request) {
@@ -87,11 +151,7 @@ func newRegisterStartHandler(verifier *verificationRegistry) func(http.ResponseW
 
         candidate, err := verifier.Provision(regpath)
         if err != nil {
-            status := http.StatusInternalServerError
-            if errors.Is(err, os.ErrPermission) {
-                status = http.StatusBadRequest
-            }
-            dumpJsonResponse(w, status, map[string]string{ "status": "ERROR", "reason": fmt.Sprintf("failed to generate a suitable verification code for %q; %v", regpath, err) })
+            dumpVerifierProvisionError(err, w)
             return
         }
 
@@ -150,28 +210,14 @@ func newRegisterFinishHandler(db *sql.DB, verifier *verificationRegistry, tokeni
             allowed["metadata.json"] = true
         }
 
-        expected_code, ok := verifier.Pop(regpath)
-        if !ok {
-            dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": fmt.Sprintf("no verification code available for %q", regpath) })
+        code_info, err := checkVerificationCode(regpath, verifier)
+        if err != nil {
+            dumpHttpErrorResponse(w, err)
             return
         }
-
-        // Make sure to use Lstat here, not Stat; otherwise, someone could
-        // create a symlink to a file owned by someone else and pretend to be
-        // that person when registering a directory.
-        expected_path := filepath.Join(regpath, expected_code)
-        code_info, err := os.Lstat(expected_path)
-        if errors.Is(err, os.ErrNotExist) {
-            dumpJsonResponse(w, http.StatusUnauthorized, map[string]string{ "status": "ERROR", "reason": fmt.Sprintf("verification failed for %q; %v", regpath, err) })
-            return
-        } else if err != nil {
-            dumpJsonResponse(w, http.StatusInternalServerError, map[string]string{ "status": "ERROR", "reason": fmt.Sprintf("failed to inspect verification code for %q; %v", regpath, err) })
-            return
-        }
-
         username, err := identifyUser(code_info)
         if err != nil {
-            dumpJsonResponse(w, http.StatusInternalServerError, map[string]string{ "status": "ERROR", "reason": fmt.Sprintf("cannot identify the registering user from %q; %v", regpath, err) })
+            dumpHttpErrorResponse(w, fmt.Errorf("cannot identify the registering user from %q; %v", regpath, err))
             return
         }
 
@@ -228,11 +274,7 @@ func newDeregisterStartHandler(db *sql.DB, verifier *verificationRegistry) func(
 
         candidate, err := verifier.Provision(regpath)
         if err != nil {
-            status := http.StatusInternalServerError
-            if errors.Is(err, os.ErrPermission) {
-                status = http.StatusBadRequest
-            }
-            dumpJsonResponse(w, status, map[string]string{ "status": "ERROR", "reason": fmt.Sprintf("failed to generate a suitable verification code for %q; %v", regpath, err) })
+            dumpVerifierProvisionError(err, w)
             return
         }
 
@@ -267,19 +309,9 @@ func newDeregisterFinishHandler(db *sql.DB, verifier *verificationRegistry) func
             return
         }
 
-        expected_code, ok := verifier.Pop(regpath)
-        if !ok {
-            dumpJsonResponse(w, http.StatusInternalServerError, map[string]string{ "status": "ERROR", "reason": fmt.Sprintf("no verification code available for %q", regpath) })
-            return
-        }
-
-        expected_path := filepath.Join(regpath, expected_code)
-        _, err = os.Lstat(expected_path)
-        if errors.Is(err, os.ErrNotExist) {
-            dumpJsonResponse(w, http.StatusUnauthorized, map[string]string{ "status": "ERROR", "reason": fmt.Sprintf("verification failed for %q; %v", regpath, err) })
-            return
-        } else if err != nil {
-            dumpJsonResponse(w, http.StatusInternalServerError, map[string]string{ "status": "ERROR", "reason": fmt.Sprintf("failed to inspect verification code for %q; %v", regpath, err) })
+        _, err = checkVerificationCode(regpath, verifier)
+        if err != nil {
+            dumpHttpErrorResponse(w, err)
             return
         }
 

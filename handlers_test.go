@@ -53,6 +53,92 @@ func TestValidateRequestPath(t *testing.T) {
     }
 }
 
+func TestCheckVerificationCode(t *testing.T) {
+    v := newVerificationRegistry(3)
+
+    t.Run("success", func(t * testing.T) {
+        target, err := os.MkdirTemp("", "")
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        code, err := v.Provision(target)
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        err = os.WriteFile(filepath.Join(target, code), []byte{}, 0644)
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        info, err := checkVerificationCode(target, v)
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        if info == nil || !strings.HasPrefix(info.Name(), ".sewer_") {
+            t.Fatalf("unexpected file %v", info)
+        }
+    })
+
+    t.Run("no code", func(t * testing.T) {
+        target, err := os.MkdirTemp("", "")
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        _, err = checkVerificationCode(target, v)
+        if err == nil || !strings.Contains(err.Error(), "no verification code") {
+            t.Fatal("should have failed")
+        }
+    })
+
+    t.Run("no file", func(t * testing.T) {
+        target, err := os.MkdirTemp("", "")
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        _, err = v.Provision(target)
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        _, err = checkVerificationCode(target, v)
+        if err == nil || !strings.Contains(err.Error(), "verification failed") {
+            t.Fatal("should have failed")
+        }
+    })
+
+    t.Run("hard links", func(t * testing.T) {
+        target, err := os.MkdirTemp("", "")
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        code, err := v.Provision(target)
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        err = os.WriteFile(filepath.Join(target, code), []byte{}, 0644)
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        err = os.Link(filepath.Join(target, code), filepath.Join(target, "foo"))
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        _, err = checkVerificationCode(target, v)
+        if err == nil || !strings.Contains(err.Error(), "hard link") {
+            t.Fatal("should have failed")
+        }
+    })
+}
+
 func decodeStringyResponse(input io.Reader, t *testing.T) map[string]string {
     var output map[string]string
     dec := json.NewDecoder(input)
