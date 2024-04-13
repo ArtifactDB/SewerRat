@@ -36,17 +36,21 @@ func dumpJsonResponse(w http.ResponseWriter, status int, v interface{}) {
     }
 }
 
-func validatePath(path string) error { 
+func validatePath(path string) (string, error) { 
     if path == "" {
-        return errors.New("'path' should be present as a non-empty string")
+        return "", errors.New("'path' should be present as a non-empty string")
     }
     if !filepath.IsAbs(path) {
-        return errors.New("'path' should be an absolute path")
+        return "", errors.New("'path' should be an absolute path")
     }
-    if strings.HasSuffix(path, "/") {
-        return errors.New("'path' should not have a trailing slash ")
-    }
-    return nil
+
+    // We limit ourselves to cleaning the path and no further normalization.
+    // In particular, we don't try to evaluate the symbolic links as the "real"
+    // path may not be consistent across the shared filesystem (e.g., due to
+    // mounts onto different compute centers). So the symbolic links in the path
+    // to the registered directory may be important (though once we're inside
+    // a registered directory, any symbolic links are forbidden).
+    return filepath.Clean(path), nil
 }
 
 type httpError struct {
@@ -133,8 +137,7 @@ func newRegisterStartHandler(verifier *verificationRegistry) func(http.ResponseW
             return
         }
 
-        regpath := output.Path
-        err = validatePath(regpath)
+        regpath, err := validatePath(output.Path)
         if err != nil {
             dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": err.Error() })
             return
@@ -182,8 +185,7 @@ func newRegisterFinishHandler(db *sql.DB, verifier *verificationRegistry, tokeni
             return
         }
 
-        regpath := output.Path
-        err = validatePath(regpath)
+        regpath, err := validatePath(output.Path)
         if err != nil {
             dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": err.Error() })
             return
@@ -253,8 +255,7 @@ func newDeregisterStartHandler(db *sql.DB, verifier *verificationRegistry) func(
             return
         }
 
-        regpath := output.Path
-        err = validatePath(regpath)
+        regpath, err := validatePath(output.Path)
         if err != nil {
             dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": err.Error() })
             return
@@ -302,8 +303,7 @@ func newDeregisterFinishHandler(db *sql.DB, verifier *verificationRegistry) func
             return
         }
 
-        regpath := output.Path
-        err = validatePath(regpath)
+        regpath, err := validatePath(output.Path)
         if err != nil {
             dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": err.Error() })
             return
@@ -501,6 +501,11 @@ func newRetrieveFileHandler(db *sql.DB) func(http.ResponseWriter, *http.Request)
             dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": fmt.Sprintf("path is not properly URL-encoded; %v", err) })
             return
         }
+        path, err = validatePath(path)
+        if err != nil {
+            dumpHttpErrorResponse(w, newHttpError(http.StatusBadRequest, fmt.Errorf("invalid path; %w", err)))
+            return
+        }
 
         okay, err := isSubpathRegistered(db, filepath.Dir(path))
         if err != nil {
@@ -542,6 +547,8 @@ func newListFilesHandler(db *sql.DB) func(http.ResponseWriter, *http.Request) {
         }
 
         params := r.URL.Query()
+        recursive := params.Get("recursive") == "true"
+
         if !params.Has("path") {
             dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": fmt.Sprintf("expected a 'path' query parameter") })
         }
@@ -550,7 +557,11 @@ func newListFilesHandler(db *sql.DB) func(http.ResponseWriter, *http.Request) {
             dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": fmt.Sprintf("path is not properly URL-encoded; %v", err) })
             return
         }
-        recursive := params.Get("recursive") == "true"
+        path, err = validatePath(path)
+        if err != nil {
+            dumpHttpErrorResponse(w, newHttpError(http.StatusBadRequest, fmt.Errorf("invalid path; %w", err)))
+            return
+        }
 
         okay, err := isSubpathRegistered(db, path)
         if err != nil {

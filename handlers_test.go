@@ -36,20 +36,31 @@ func TestDumpJsonResponse(t *testing.T) {
     }
 }
 
-func TestValidateRequestPath(t *testing.T) {
-    err := validatePath("")
+func TestValidatePath(t *testing.T) {
+    _, err := validatePath("")
     if err == nil || !strings.Contains(err.Error(), "empty string") {
         t.Fatalf("expected an empty string error")
     }
 
-    err = validatePath("foobar")
+    _, err = validatePath("foobar")
     if err == nil || !strings.Contains(err.Error(), "absolute path") {
         t.Fatalf("expected an absolute path error")
     }
 
-    err = validatePath("/whee/foobar/")
-    if err == nil || !strings.Contains(err.Error(), "trailing slash") {
-        t.Fatalf("expected a trailing slash error")
+    path, err := validatePath("/whee/foobar/")
+    if err != nil {
+        t.Fatal(err)
+    }
+    if path != "/whee/foobar" {
+        t.Fatalf("expected elimination of trailing slashes, got %q instead", path)
+    }
+
+    path, err = validatePath("/whee/a/../foobar/")
+    if err != nil {
+        t.Fatal(err)
+    }
+    if path != "/whee/foobar" {
+        t.Fatalf("expected cleaning of the path, got %q instead", path)
     }
 }
 
