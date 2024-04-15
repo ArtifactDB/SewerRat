@@ -53,21 +53,8 @@ func validatePath(path string) (string, error) {
     return filepath.Clean(path), nil
 }
 
-type httpError struct {
-    Status int
-    Reason error
-}
-
-func (r *httpError) Error() string {
-    return r.Reason.Error()
-}
-
-func (r *httpError) Unwrap() error {
-    return r.Reason
-}
-
-func newHttpError(status int, reason error) *httpError {
-    return &httpError{ Status: status, Reason: reason }
+func dumpErrorResponse(w http.ResponseWriter, status_code int, reason string) {
+    dumpJsonResponse(w, status_code, map[string]interface{}{ "status": "ERROR", "reason": reason })
 }
 
 func dumpHttpErrorResponse(w http.ResponseWriter, err error) {
@@ -76,14 +63,7 @@ func dumpHttpErrorResponse(w http.ResponseWriter, err error) {
     if errors.As(err, &http_err) {
         status_code = http_err.Status
     }
-    dumpJsonResponse(w, status_code, map[string]interface{}{ "status": "ERROR", "reason": err.Error() })
-}
-
-func dumpVerifierProvisionError(err error, w http.ResponseWriter) {
-    if errors.Is(err, os.ErrPermission) {
-        err = newHttpError(http.StatusBadRequest, err)
-    }
-    dumpHttpErrorResponse(w, err)
+    dumpErrorResponse(w, status_code, err.Error())
 }
 
 func checkVerificationCode(path string, verifier *verificationRegistry) (fs.FileInfo, error) {
@@ -98,9 +78,9 @@ func checkVerificationCode(path string, verifier *verificationRegistry) (fs.File
     expected_path := filepath.Join(path, expected_code)
     code_info, err := os.Lstat(expected_path)
     if errors.Is(err, os.ErrNotExist) {
-        return nil, newHttpError(http.StatusUnauthorized, fmt.Errorf("verification failed for %q; %v", path, err))
+        return nil, newHttpError(http.StatusUnauthorized, fmt.Errorf("verification failed for %q; %w", path, err))
     } else if err != nil {
-        return nil, fmt.Errorf("failed to inspect verification code for %q; %v", path, err)
+        return nil, fmt.Errorf("failed to inspect verification code for %q; %w", path, err)
     }
 
     // Similarly, prohibit hard links to avoid spoofing identities. Admittedly,
@@ -108,9 +88,9 @@ func checkVerificationCode(path string, verifier *verificationRegistry) (fs.File
     // they would be able to (de)register the directory themselves anyway.
     s, ok := code_info.Sys().(*syscall.Stat_t)
     if !ok {
-        return nil, fmt.Errorf("failed to convert into a syscall.Stat_t; %v", err)
+        return nil, fmt.Errorf("failed to convert into a syscall.Stat_t; %w", err)
     } else if int(s.Nlink) > 1 {
-        return nil, newHttpError(http.StatusBadRequest, fmt.Errorf("verification path has multiple hard links; %v", err))
+        return nil, newHttpError(http.StatusBadRequest, fmt.Errorf("verification path has multiple hard links; %w", err))
     }
 
     return code_info, nil
@@ -118,43 +98,52 @@ func checkVerificationCode(path string, verifier *verificationRegistry) (fs.File
 
 /**********************************************************************/
 
+func checkValidRegistrationPath(path string) error {
+    info, err := os.Lstat(path)
+    if err != nil {
+        return fmt.Errorf("failed to stat; %w", err)
+    } else if info.Mode() & fs.ModeSymlink != 0 {
+        return errors.New("path cannot be a symbolic link to a directory")
+    } else if !info.IsDir() {
+        return errors.New("path should be a directory")
+    }
+    return nil
+}
+
 func newRegisterStartHandler(verifier *verificationRegistry) func(http.ResponseWriter, *http.Request) {
     return func(w http.ResponseWriter, r *http.Request) {
         if r.Method != "POST" {
-            dumpJsonResponse(w, http.StatusMethodNotAllowed, map[string]string{ "status": "ERROR", "reason": "expected a POST request" })
+            dumpErrorResponse(w, http.StatusMethodNotAllowed, "expected a POST request")
             return
         }
 
         if r.Body == nil {
-            dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": "expected a non-empty request body" })
+            dumpErrorResponse(w, http.StatusBadRequest, "expected a non-empty request body")
             return
         }
         dec := json.NewDecoder(r.Body)
         output := struct { Path string `json:"path"` }{}
         err := dec.Decode(&output)
         if err != nil {
-            dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": fmt.Sprintf("failed to decode body; %v", err) })
+            dumpErrorResponse(w, http.StatusBadRequest, fmt.Sprintf("failed to decode body; %v", err))
             return
         }
 
         regpath, err := validatePath(output.Path)
         if err != nil {
-            dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": err.Error() })
+            dumpErrorResponse(w, http.StatusBadRequest, err.Error())
             return
         }
 
-        info, err := os.Lstat(regpath)
+        err = checkValidRegistrationPath(regpath)
         if err != nil {
-            dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": fmt.Sprintf("failed to stat; %v", err) })
-            return
-        } else if info.Mode() & fs.ModeSymlink != 0 {
-            dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": "cannot register a symbolic link" })
+            dumpErrorResponse(w, http.StatusBadRequest, err.Error())
             return
         }
 
         candidate, err := verifier.Provision(regpath)
         if err != nil {
-            dumpVerifierProvisionError(err, w)
+            dumpHttpErrorResponse(w, fmt.Errorf("failed to provision a verification code; %w", err))
             return
         }
 
@@ -166,12 +155,12 @@ func newRegisterStartHandler(verifier *verificationRegistry) func(http.ResponseW
 func newRegisterFinishHandler(db *sql.DB, verifier *verificationRegistry, tokenizer *unicodeTokenizer) func(http.ResponseWriter, *http.Request) {
     return func(w http.ResponseWriter, r *http.Request) {
         if r.Method != "POST" {
-            dumpJsonResponse(w, http.StatusMethodNotAllowed, map[string]string{ "status": "ERROR", "reason": "expected a POST request" })
+            dumpErrorResponse(w, http.StatusMethodNotAllowed, "expected a POST request")
             return
         }
 
         if r.Body == nil {
-            dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": "expected a non-empty request body" })
+            dumpErrorResponse(w, http.StatusBadRequest, "expected a non-empty request body")
             return
         }
         dec := json.NewDecoder(r.Body)
@@ -181,13 +170,19 @@ func newRegisterFinishHandler(db *sql.DB, verifier *verificationRegistry, tokeni
         }{}
         err := dec.Decode(&output)
         if err != nil {
-            dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": fmt.Sprintf("failed to decode body; %v", err) })
+            dumpErrorResponse(w, http.StatusBadRequest, fmt.Sprintf("failed to decode body; %v", err))
             return
         }
 
         regpath, err := validatePath(output.Path)
         if err != nil {
-            dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": err.Error() })
+            dumpErrorResponse(w, http.StatusBadRequest, err.Error())
+            return
+        }
+
+        err = checkValidRegistrationPath(regpath)
+        if err != nil {
+            dumpHttpErrorResponse(w, err)
             return
         }
 
@@ -195,17 +190,17 @@ func newRegisterFinishHandler(db *sql.DB, verifier *verificationRegistry, tokeni
         if output.Base != nil {
             for _, a := range output.Base {
                 if len(a) == 0 {
-                    dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": "empty name in 'base'" })
+                    dumpErrorResponse(w, http.StatusBadRequest, "empty name in 'base'")
                     return
                 }
                 if _, ok := allowed[a]; ok {
-                    dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": "duplicate names in 'base'" })
+                    dumpErrorResponse(w, http.StatusBadRequest, "duplicate names in 'base'")
                     return
                 }
                 allowed[a] = true
             }
             if len(allowed) == 0 {
-                dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": "'base' should have at least one name" })
+                dumpErrorResponse(w, http.StatusBadRequest, "'base' should have at least one name")
                 return
             }
         } else {
@@ -219,13 +214,13 @@ func newRegisterFinishHandler(db *sql.DB, verifier *verificationRegistry, tokeni
         }
         username, err := identifyUser(code_info)
         if err != nil {
-            dumpHttpErrorResponse(w, fmt.Errorf("cannot identify the registering user from %q; %v", regpath, err))
+            dumpHttpErrorResponse(w, fmt.Errorf("cannot identify the registering user from %q; %w", regpath, err))
             return
         }
 
         failures, err := addDirectory(db, regpath, allowed, username, tokenizer)
         if err != nil {
-            dumpJsonResponse(w, http.StatusInternalServerError, map[string]string{ "status": "ERROR", "reason": fmt.Sprintf("failed to index directory; %v", err) })
+            dumpHttpErrorResponse(w, fmt.Errorf("failed to index directory; %w", err))
             return
         }
 
@@ -239,33 +234,34 @@ func newRegisterFinishHandler(db *sql.DB, verifier *verificationRegistry, tokeni
 func newDeregisterStartHandler(db *sql.DB, verifier *verificationRegistry) func(http.ResponseWriter, *http.Request) {
     return func(w http.ResponseWriter, r *http.Request) {
         if r.Method != "POST" {
-            dumpJsonResponse(w, http.StatusMethodNotAllowed, map[string]string{ "status": "ERROR", "reason": "expected a POST request" })
+            dumpErrorResponse(w, http.StatusMethodNotAllowed, "expected a POST request")
             return
         }
 
         if r.Body == nil {
-            dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": "expected a non-empty request body" })
+            dumpErrorResponse(w, http.StatusBadRequest, "expected a non-empty request body")
             return
         }
         dec := json.NewDecoder(r.Body)
         output := struct { Path string `json:"path"` }{}
         err := dec.Decode(&output)
         if err != nil {
-            dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": fmt.Sprintf("failed to decode body; %v", err) })
+            dumpHttpErrorResponse(w, newHttpError(http.StatusBadRequest, fmt.Errorf("failed to decode body; %w", err)))
             return
         }
 
         regpath, err := validatePath(output.Path)
         if err != nil {
-            dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": err.Error() })
+            dumpErrorResponse(w, http.StatusBadRequest, err.Error())
             return
         }
 
+        // No need to check for a valid directory, as we want to be able to deregister missing/symlinked directories.
         // If the directory doesn't exist, then we don't need to attempt to create a verification code.
         if _, err := os.Lstat(regpath); errors.Is(err, os.ErrNotExist) {
             err := deleteDirectory(db, regpath)
             if err != nil {
-                dumpJsonResponse(w, http.StatusInternalServerError, map[string]string{ "status": "ERROR", "reason": fmt.Sprintf("failed to deregister %q; %v", regpath, err) })
+                dumpHttpErrorResponse(w, fmt.Errorf("failed to deregister %q; %w", regpath, err))
                 return
             } else {
                 dumpJsonResponse(w, http.StatusOK, map[string]string{ "status": "SUCCESS" })
@@ -275,7 +271,7 @@ func newDeregisterStartHandler(db *sql.DB, verifier *verificationRegistry) func(
 
         candidate, err := verifier.Provision(regpath)
         if err != nil {
-            dumpVerifierProvisionError(err, w)
+            dumpHttpErrorResponse(w, fmt.Errorf("failed to provision a verification code; %w", err))
             return
         }
 
@@ -287,25 +283,25 @@ func newDeregisterStartHandler(db *sql.DB, verifier *verificationRegistry) func(
 func newDeregisterFinishHandler(db *sql.DB, verifier *verificationRegistry) func(http.ResponseWriter, *http.Request) {
     return func(w http.ResponseWriter, r *http.Request) {
         if r.Method != "POST" {
-            dumpJsonResponse(w, http.StatusMethodNotAllowed, map[string]string{ "status": "ERROR", "reason": "expected a POST request" })
+            dumpErrorResponse(w, http.StatusMethodNotAllowed, "expected a POST request")
             return
         }
 
         if r.Body == nil {
-            dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": "expected a non-empty request body" })
+            dumpErrorResponse(w, http.StatusBadRequest, "expected a non-empty request body")
             return
         }
         dec := json.NewDecoder(r.Body)
         output := struct { Path string `json:"path"` }{}
         err := dec.Decode(&output)
         if err != nil {
-            dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": fmt.Sprintf("failed to decode body; %v", err) })
+            dumpErrorResponse(w, http.StatusBadRequest, fmt.Sprintf("failed to decode body; %v", err))
             return
         }
 
         regpath, err := validatePath(output.Path)
         if err != nil {
-            dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": err.Error() })
+            dumpErrorResponse(w, http.StatusBadRequest, err.Error())
             return
         }
 
@@ -317,7 +313,7 @@ func newDeregisterFinishHandler(db *sql.DB, verifier *verificationRegistry) func
 
         err = deleteDirectory(db, regpath)
         if err != nil {
-            dumpJsonResponse(w, http.StatusInternalServerError, map[string]string{ "status": "ERROR", "reason": fmt.Sprintf("failed to deregister %q; %v", regpath, err) })
+            dumpHttpErrorResponse(w, fmt.Errorf("failed to deregister %q; %w", regpath, err))
             return
         }
 
@@ -439,23 +435,33 @@ func newQueryHandler(db *sql.DB, tokenizer *unicodeTokenizer, wild_tokenizer *un
 
 /**********************************************************************/
 
+func getRetrievePath(params url.Values) (string, error) {
+    if !params.Has("path") {
+        return "", errors.New("expected a 'path' query parameter")
+    }
+
+    path, err := url.QueryUnescape(params.Get("path"))
+    if err != nil {
+        return "", fmt.Errorf("path is not properly URL-encoded; %w", err)
+    }
+
+    return filepath.Clean(path), nil
+}
+
 func newRetrieveMetadataHandler(db *sql.DB) func(http.ResponseWriter, *http.Request) {
     return func(w http.ResponseWriter, r *http.Request) {
         if configureCors(w, r) {
             return
         }
         if r.Method != "GET" {
-            dumpJsonResponse(w, http.StatusMethodNotAllowed, map[string]string{ "status": "ERROR", "reason": "expected a GET request" })
+            dumpErrorResponse(w, http.StatusMethodNotAllowed, "expected a GET request")
             return
         }
 
         params := r.URL.Query()
-        if !params.Has("path") {
-            dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": fmt.Sprintf("expected a 'path' query parameter") })
-        }
-        path, err := url.QueryUnescape(params.Get("path"))
+        path, err := getRetrievePath(params)
         if err != nil {
-            dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": fmt.Sprintf("path is not properly URL-encoded; %v", err) })
+            dumpHttpErrorResponse(w, newHttpError(http.StatusBadRequest, err))
             return
         }
 
@@ -466,12 +472,12 @@ func newRetrieveMetadataHandler(db *sql.DB) func(http.ResponseWriter, *http.Requ
 
         res, err := retrievePath(db, path, use_metadata)
         if err != nil {
-            dumpJsonResponse(w, http.StatusInternalServerError, map[string]string{ "status": "ERROR", "reason": fmt.Sprintf("failed to retrieve path; %v", err) })
+            dumpHttpErrorResponse(w, fmt.Errorf("failed to retrieve path; %w", err))
             return
         }
 
         if res == nil {
-            dumpJsonResponse(w, http.StatusNotFound, map[string]string{ "status": "ERROR", "reason": "path is not registered" })
+            dumpErrorResponse(w, http.StatusNotFound, "path is not registered")
             return
         }
 
@@ -488,45 +494,47 @@ func newRetrieveFileHandler(db *sql.DB) func(http.ResponseWriter, *http.Request)
             return
         }
         if r.Method != "GET" {
-            dumpJsonResponse(w, http.StatusMethodNotAllowed, map[string]string{ "status": "ERROR", "reason": "expected a GET request" })
+            dumpErrorResponse(w, http.StatusMethodNotAllowed, "expected a GET request")
             return
         }
 
         params := r.URL.Query()
-        if !params.Has("path") {
-            dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": fmt.Sprintf("expected a 'path' query parameter") })
-        }
-        path, err := url.QueryUnescape(params.Get("path"))
+        path, err := getRetrievePath(params)
         if err != nil {
-            dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": fmt.Sprintf("path is not properly URL-encoded; %v", err) })
-            return
-        }
-        path, err = validatePath(path)
-        if err != nil {
-            dumpHttpErrorResponse(w, newHttpError(http.StatusBadRequest, fmt.Errorf("invalid path; %w", err)))
+            dumpErrorResponse(w, http.StatusBadRequest, err.Error())
             return
         }
 
-        okay, err := isSubpathRegistered(db, filepath.Dir(path))
+        path, err = validatePath(path)
         if err != nil {
-            dumpJsonResponse(w, http.StatusInternalServerError, map[string]string{ "status": "ERROR", "reason": fmt.Sprintf("failed to check path registration; %v", err) })
+            dumpErrorResponse(w, http.StatusBadRequest, fmt.Sprintf("invalid path; %v", err))
+            return
+        }
+
+        okay, err := isDirectoryRegistered(db, filepath.Dir(path))
+        if err != nil {
+            dumpHttpErrorResponse(w, fmt.Errorf("failed to check directory registration; %w", err))
             return
         }
         if !okay {
-            dumpJsonResponse(w, http.StatusForbidden, map[string]string{ "status": "ERROR", "reason": "cannot retrieve file from an unregistered path" })
+            dumpHttpErrorResponse(w, newHttpError(http.StatusForbidden, errors.New("cannot retrieve file from an unregistered path")))
             return
         }
 
-        // Note that isSubpathRegistered already checks for links at every step of the path.
         info, err := os.Lstat(path)
-        if errors.Is(err, os.ErrNotExist) {
-            dumpJsonResponse(w, http.StatusNotFound, map[string]string{ "status": "ERROR", "reason": "path does not exist" })
-            return
-        } else if err != nil {
-            dumpJsonResponse(w, http.StatusInternalServerError, map[string]string{ "status": "ERROR", "reason": fmt.Sprintf("inaccessible path; %v", err) })
-            return
+        if err != nil {
+            if errors.Is(err, os.ErrNotExist) {
+                err = newHttpError(http.StatusNotFound, errors.New("path does not exist"))
+            } else {
+                err = fmt.Errorf("inaccessible path; %w", err)
+            }
+        } else if info.Mode() & fs.ModeSymlink != 0 {
+            err = newHttpError(http.StatusBadRequest, fmt.Errorf("cannot retrieve contents of a symbolic link; %w", err))
         } else if info.IsDir() {
-            dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": "path should refer to a file, not a directory" })
+            err = newHttpError(http.StatusBadRequest, errors.New("path should refer to a file, not a directory"))
+        }
+        if err != nil {
+            dumpHttpErrorResponse(w, err)
             return
         }
 
@@ -542,53 +550,31 @@ func newListFilesHandler(db *sql.DB) func(http.ResponseWriter, *http.Request) {
             return
         }
         if r.Method != "GET" {
-            dumpJsonResponse(w, http.StatusMethodNotAllowed, map[string]string{ "status": "ERROR", "reason": "expected a GET request" })
+            dumpErrorResponse(w, http.StatusMethodNotAllowed, "expected a GET request")
             return
         }
 
         params := r.URL.Query()
         recursive := params.Get("recursive") == "true"
-
-        if !params.Has("path") {
-            dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": fmt.Sprintf("expected a 'path' query parameter") })
-        }
-        path, err := url.QueryUnescape(params.Get("path"))
+        path, err := getRetrievePath(params)
         if err != nil {
-            dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": fmt.Sprintf("path is not properly URL-encoded; %v", err) })
-            return
-        }
-        path, err = validatePath(path)
-        if err != nil {
-            dumpHttpErrorResponse(w, newHttpError(http.StatusBadRequest, fmt.Errorf("invalid path; %w", err)))
+            dumpHttpErrorResponse(w, newHttpError(http.StatusBadRequest, err))
             return
         }
 
-        okay, err := isSubpathRegistered(db, path)
+        okay, err := isDirectoryRegistered(db, path)
         if err != nil {
-            dumpJsonResponse(w, http.StatusInternalServerError, map[string]string{ "status": "ERROR", "reason": fmt.Sprintf("failed to check path registration; %v", err) })
+            dumpHttpErrorResponse(w, fmt.Errorf("failed to check path registration; %w", err))
             return
         }
         if !okay {
-            dumpJsonResponse(w, http.StatusForbidden, map[string]string{ "status": "ERROR", "reason": "cannot retrieve file from an unregistered path" })
-            return
-        }
-
-        // isSubpathRegistered already checks for symlinks in the path.
-        info, err := os.Lstat(path)
-        if errors.Is(err, os.ErrNotExist) {
-            dumpJsonResponse(w, http.StatusNotFound, map[string]string{ "status": "ERROR", "reason": "path does not exist" })
-            return
-        } else if err != nil {
-            dumpJsonResponse(w, http.StatusInternalServerError, map[string]string{ "status": "ERROR", "reason": fmt.Sprintf("inaccessible path; %v", err) })
-            return
-        } else if !info.IsDir() {
-            dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": "path should refer to a directory" })
+            dumpHttpErrorResponse(w, newHttpError(http.StatusForbidden, errors.New("cannot retrieve file from an unregistered path")))
             return
         }
 
         listing, err := listFiles(path, recursive)
         if err != nil {
-            dumpJsonResponse(w, http.StatusInternalServerError, map[string]string{ "status": "ERROR", "reason": fmt.Sprintf("failed to obtain listing; %v", err) })
+            dumpHttpErrorResponse(w, fmt.Errorf("failed to obtain listing; %w", err))
             return
         }
         dumpJsonResponse(w, http.StatusOK, listing)

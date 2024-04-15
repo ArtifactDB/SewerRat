@@ -9,6 +9,7 @@ import (
     "crypto/rand"
     "errors"
     "time"
+    "net/http"
 )
 
 type verificationSession struct {
@@ -53,7 +54,7 @@ func (vr *verificationRegistry) Provision(path string) (string, error) {
                 found = true
                 break
             } else if errors.Is(err, os.ErrPermission) {
-                return "", fmt.Errorf("path is not accessible; %w", err)
+                return "", newHttpError(http.StatusBadRequest, fmt.Errorf("path is not accessible; %w", err))
             } else {
                 return "", fmt.Errorf("failed to inspect path; %w", err)
             }

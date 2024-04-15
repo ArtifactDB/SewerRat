@@ -9,6 +9,7 @@ import (
     "encoding/json"
     "path/filepath"
     "io/fs"
+    "net/http"
     "database/sql"
     "strconv"
     "context"
@@ -894,28 +895,32 @@ func retrievePath(db * sql.DB, path string, include_metadata bool) (*queryResult
 
 /**********************************************************************/
 
-func isSubpathRegistered(db * sql.DB, path string) (bool, error) {
+func isDirectoryRegistered(db * sql.DB, path string) (bool, error) {
     collected := []interface{}{}
     for {
-        // If we encounter a symlink, we can assume that neither it or its
-        // parent directories can be a registered directory, as it is forbidden
-        // to access symlinks inside a registered directory that might cause
-        // breakouts; so we stop. Note that this still allows the registered 
-        // directory itself to have a symlink among its parents, which is ok.
-        //
-        // Also note that we don't break if there's an error in the Lstat; 
-        // we let the caller to decide what to do with missing files.
         info, err := os.Lstat(path)
-        if err == nil && info.Mode() & fs.ModeSymlink != 0 { 
+        if err != nil {
+            if errors.Is(err, os.ErrNotExist) {
+                return false, newHttpError(http.StatusNotFound, errors.New("path does not exist"))
+            } else {
+                return false, fmt.Errorf("inaccessible path; %v", err)
+            }
+        } else if info.Mode() & fs.ModeSymlink != 0 { 
+            // Normally, we would throw an error here as symlinks are persona
+            // non grata within a registry. However, it's legal for a
+            // registered directory to have a symlink in its parents. Thus, we
+            // quit the loop and search on the current 'collected'; if any of
+            // these are registered, all is fine as the symlink occurs in the
+            // parents. Had we kept on taking the dirnames, all would NOT be
+            // fine as the symlink would have been inside the registered
+            // directory of subsequent additions to 'collected'.
             break
+        } else if !info.IsDir() {
+            return false, newHttpError(http.StatusBadRequest, errors.New("path should refer to a directory"))
         }
 
-        // Same logic as above, but for '..' that can cause breakouts.
-        base := filepath.Base(path)
-        if base == ".." {
-            break
-        }
-
+        // Note that there's no need to defend against '..', as it is assumed
+        // that all paths are Cleaned before this point.
         collected = append(collected, path)
 
         newpath := filepath.Dir(path)

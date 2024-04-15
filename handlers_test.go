@@ -459,7 +459,7 @@ func TestDeregisterHandlers(t *testing.T) {
         rr := httptest.NewRecorder()
         handler.ServeHTTP(rr, req)
         if rr.Code != http.StatusUnauthorized {
-            t.Fatalf("should have failed due to lack of code")
+            t.Fatalf("should have failed with a 401 (got %d instead)", rr.Code)
         }
     })
 
@@ -1138,7 +1138,7 @@ func TestListFilesHandler(t *testing.T) {
         rr := httptest.NewRecorder()
         handler.ServeHTTP(rr, req)
         if rr.Code != http.StatusNotFound {
-            t.Fatalf("should have failed with a 404")
+            t.Fatalf("should have failed with a 404 (got %d instead)", rr.Code)
         }
     })
 
@@ -1164,7 +1164,7 @@ func TestListFilesHandler(t *testing.T) {
         rr := httptest.NewRecorder()
         handler.ServeHTTP(rr, req)
         if rr.Code != http.StatusBadRequest {
-            t.Fatalf("should have failed with a 400")
+            t.Fatalf("should have failed with a 400 (got %d instead)", rr.Code)
         }
     })
 }
