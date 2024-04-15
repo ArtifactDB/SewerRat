@@ -53,23 +53,6 @@ func validatePath(path string) (string, error) {
     return filepath.Clean(path), nil
 }
 
-type httpError struct {
-    Status int
-    Reason error
-}
-
-func (r *httpError) Error() string {
-    return r.Reason.Error()
-}
-
-func (r *httpError) Unwrap() error {
-    return r.Reason
-}
-
-func newHttpError(status int, reason error) *httpError {
-    return &httpError{ Status: status, Reason: reason }
-}
-
 func dumpHttpErrorResponse(w http.ResponseWriter, err error) {
     status_code := http.StatusInternalServerError
     var http_err *httpError
@@ -143,12 +126,9 @@ func newRegisterStartHandler(verifier *verificationRegistry) func(http.ResponseW
             return
         }
 
-        info, err := os.Lstat(regpath)
+        err = checkValidDirectory(regpath)
         if err != nil {
-            dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": fmt.Sprintf("failed to stat; %v", err) })
-            return
-        } else if info.Mode() & fs.ModeSymlink != 0 {
-            dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": "cannot register a symbolic link" })
+            dumpHttpErrorResponse(w, err)
             return
         }
 
@@ -190,6 +170,11 @@ func newRegisterFinishHandler(db *sql.DB, verifier *verificationRegistry, tokeni
             dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": err.Error() })
             return
         }
+        err = checkValidDirectory(regpath)
+        if err != nil {
+            dumpHttpErrorResponse(w, err)
+            return
+        }
 
         allowed := map[string]bool{}
         if output.Base != nil {
@@ -225,7 +210,7 @@ func newRegisterFinishHandler(db *sql.DB, verifier *verificationRegistry, tokeni
 
         failures, err := addDirectory(db, regpath, allowed, username, tokenizer)
         if err != nil {
-            dumpJsonResponse(w, http.StatusInternalServerError, map[string]string{ "status": "ERROR", "reason": fmt.Sprintf("failed to index directory; %v", err) })
+            dumpHttpErrorResponse(w, fmt.Errorf("failed to index directory; %v", err))
             return
         }
 
@@ -507,7 +492,7 @@ func newRetrieveFileHandler(db *sql.DB) func(http.ResponseWriter, *http.Request)
             return
         }
 
-        okay, err := isSubpathRegistered(db, filepath.Dir(path))
+        okay, err := isDirectoryRegistered(db, filepath.Dir(path))
         if err != nil {
             dumpJsonResponse(w, http.StatusInternalServerError, map[string]string{ "status": "ERROR", "reason": fmt.Sprintf("failed to check path registration; %v", err) })
             return
@@ -517,7 +502,6 @@ func newRetrieveFileHandler(db *sql.DB) func(http.ResponseWriter, *http.Request)
             return
         }
 
-        // Note that isSubpathRegistered already checks for links at every step of the path.
         info, err := os.Lstat(path)
         if errors.Is(err, os.ErrNotExist) {
             dumpJsonResponse(w, http.StatusNotFound, map[string]string{ "status": "ERROR", "reason": "path does not exist" })
@@ -528,6 +512,12 @@ func newRetrieveFileHandler(db *sql.DB) func(http.ResponseWriter, *http.Request)
         } else if info.IsDir() {
             dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": "path should refer to a file, not a directory" })
             return
+        } else if info.Mode() & os.ModeSymlink != 0 {
+            _, err := checkSymlinkTarget(path, nil)
+            if err != nil {
+                dumpHttpErrorResponse(w, fmt.Errorf("failed to check symlink target; %w", err))
+                return
+            }
         }
 
         http.ServeFile(w, r, path)
@@ -557,13 +547,20 @@ func newListFilesHandler(db *sql.DB) func(http.ResponseWriter, *http.Request) {
             dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": fmt.Sprintf("path is not properly URL-encoded; %v", err) })
             return
         }
+
         path, err = validatePath(path)
         if err != nil {
             dumpHttpErrorResponse(w, newHttpError(http.StatusBadRequest, fmt.Errorf("invalid path; %w", err)))
             return
         }
 
-        okay, err := isSubpathRegistered(db, path)
+        err = checkValidDirectory(path)
+        if err != nil {
+            dumpHttpErrorResponse(w, newHttpError(http.StatusBadRequest, fmt.Errorf("invalid directory path; %w", err)))
+            return
+        }
+
+        okay, err := isDirectoryRegistered(db, path)
         if err != nil {
             dumpJsonResponse(w, http.StatusInternalServerError, map[string]string{ "status": "ERROR", "reason": fmt.Sprintf("failed to check path registration; %v", err) })
             return
@@ -573,22 +570,9 @@ func newListFilesHandler(db *sql.DB) func(http.ResponseWriter, *http.Request) {
             return
         }
 
-        // isSubpathRegistered already checks for symlinks in the path.
-        info, err := os.Lstat(path)
-        if errors.Is(err, os.ErrNotExist) {
-            dumpJsonResponse(w, http.StatusNotFound, map[string]string{ "status": "ERROR", "reason": "path does not exist" })
-            return
-        } else if err != nil {
-            dumpJsonResponse(w, http.StatusInternalServerError, map[string]string{ "status": "ERROR", "reason": fmt.Sprintf("inaccessible path; %v", err) })
-            return
-        } else if !info.IsDir() {
-            dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": "path should refer to a directory" })
-            return
-        }
-
         listing, err := listFiles(path, recursive)
         if err != nil {
-            dumpJsonResponse(w, http.StatusInternalServerError, map[string]string{ "status": "ERROR", "reason": fmt.Sprintf("failed to obtain listing; %v", err) })
+            dumpHttpErrorResponse(w, fmt.Errorf("failed to obtain directory listing; %w", err))
             return
         }
         dumpJsonResponse(w, http.StatusOK, listing)

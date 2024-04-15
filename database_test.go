@@ -433,14 +433,8 @@ func TestAddDirectory(t *testing.T) {
         if err != nil {
             t.Fatal(err)
         }
-        has_link_comment := false
-        for _, c := range comments {
-            if strings.Contains(c, "symbolic link") {
-                has_link_comment = true
-            }
-        }
-        if !has_link_comment {
-            t.Fatalf("expected at least one comment about symbol link failure %v", comments)
+        if len(comments) != 0 {
+            t.Fatalf("unexpected comments from directory addition %v", comments)
         }
 
         all_paths, err := listPaths(dbconn, tmp)
@@ -448,8 +442,8 @@ func TestAddDirectory(t *testing.T) {
             t.Fatal(err)
         }
 
-        // All symlink paths to directories/files are ignored.
-        if !equalStringArrays(all_paths, []string{ "symlink/other.json" }) {
+        // All symlink paths to directories are ignored.
+        if !equalStringArrays(all_paths, []string{ "symlink/metadata.json", "symlink/other.json" }) {
             t.Fatalf("unexpected paths %v", all_paths)
         }
     })
@@ -1698,7 +1692,7 @@ func TestIsSubpathRegistered(t *testing.T) {
     }
 
     t.Run("present", func(t *testing.T) {
-        found, err := isSubpathRegistered(dbconn, to_add)
+        found, err := isDirectoryRegistered(dbconn, to_add)
         if err != nil {
             t.Fatal(err)
         }
@@ -1706,7 +1700,7 @@ func TestIsSubpathRegistered(t *testing.T) {
             t.Fatal("should have found one matching path")
         }
 
-        found, err = isSubpathRegistered(dbconn, filepath.Join(to_add, "stuff"))
+        found, err = isDirectoryRegistered(dbconn, filepath.Join(to_add, "stuff"))
         if err != nil {
             t.Fatal(err)
         }
@@ -1714,7 +1708,7 @@ func TestIsSubpathRegistered(t *testing.T) {
             t.Fatal("should have found one matching path")
         }
 
-        found, err = isSubpathRegistered(dbconn, filepath.Join(to_add, "stuff", "other.json"))
+        found, err = isDirectoryRegistered(dbconn, filepath.Join(to_add, "stuff", "other.json"))
         if err != nil {
             t.Fatal(err)
         }
@@ -1725,7 +1719,7 @@ func TestIsSubpathRegistered(t *testing.T) {
 
     t.Run("absent", func(t *testing.T) {
         // Directory is absent.
-        found, err := isSubpathRegistered(dbconn, to_add + "_missing")
+        found, err := isDirectoryRegistered(dbconn, to_add + "_missing")
         if err != nil {
             t.Fatal(err)
         }
@@ -1734,7 +1728,7 @@ func TestIsSubpathRegistered(t *testing.T) {
         }
 
         // Directory is present but not registered.
-        found, err = isSubpathRegistered(dbconn, tmp)
+        found, err = isDirectoryRegistered(dbconn, tmp)
         if err != nil {
             t.Fatal(err)
         }
@@ -1744,7 +1738,7 @@ func TestIsSubpathRegistered(t *testing.T) {
     })
 
     t.Run("parent breakout", func(t *testing.T) {
-        found, err := isSubpathRegistered(dbconn, to_add + "/stuff/..")
+        found, err := isDirectoryRegistered(dbconn, to_add + "/stuff/..")
         if err != nil {
             t.Fatal(err)
         }
@@ -1760,7 +1754,7 @@ func TestIsSubpathRegistered(t *testing.T) {
     }
 
     t.Run("symlink breakout", func(t *testing.T) {
-        found, err := isSubpathRegistered(dbconn, slink)
+        found, err := isDirectoryRegistered(dbconn, slink)
         if err != nil {
             t.Fatal(err)
         }

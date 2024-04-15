@@ -229,12 +229,45 @@ func loadMetadata(paths []string, stats []fs.FileInfo) []*loadedMetadata {
 
     var wg sync.WaitGroup
     wg.Add(len(paths))
+    cached_symlink_paths := map[string]bool{}
+    var lock sync.Mutex
 
     for i, f := range paths {
         go func(i int, f string) {
             defer wg.Done()
             assets[i] = &loadedMetadata{ Path: f, Failure: nil }
 
+            // Checking the metadata properties.
+            var info fs.FileInfo
+            if stats != nil {
+                info = stats[i]
+            } else {
+                raw_info, err := os.Lstat(f)
+                if err != nil {
+                    assets[i].Failure = fmt.Errorf("failed to stat %q; %w", f, err)
+                    return
+                }
+
+                if raw_info.Mode() & fs.ModeSymlink != 0 { 
+                    lock.Lock() // need a lock to protect cached_symlink_paths.
+                    defer lock.Unlock()
+                    raw_info, err = checkSymlinkTarget(f, cached_symlink_paths)
+                    if err != nil {
+                        assets[i].Failure = fmt.Errorf("failed to check symlink for %q; %w", f, err)
+                        return
+                    }
+                }
+
+                info = raw_info
+            }
+
+            username, err := identifyUser(info)
+            if err != nil {
+                assets[i].Failure = fmt.Errorf("failed to determine author of %q; %w", f, err)
+                return
+            }
+
+            // Now actually reading the file.
             raw, err := os.ReadFile(f)
             if err != nil {
                 assets[i].Failure = fmt.Errorf("failed to read %q; %w", f, err)
@@ -245,28 +278,6 @@ func loadMetadata(paths []string, stats []fs.FileInfo) []*loadedMetadata {
             err = json.Unmarshal(raw, &vals)
             if err != nil {
                 assets[i].Failure = fmt.Errorf("failed to parse %q; %w", f, err)
-                return
-            }
-
-            var info fs.FileInfo
-            if stats != nil {
-                info = stats[i]
-            } else {
-                raw_info, err := os.Lstat(f)
-                if err != nil {
-                    assets[i].Failure = fmt.Errorf("failed to stat %q; %w", f, err)
-                    return
-                }
-                if raw_info.Mode() & fs.ModeSymlink != 0 {
-                    assets[i].Failure = fmt.Errorf("not following symbolic link at %q", f)
-                    return
-                }
-                info = raw_info
-            }
-
-            username, err := identifyUser(info)
-            if err != nil {
-                assets[i].Failure = fmt.Errorf("failed to determine author of %q; %w", f, err)
                 return
             }
 
@@ -285,9 +296,8 @@ func loadMetadata(paths []string, stats []fs.FileInfo) []*loadedMetadata {
 
 func addDirectory(db *sql.DB, directory string, of_interest map[string]bool, user string, tokenizer *unicodeTokenizer) ([]string, error) {
     all_failures := []string{}
-
     paths := []string{}
-    safeWalkDir(directory, func(path string, d fs.DirEntry, err error) error {
+    filepath.WalkDir(directory, func(path string, d fs.DirEntry, err error) error {
         // Just skip any directories that we can't access.
         if err != nil {
             all_failures = append(all_failures, fmt.Sprintf("failed to walk %q; %v", path, err))
@@ -300,6 +310,7 @@ func addDirectory(db *sql.DB, directory string, of_interest map[string]bool, use
         }
         return nil
     })
+
     assets := loadMetadata(paths, nil)
 
     atx, err := createTransaction(db)
@@ -507,37 +518,42 @@ func scanDirectories(db *sql.DB) (map[string]*directoryEntry, []string, error) {
     for i, dir := range all_dirs {
         go func(i int, dir *Directory) {
             defer wg.Done()
-
             curcontents := map[string]*directoryEntry{}
             curfailures := []string{}
-            curnames := map[string]bool{}
-            for _, n := range dir.Names {
-                curnames[n] = true
+
+            err := checkValidDirectory(dir.Path)
+            if err != nil {
+                curfailures = append(curfailures, fmt.Sprintf("invalid path %q; %v", dir.Path, err))
+            } else {
+                curnames := map[string]bool{}
+                for _, n := range dir.Names {
+                    curnames[n] = true
+                }
+
+                // Just skip any directories that we can't access, no need to check the error.
+                filepath.WalkDir(dir.Path, func(path string, d fs.DirEntry, err error) error {
+                    if err != nil {
+                        curfailures = append(curfailures, fmt.Sprintf("failed to walk %q; %v", path, err))
+                        return nil
+                    }
+
+                    if d.IsDir() {
+                        return nil
+                    }
+
+                    _, ok := curnames[filepath.Base(path)]
+                    if !ok {
+                        return nil
+                    }
+                    info, err := d.Info()
+                    if err != nil {
+                        curfailures = append(curfailures, fmt.Sprintf("failed to stat %q; %v", path, err))
+                        return nil
+                    }
+                    curcontents[path] = &directoryEntry{ Parent: dir.Id, Info: info }
+                    return nil
+                })
             }
-
-            // Just skip any directories that we can't access, no need to check the error.
-            safeWalkDir(dir.Path, func(path string, d fs.DirEntry, err error) error {
-                if err != nil {
-                    curfailures = append(curfailures, fmt.Sprintf("failed to walk %q; %v", path, err))
-                    return nil
-                }
-
-                if d.IsDir() {
-                    return nil
-                }
-
-                _, ok := curnames[filepath.Base(path)]
-                if !ok {
-                    return nil
-                }
-                info, err := d.Info()
-                if err != nil {
-                    curfailures = append(curfailures, fmt.Sprintf("failed to stat %q; %v", path, err))
-                    return nil
-                }
-                curcontents[path] = &directoryEntry{ Parent: dir.Id, Info: info }
-                return nil
-            })
 
             dircontents[i] = curcontents 
             dirfailures[i] = curfailures
@@ -894,7 +910,7 @@ func retrievePath(db * sql.DB, path string, include_metadata bool) (*queryResult
 
 /**********************************************************************/
 
-func isSubpathRegistered(db * sql.DB, path string) (bool, error) {
+func isDirectoryRegistered(db * sql.DB, path string) (bool, error) {
     collected := []interface{}{}
     for {
         // If we encounter a symlink, we can assume that neither it or its
