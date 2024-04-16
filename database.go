@@ -429,6 +429,7 @@ func addDirectoryContents(tx *sql.Tx, path string, did int64, base_names []strin
 
         for _, loaded := range update_assets {
             if loaded.Failure != nil {
+                purge_paths = append(purge_paths, loaded.Path)
                 all_failures = append(all_failures, loaded.Failure.Error())
                 continue
             }

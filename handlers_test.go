@@ -317,14 +317,14 @@ func TestRegisterHandlers(t *testing.T) {
         }
     })
 
-    t.Run("register finish with duplicate names", func(t *testing.T) {
+    t.Run("register finish with empty names", func(t *testing.T) {
         quickRegisterStart()
         handler := http.HandlerFunc(newRegisterFinishHandler(dbconn, verifier, tokr))
-        req := createJsonRequest("POST", "/register/finish", map[string]interface{}{ "path": to_add, "base": []string{ "metadata.json", "metadata.json" } }, t)
+        req := createJsonRequest("POST", "/register/finish", map[string]interface{}{ "path": to_add, "base": []string{ "", "metadata.json" } }, t)
         rr := httptest.NewRecorder()
         handler.ServeHTTP(rr, req)
         if rr.Code != http.StatusBadRequest {
-            t.Fatalf("should have failed with duplicate names")
+            t.Fatalf("should have failed with empty names")
         }
     })
 
@@ -393,7 +393,7 @@ func TestDeregisterHandlers(t *testing.T) {
         t.Fatalf(err.Error())
     }
 
-    comments, err := addDirectory(dbconn, to_add, map[string]bool{ "metadata.json": true, "other.json": true }, "myself", tokr)
+    comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr)
     if err != nil {
         t.Fatal(err)
     }
@@ -497,7 +497,7 @@ func TestDeregisterHandlers(t *testing.T) {
     })
 
     // Readding the directory, and then removing it from the file system.
-    comments, err = addDirectory(dbconn, to_add, map[string]bool{ "metadata.json": true, "other.json": true }, "myself", tokr)
+    comments, err = addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr)
     if err != nil {
         t.Fatal(err)
     }
@@ -564,7 +564,7 @@ func TestQueryHandler(t *testing.T) {
         t.Fatalf(err.Error())
     }
 
-    comments, err := addDirectory(dbconn, to_add, map[string]bool{ "metadata.json": true, "other.json": true }, "myself", tokr)
+    comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr)
     if err != nil {
         t.Fatal(err)
     }
@@ -638,6 +638,7 @@ func TestQueryHandler(t *testing.T) {
             }
         }
 
+        sort.Strings(all_paths)
         return all_paths, output.Next
     }
 
@@ -679,7 +680,7 @@ func TestQueryHandler(t *testing.T) {
         if scroll != "" {
             t.Fatalf("unexpected scroll %v", scroll)
         }
-        if len(all_paths) != 2 || all_paths[0] != filepath.Join(to_add, "whee/other.json") || all_paths[1] != filepath.Join(to_add, "stuff/metadata.json") {
+        if !equalPathArrays(all_paths, []string{ "stuff/metadata.json", "whee/other.json" }, to_add) {
             t.Fatalf("unexpected paths %v", all_paths)
         }
     })
@@ -701,7 +702,7 @@ func TestQueryHandler(t *testing.T) {
         if scroll != "" {
             t.Fatalf("unexpected scroll %v", scroll)
         }
-        if len(all_paths) != 1 || all_paths[0] != filepath.Join(to_add, "stuff/other.json") {
+        if !equalPathArrays(all_paths, []string{ "stuff/other.json" }, to_add) {
             t.Fatalf("unexpected paths %v", all_paths)
         }
     })
@@ -722,7 +723,7 @@ func TestQueryHandler(t *testing.T) {
         if scroll != "" {
             t.Fatalf("unexpected scroll %v", scroll)
         }
-        if len(all_paths) != 2 || all_paths[0] != filepath.Join(to_add, "stuff/other.json") || all_paths[1] != filepath.Join(to_add, "metadata.json") {
+        if !equalPathArrays(all_paths, []string{ "metadata.json", "stuff/other.json" }, to_add) {
             t.Fatalf("unexpected paths %v", all_paths)
         }
     })
@@ -745,9 +746,6 @@ func TestQueryHandler(t *testing.T) {
         if !strings.HasPrefix(scroll, "/query?scroll=") {
             t.Fatalf("unexpected scroll %v", scroll)
         }
-        if len(all_paths) != 2 || all_paths[0] != filepath.Join(to_add, "whee/other.json") || all_paths[1] != filepath.Join(to_add, "stuff/other.json") {
-            t.Fatalf("unexpected paths %v", all_paths)
-        }
 
         // Next scroll.
         req, err = http.NewRequest("POST", scroll, strings.NewReader(dummy_query))
@@ -761,11 +759,14 @@ func TestQueryHandler(t *testing.T) {
             t.Fatalf("should have succeeded")
         }
 
-        all_paths, scroll = validateSearchResults(rr.Body)
+        all_paths2, scroll := validateSearchResults(rr.Body)
         if scroll != "" { // fully exhausted the scroll now.
             t.Fatalf("unexpected scroll %v", scroll)
         }
-        if len(all_paths) != 2 || all_paths[0] != filepath.Join(to_add, "stuff/metadata.json") || all_paths[1] != filepath.Join(to_add, "metadata.json") {
+
+        all_paths = append(all_paths, all_paths2...)
+        sort.Strings(all_paths)
+        if !equalPathArrays(all_paths, []string{ "metadata.json", "stuff/metadata.json", "stuff/other.json", "whee/other.json" }, to_add) {
             t.Fatalf("unexpected paths %v", all_paths)
         }
     })
@@ -796,7 +797,7 @@ func TestRetrieveMetadataHandler(t *testing.T) {
         t.Fatalf(err.Error())
     }
 
-    comments, err := addDirectory(dbconn, to_add, map[string]bool{ "metadata.json": true, "other.json": true }, "myself", tokr)
+    comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr)
     if err != nil {
         t.Fatal(err)
     }
@@ -944,7 +945,7 @@ func TestRetrieveFileHandler(t *testing.T) {
     }
 
     // Here, nothing is actually indexed! So we can't get confused with the metadata retrievals.
-    comments, err := addDirectory(dbconn, to_add, map[string]bool{}, "myself", tokr)
+    comments, err := addNewDirectory(dbconn, to_add, []string{}, "myself", tokr)
     if err != nil {
         t.Fatal(err)
     }
@@ -1044,7 +1045,7 @@ func TestListFilesHandler(t *testing.T) {
         t.Fatalf(err.Error())
     }
 
-    comments, err := addDirectory(dbconn, to_add, map[string]bool{}, "myself", tokr)
+    comments, err := addNewDirectory(dbconn, to_add, []string{}, "myself", tokr)
     if err != nil {
         t.Fatal(err)
     }
