@@ -6,6 +6,7 @@ import (
     "time"
     "net/http"
     "strconv"
+    "strings"
 )
 
 func main() {
@@ -14,6 +15,7 @@ func main() {
     backup0 := flag.Int("backup", 24, "Frequency of back-ups, in hours")
     update0 := flag.Int("update", 24, "Frequency of updates, in hours")
     lifetime0 := flag.Int("session", 10, "Session lifetime, in minutes")
+    whitelist0 := flag.String("whitelist", "", "Comma-separated whitelist of absolute paths of directories for symbolic link targets")
     flag.Parse()
 
     dbpath := *dbpath0
@@ -34,17 +36,29 @@ func main() {
         log.Fatalf("failed to create the wildcard tokenizer; %v", err)
     }
 
+    whitelist := []string{}
+    if *whitelist0 != "" {
+        whitelist = strings.Split(*whitelist0, ",")
+        for i, x := range whitelist {
+            full, err := normalizePath(x)
+            if err != nil {
+                log.Fatalf("failed to prepare whitelist for %q; %v", x, err)
+            }
+            whitelist[i] = full
+        }
+    }
+
     const num_verification_threads = 64
     verifier := newVerificationRegistry(num_verification_threads)
 
     // Setting up the endpoints.
     http.HandleFunc("/register/start", newRegisterStartHandler(verifier))
-    http.HandleFunc("/register/finish", newRegisterFinishHandler(db, verifier, tokenizer))
+    http.HandleFunc("/register/finish", newRegisterFinishHandler(db, verifier, tokenizer, whitelist))
     http.HandleFunc("/deregister/start", newDeregisterStartHandler(db, verifier))
     http.HandleFunc("/deregister/finish", newDeregisterFinishHandler(db, verifier))
     http.HandleFunc("/query", newQueryHandler(db, tokenizer, wild_tokenizer, "/query"))
     http.HandleFunc("/retrieve/metadata", newRetrieveMetadataHandler(db))
-    http.HandleFunc("/retrieve/file", newRetrieveFileHandler(db))
+    http.HandleFunc("/retrieve/file", newRetrieveFileHandler(db, whitelist))
     http.HandleFunc("/list", newListFilesHandler(db))
 
     // Adding a hour job that purges various old verification sessions.
@@ -67,7 +81,7 @@ func main() {
         go func() {
             for {
                 <-ticker.C
-                fails, err := updateDirectories(db, tokenizer)
+                fails, err := updateDirectories(db, tokenizer, whitelist)
                 if err != nil {
                     log.Println(err)
                 } else {

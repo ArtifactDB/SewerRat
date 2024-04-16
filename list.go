@@ -21,15 +21,12 @@ func listFiles(dir string, recursive bool) ([]string, error) {
             }
         }
 
-        if info.Type() & fs.ModeSymlink != 0 {
-            return nil
-        }
-
         rel, err := filepath.Rel(dir, path)
         if err != nil {
             return err
         }
 
+        // Symbolic links are just reported as dumb files here.
         if !recursive && is_dir {
             to_report = append(to_report, rel + "/")
             return fs.SkipDir

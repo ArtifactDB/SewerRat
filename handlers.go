@@ -152,7 +152,7 @@ func newRegisterStartHandler(verifier *verificationRegistry) func(http.ResponseW
     }
 }
 
-func newRegisterFinishHandler(db *sql.DB, verifier *verificationRegistry, tokenizer *unicodeTokenizer) func(http.ResponseWriter, *http.Request) {
+func newRegisterFinishHandler(db *sql.DB, verifier *verificationRegistry, tokenizer *unicodeTokenizer, whitelist []string) func(http.ResponseWriter, *http.Request) {
     return func(w http.ResponseWriter, r *http.Request) {
         if r.Method != "POST" {
             dumpErrorResponse(w, http.StatusMethodNotAllowed, "expected a POST request")
@@ -214,7 +214,7 @@ func newRegisterFinishHandler(db *sql.DB, verifier *verificationRegistry, tokeni
             return
         }
 
-        failures, err := addNewDirectory(db, regpath, allowed, username, tokenizer)
+        failures, err := addNewDirectory(db, regpath, allowed, username, tokenizer, whitelist)
         if err != nil {
             dumpHttpErrorResponse(w, fmt.Errorf("failed to index directory; %w", err))
             return
@@ -484,7 +484,7 @@ func newRetrieveMetadataHandler(db *sql.DB) func(http.ResponseWriter, *http.Requ
 
 /**********************************************************************/
 
-func newRetrieveFileHandler(db *sql.DB) func(http.ResponseWriter, *http.Request) {
+func newRetrieveFileHandler(db *sql.DB, whitelist []string) func(http.ResponseWriter, *http.Request) {
     return func(w http.ResponseWriter, r *http.Request) {
         if configureCors(w, r) {
             return
@@ -525,7 +525,12 @@ func newRetrieveFileHandler(db *sql.DB) func(http.ResponseWriter, *http.Request)
                 err = fmt.Errorf("inaccessible path; %w", err)
             }
         } else if info.Mode() & fs.ModeSymlink != 0 {
-            err = newHttpError(http.StatusBadRequest, fmt.Errorf("cannot retrieve contents of a symbolic link; %w", err))
+            okay, err0 := isWhitelisted(path, whitelist)
+            if err0 != nil {
+                err = err0
+            } else if !okay {
+                err = newHttpError(http.StatusBadRequest, errors.New("symbolic link target is outside of the whitelist"))
+            }
         } else if info.IsDir() {
             err = newHttpError(http.StatusBadRequest, errors.New("path should refer to a file, not a directory"))
         }

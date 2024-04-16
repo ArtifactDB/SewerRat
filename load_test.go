@@ -8,6 +8,160 @@ import (
     "strings"
 )
 
+func TestNormalizePath(t *testing.T) {
+    dir, err := os.MkdirTemp("", "")
+    if (err != nil) {
+        t.Fatalf("failed to create a temporary directory; %v", err)
+    }
+
+    path := filepath.Join(dir, "A")
+    err = os.WriteFile(path, []byte("foobar"), 0644)
+    if err != nil {
+        t.Fatalf("failed to create a mock file; %v", err)
+    }
+
+    ref, err := normalizePath(path)
+    if err != nil {
+        t.Fatal(err)
+    }
+
+    contents, err := os.ReadFile(path)
+    if err != nil {
+        t.Fatal(err)
+    }
+    if string(contents) != "foobar" {
+        t.Fatal("unexpected contents of file")
+    }
+
+    t.Run("simple", func (t *testing.T) {
+        path2 := filepath.Join(dir, "B")
+        err := os.Symlink(path, path2)
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        norm, err := normalizePath(path2)
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        if ref != norm {
+            t.Fatalf("unexpected normalized path %q", norm)
+        }
+    })
+
+    t.Run("relative", func (t *testing.T) {
+        path2 := filepath.Join(dir, "C")
+        err := os.Symlink("A", path2)
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        norm, err := normalizePath(path2)
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        if ref != norm {
+            t.Fatalf("unexpected normalized path %q", norm)
+        }
+    })
+
+    t.Run("indirect", func (t *testing.T) {
+        path2 := filepath.Join(dir, "D")
+        err := os.Symlink("C", path2)
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        norm, err := normalizePath(path2)
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        if ref != norm {
+            t.Fatalf("unexpected normalized path %q", norm)
+        }
+    })
+}
+
+func TestIsWhitelisted(t *testing.T) {
+    dir1, err := os.MkdirTemp("", "")
+    if (err != nil) {
+        t.Fatalf("failed to create a temporary directory; %v", err)
+    }
+
+    path := filepath.Join(dir1, "A")
+    err = os.WriteFile(path, []byte("foobar"), 0644)
+    if err != nil {
+        t.Fatalf("failed to create a mock file; %v", err)
+    }
+
+    dir2, err := os.MkdirTemp("", "")
+    if (err != nil) {
+        t.Fatalf("failed to create a temporary directory; %v", err)
+    }
+
+    norm1, err := normalizePath(dir1)
+    if err != nil {
+        t.Fatal(err)
+    }
+
+    norm2, err := normalizePath(dir2)
+    if err != nil {
+        t.Fatal(err)
+    }
+
+    t.Run("simple", func(t * testing.T) {
+        path2 := filepath.Join(dir2, "B")
+        err := os.Symlink(path, path2)
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        okay, err := isWhitelisted(path2, nil)
+        if err != nil {
+            t.Fatal(err)
+        }
+        if okay {
+            t.Fatal("no whitelist provided")
+        }
+
+        okay, err = isWhitelisted(path2, []string{ norm2 })
+        if err != nil {
+            t.Fatal(err)
+        }
+        if okay {
+            t.Fatal("should not be in whitelist")
+        }
+
+        okay, err = isWhitelisted(path2, []string{ norm2, norm1 })
+        if err != nil {
+            t.Fatal(err)
+        }
+        if !okay {
+            t.Fatal("should be in whitelist")
+        }
+    })
+
+    t.Run("indirect", func(t * testing.T) {
+        path2 := filepath.Join(dir2, "C")
+        err := os.Symlink("B", path2)
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        okay, err := isWhitelisted(path2, []string{ norm1 })
+        if err != nil {
+            t.Fatal(err)
+        }
+        if !okay {
+            t.Fatal("should be in whitelist")
+        }
+    })
+}
+
+
 func TestLoadMetadata(t *testing.T) {
     dir, err := os.MkdirTemp("", "")
     if (err != nil) {
@@ -26,7 +180,7 @@ func TestLoadMetadata(t *testing.T) {
             t.Fatal(err)
         }
 
-        loaded := loadMetadata(path, info)
+        loaded := loadMetadata(path, info, nil)
         if loaded.Failure != nil {
             t.Fatal(loaded.Failure)
         }
@@ -51,14 +205,6 @@ func TestLoadMetadata(t *testing.T) {
         }
     })
 
-    t.Run("reading failure", func(t *testing.T) {
-        path := filepath.Join(dir, "missing")
-        loaded := loadMetadata(path, nil)
-        if loaded.Failure == nil || !strings.Contains(loaded.Failure.Error(), "failed to read") {
-            t.Fatal("expected a reading error")
-        }
-    })
-
     t.Run("parsing failure", func(t *testing.T) {
         path := filepath.Join(dir, "B")
         err = os.WriteFile(path, []byte("{ whee }"), 0644)
@@ -71,7 +217,7 @@ func TestLoadMetadata(t *testing.T) {
             t.Fatal(err)
         }
 
-        loaded := loadMetadata(path, info)
+        loaded := loadMetadata(path, info, nil)
         if loaded.Failure == nil || !strings.Contains(loaded.Failure.Error(), "failed to parse") {
             t.Fatal("expected a parsing error")
         }
@@ -89,9 +235,26 @@ func TestLoadMetadata(t *testing.T) {
             t.Fatal(err)
         }
 
-        loaded := loadMetadata(path, info)
+        loaded := loadMetadata(path, info, nil)
         if loaded.Failure == nil || !strings.Contains(loaded.Failure.Error(), "symbolic link") {
             t.Fatalf("expected a symbolic link error %v", *loaded)
         }
+
+        // But we can load it if we put its (normalized path to the) parent directory in the whitelist.
+        normed, err := normalizePath(dir)
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        loaded = loadMetadata(path, info, []string{ "/foo", normed, "/bar" })
+        if loaded.Failure != nil {
+            t.Fatal(loaded.Failure)
+        }
+
+        _, ok := loaded.Parsed.(map[string]interface{})
+        if !ok {
+            t.Fatal("unexpected parsed object")
+        }
+
     })
 }

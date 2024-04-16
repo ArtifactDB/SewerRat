@@ -339,7 +339,7 @@ func compareToExistingPaths(tx *sql.Tx, did int64, all_paths map[string]fs.FileI
     return new_paths, update_paths, purge_paths, nil
 }
 
-func addDirectoryContents(tx *sql.Tx, path string, did int64, base_names []string, tokenizer* unicodeTokenizer) ([]string, error) {
+func addDirectoryContents(tx *sql.Tx, path string, did int64, base_names []string, tokenizer* unicodeTokenizer, whitelist []string) ([]string, error) {
     all_failures := []string{}
 
     dir_contents, dir_failures, err := listMetadata(path, base_names)
@@ -363,14 +363,14 @@ func addDirectoryContents(tx *sql.Tx, path string, did int64, base_names []strin
         for i, e := range new_paths {
             go func(i int, e *FileInfoWithPath) {
                 defer wg.Done()
-                new_assets[i] = loadMetadata(e.Path, e.Info)
+                new_assets[i] = loadMetadata(e.Path, e.Info, whitelist)
             }(i, e)
         }
 
         for i, e := range update_paths {
             go func(i int, e *FileInfoWithPath) {
                 defer wg.Done()
-                update_assets[i] = loadMetadata(e.Path, e.Info)
+                update_assets[i] = loadMetadata(e.Path, e.Info, whitelist)
             }(i, e)
         }
 
@@ -478,7 +478,7 @@ func addDirectoryContents(tx *sql.Tx, path string, did int64, base_names []strin
 
 /**********************************************************************/
 
-func addNewDirectory(db *sql.DB, path string, base_names []string, user string, tokenizer* unicodeTokenizer) ([]string, error) {
+func addNewDirectory(db *sql.DB, path string, base_names []string, user string, tokenizer* unicodeTokenizer, whitelist []string) ([]string, error) {
     b, err := json.Marshal(base_names)
     if err != nil {
         return nil, fmt.Errorf("failed to encode names as JSON; %w", err)
@@ -516,7 +516,7 @@ func addNewDirectory(db *sql.DB, path string, base_names []string, user string, 
         return nil, fmt.Errorf("failed to insert new directory; %w", err)
     }
 
-    failures, err := addDirectoryContents(atx.Tx, path, did, base_names, tokenizer)
+    failures, err := addDirectoryContents(atx.Tx, path, did, base_names, tokenizer, whitelist)
 
     err = atx.Tx.Commit()
     if err != nil {
@@ -562,7 +562,7 @@ func listDirectories(tx *sql.Tx) ([]*registeredDirectory, error) {
     return all_dirs, nil
 }
 
-func updateDirectories(db *sql.DB, tokenizer* unicodeTokenizer) ([]string, error) {
+func updateDirectories(db *sql.DB, tokenizer* unicodeTokenizer, whitelist []string) ([]string, error) {
     atx, err := createTransaction(db)
     if err != nil {
         return nil, fmt.Errorf("failed to prepare transaction for update; %w", err)
@@ -576,7 +576,7 @@ func updateDirectories(db *sql.DB, tokenizer* unicodeTokenizer) ([]string, error
 
     all_failures := []string{}
     for _, d := range all_dirs {
-        curfailures, err := addDirectoryContents(atx.Tx, d.Path, d.Id, d.Names, tokenizer)
+        curfailures, err := addDirectoryContents(atx.Tx, d.Path, d.Id, d.Names, tokenizer, whitelist)
         if err != nil {
             return nil, err
         }

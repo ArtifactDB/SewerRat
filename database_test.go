@@ -146,7 +146,7 @@ func TestAddNewDirectory(t *testing.T) {
         defer dbconn.Close()
         defer os.Remove(dbpath)
 
-        comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json" }, "myself", tokr)
+        comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json" }, "myself", tokr, nil)
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -267,7 +267,7 @@ func TestAddNewDirectory(t *testing.T) {
         defer os.Remove(dbpath)
 
         // Works with multiple JSON targets.
-        comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myslef", tokr)
+        comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myslef", tokr, nil)
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -311,7 +311,7 @@ func TestAddNewDirectory(t *testing.T) {
         defer os.Remove(dbpath)
 
         // Works with multiple JSON directories.
-        comments, err := addNewDirectory(dbconn, to_add, []string{ "other.json" }, "myself", tokr)
+        comments, err := addNewDirectory(dbconn, to_add, []string{ "other.json" }, "myself", tokr, nil)
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -319,7 +319,7 @@ func TestAddNewDirectory(t *testing.T) {
             t.Fatalf("unexpected comments from the directory addition %v", comments)
         }
 
-        comments, err = addNewDirectory(dbconn, to_add2, []string{ "metadata.json" }, "myself", tokr)
+        comments, err = addNewDirectory(dbconn, to_add2, []string{ "metadata.json" }, "myself", tokr, nil)
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -352,7 +352,7 @@ func TestAddNewDirectory(t *testing.T) {
         }
 
         // Recalling on an existing directory wipes out existing entries and replaces it.
-        comments, err = addNewDirectory(dbconn, to_add, []string{ "metadata.json" }, "myself", tokr)
+        comments, err = addNewDirectory(dbconn, to_add, []string{ "metadata.json" }, "myself", tokr, nil)
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -390,7 +390,7 @@ func TestAddNewDirectory(t *testing.T) {
         defer os.Remove(dbpath)
 
         // Reports the error correctly.
-        comments, err := addNewDirectory(dbconn, to_fail, []string{ "metadata.json", "other.json" }, "myself", tokr)
+        comments, err := addNewDirectory(dbconn, to_fail, []string{ "metadata.json", "other.json" }, "myself", tokr, nil)
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -429,7 +429,7 @@ func TestAddNewDirectory(t *testing.T) {
         defer dbconn.Close()
         defer os.Remove(dbpath)
 
-        comments, err := addNewDirectory(dbconn, symdir, []string{ "metadata.json", "other.json" }, "myself", tokr)
+        comments, err := addNewDirectory(dbconn, symdir, []string{ "metadata.json", "other.json" }, "myself", tokr, nil)
         if err != nil {
             t.Fatal(err)
         }
@@ -487,7 +487,7 @@ func TestDeleteDirectory(t *testing.T) {
         t.Fatalf(err.Error())
     }
 
-    comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr)
+    comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr, nil)
     if err != nil {
         t.Fatalf(err.Error())
     }
@@ -495,7 +495,7 @@ func TestDeleteDirectory(t *testing.T) {
         t.Fatalf("unexpected comments from the directory addition %v", comments)
     }
 
-    comments, err = addNewDirectory(dbconn, to_add2, []string{ "other.json" }, "myself", tokr)
+    comments, err = addNewDirectory(dbconn, to_add2, []string{ "other.json" }, "myself", tokr, nil)
     if err != nil {
         t.Fatalf(err.Error())
     }
@@ -652,7 +652,7 @@ func TestUpdateDirectories(t *testing.T) {
 
         var oldtime1, oldtime2 int64
         {
-            comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr)
+            comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr, nil)
             if err != nil {
                 t.Fatalf(err.Error())
             }
@@ -683,7 +683,7 @@ func TestUpdateDirectories(t *testing.T) {
         }
 
         // Now actually running the update.
-        comments, err := updateDirectories(dbconn, tokr)
+        comments, err := updateDirectories(dbconn, tokr, nil)
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -765,7 +765,7 @@ func TestUpdateDirectories(t *testing.T) {
         defer os.RemoveAll(to_add)
 
         {
-            comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr)
+            comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr, nil)
             if err != nil {
                 t.Fatalf(err.Error())
             }
@@ -786,7 +786,7 @@ func TestUpdateDirectories(t *testing.T) {
         }
 
         // Now actually running the update.
-        comments, err := updateDirectories(dbconn, tokr)
+        comments, err := updateDirectories(dbconn, tokr, nil)
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -848,7 +848,7 @@ func TestUpdateDirectories(t *testing.T) {
         defer os.RemoveAll(to_add)
 
         {
-            comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr)
+            comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr, nil)
             if err != nil {
                 t.Fatalf(err.Error())
             }
@@ -874,7 +874,7 @@ func TestUpdateDirectories(t *testing.T) {
         }
 
         // Now actually running the update.
-        comments, err := updateDirectories(dbconn, tokr)
+        comments, err := updateDirectories(dbconn, tokr, nil)
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -954,7 +954,7 @@ func TestUpdateDirectories(t *testing.T) {
         defer os.RemoveAll(to_add)
 
         {
-            comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr)
+            comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr, nil)
             if err != nil {
                 t.Fatalf(err.Error())
             }
@@ -1001,7 +1001,7 @@ func TestUpdateDirectories(t *testing.T) {
         }
 
         // Now actually running the update.
-        comments, err := updateDirectories(dbconn, tokr)
+        comments, err := updateDirectories(dbconn, tokr, nil)
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -1084,7 +1084,7 @@ func TestUpdateDirectories(t *testing.T) {
         }
         defer os.RemoveAll(to_add)
 
-        comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr)
+        comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr, nil)
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -1099,7 +1099,7 @@ func TestUpdateDirectories(t *testing.T) {
             t.Fatalf(err.Error())
         }
 
-        comments, err = updateDirectories(dbconn, tokr)
+        comments, err = updateDirectories(dbconn, tokr, nil)
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -1143,7 +1143,7 @@ func TestBackupDatabase(t *testing.T) {
         t.Fatalf(err.Error())
     }
 
-    comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr)
+    comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr, nil)
     if err != nil {
         t.Fatalf(err.Error())
     }
@@ -1212,7 +1212,7 @@ func TestQueryTokens(t *testing.T) {
         t.Fatalf(err.Error())
     }
 
-    comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr)
+    comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr, nil)
     if err != nil {
         t.Fatalf(err.Error())
     }
@@ -1607,7 +1607,7 @@ func TestRetrievePath(t *testing.T) {
         t.Fatalf(err.Error())
     }
 
-    comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr)
+    comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr, nil)
     if err != nil {
         t.Fatalf(err.Error())
     }
@@ -1690,7 +1690,7 @@ func TestIsDirectoryRegistered(t *testing.T) {
         t.Fatalf(err.Error())
     }
 
-    comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr)
+    comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr, nil)
     if err != nil {
         t.Fatalf(err.Error())
     }
@@ -1762,7 +1762,7 @@ func TestIsDirectoryRegistered(t *testing.T) {
     }
 
     to_add2 := filepath.Join(linkparent, "stuff")
-    comments, err = addNewDirectory(dbconn, to_add2, []string{ "metadata.json", "other.json" }, "myself", tokr)
+    comments, err = addNewDirectory(dbconn, to_add2, []string{ "metadata.json", "other.json" }, "myself", tokr, nil)
     if err != nil {
         t.Fatal(err)
     }
