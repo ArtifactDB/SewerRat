@@ -300,7 +300,7 @@ we can skip it by setting the `metadata=false` URL query parameter in our reques
 
 If the path doesn't exist in the index, a 404 error is returned.
 
-## Spinning up an instance
+## Administration
 
 Clone this repository and build the binary.
 This assumes that [Go version 1.20 or higher](https://go.dev/dl) is available.
@@ -333,6 +333,10 @@ Additional arguments can be passed to `./SewerRat` to control its behavior (chec
 - `-session` specifies the lifetime of a registration sesssion 
   (i.e., the maximum time between starting and finishing the registration, see below).
   This defaults to 10 minutes.
+
+It is assumed that SewerRat runs under a service account with no access to credentials or other sensitive information.
+This is because users can, in their registered directories, craft symlinks to arbitrary locations that will be followed by SewerRat.
+Any file path that can be accessed by the service account should be assumed to be public when the SewerRat API is active.
 
 The [`html/`](html) subdirectory contains a minimal search page that queries a local SewerRat instance.
 Developers can copy this page and change the `base_url` to point to their production instance.
