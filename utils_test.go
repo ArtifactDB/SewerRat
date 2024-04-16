@@ -29,6 +29,26 @@ func equalStringArrays(x []string, y []string) bool {
     return true
 }
 
+func equalPathArrays(x []string, y []string, dir string) bool {
+    if (x == nil) != (y == nil) {
+        return false
+    }
+    if x == nil {
+        return true
+    }
+
+    if len(x) != len(y) {
+        return false
+    }
+    for i, v := range x {
+        if v != filepath.Join(dir, y[i]) {
+            return false
+        }
+    }
+
+    return true
+}
+
 func mockDirectory(path string) error {
     err := os.MkdirAll(path, 0700)
     if err != nil {

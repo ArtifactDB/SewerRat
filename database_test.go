@@ -111,7 +111,7 @@ WHERE paths.path = ? AND fields.field = ? AND tokens.token = ?
     return count != 0, nil
 }
 
-func TestAddDirectory(t *testing.T) {
+func TestAddNewDirectory(t *testing.T) {
     tmp, err := os.MkdirTemp("", "")
     if err != nil {
         t.Fatalf(err.Error())
@@ -146,7 +146,7 @@ func TestAddDirectory(t *testing.T) {
         defer dbconn.Close()
         defer os.Remove(dbpath)
 
-        comments, err := addDirectory(dbconn, to_add, map[string]bool{ "metadata.json": true }, "myself", tokr)
+        comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json" }, "myself", tokr)
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -267,7 +267,7 @@ func TestAddDirectory(t *testing.T) {
         defer os.Remove(dbpath)
 
         // Works with multiple JSON targets.
-        comments, err := addDirectory(dbconn, to_add, map[string]bool{ "metadata.json": true, "other.json": true }, "myslef", tokr)
+        comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myslef", tokr)
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -311,7 +311,7 @@ func TestAddDirectory(t *testing.T) {
         defer os.Remove(dbpath)
 
         // Works with multiple JSON directories.
-        comments, err := addDirectory(dbconn, to_add, map[string]bool{ "other.json": true }, "myself", tokr)
+        comments, err := addNewDirectory(dbconn, to_add, []string{ "other.json" }, "myself", tokr)
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -319,7 +319,7 @@ func TestAddDirectory(t *testing.T) {
             t.Fatalf("unexpected comments from the directory addition %v", comments)
         }
 
-        comments, err = addDirectory(dbconn, to_add2, map[string]bool{ "metadata.json": true }, "myself", tokr)
+        comments, err = addNewDirectory(dbconn, to_add2, []string{ "metadata.json" }, "myself", tokr)
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -352,7 +352,7 @@ func TestAddDirectory(t *testing.T) {
         }
 
         // Recalling on an existing directory wipes out existing entries and replaces it.
-        comments, err = addDirectory(dbconn, to_add, map[string]bool{ "metadata.json": true }, "myself", tokr)
+        comments, err = addNewDirectory(dbconn, to_add, []string{ "metadata.json" }, "myself", tokr)
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -390,7 +390,7 @@ func TestAddDirectory(t *testing.T) {
         defer os.Remove(dbpath)
 
         // Reports the error correctly.
-        comments, err := addDirectory(dbconn, to_fail, map[string]bool{ "metadata.json": true, "other.json": true }, "myself", tokr)
+        comments, err := addNewDirectory(dbconn, to_fail, []string{ "metadata.json", "other.json" }, "myself", tokr)
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -429,7 +429,7 @@ func TestAddDirectory(t *testing.T) {
         defer dbconn.Close()
         defer os.Remove(dbpath)
 
-        comments, err := addDirectory(dbconn, symdir, map[string]bool{ "metadata.json": true, "other.json": true }, "myself", tokr)
+        comments, err := addNewDirectory(dbconn, symdir, []string{ "metadata.json", "other.json" }, "myself", tokr)
         if err != nil {
             t.Fatal(err)
         }
@@ -487,7 +487,7 @@ func TestDeleteDirectory(t *testing.T) {
         t.Fatalf(err.Error())
     }
 
-    comments, err := addDirectory(dbconn, to_add, map[string]bool{ "metadata.json": true, "other.json": true }, "myself", tokr)
+    comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr)
     if err != nil {
         t.Fatalf(err.Error())
     }
@@ -495,7 +495,7 @@ func TestDeleteDirectory(t *testing.T) {
         t.Fatalf("unexpected comments from the directory addition %v", comments)
     }
 
-    comments, err = addDirectory(dbconn, to_add2, map[string]bool{ "other.json": true }, "myself", tokr)
+    comments, err = addNewDirectory(dbconn, to_add2, []string{ "other.json" }, "myself", tokr)
     if err != nil {
         t.Fatalf(err.Error())
     }
@@ -573,7 +573,7 @@ func TestDeleteDirectory(t *testing.T) {
     }
 }
 
-func TestUpdatePaths(t *testing.T) {
+func TestUpdateDirectories(t *testing.T) {
     tmp, err := os.MkdirTemp("", "")
     if err != nil {
         t.Fatalf(err.Error())
@@ -652,7 +652,7 @@ func TestUpdatePaths(t *testing.T) {
 
         var oldtime1, oldtime2 int64
         {
-            comments, err := addDirectory(dbconn, to_add, map[string]bool{ "metadata.json": true, "other.json": true }, "myself", tokr)
+            comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr)
             if err != nil {
                 t.Fatalf(err.Error())
             }
@@ -683,7 +683,7 @@ func TestUpdatePaths(t *testing.T) {
         }
 
         // Now actually running the update.
-        comments, err := updatePaths(dbconn, tokr)
+        comments, err := updateDirectories(dbconn, tokr)
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -765,7 +765,7 @@ func TestUpdatePaths(t *testing.T) {
         defer os.RemoveAll(to_add)
 
         {
-            comments, err := addDirectory(dbconn, to_add, map[string]bool{ "metadata.json": true, "other.json": true }, "myself", tokr)
+            comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr)
             if err != nil {
                 t.Fatalf(err.Error())
             }
@@ -786,7 +786,7 @@ func TestUpdatePaths(t *testing.T) {
         }
 
         // Now actually running the update.
-        comments, err := updatePaths(dbconn, tokr)
+        comments, err := updateDirectories(dbconn, tokr)
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -848,7 +848,7 @@ func TestUpdatePaths(t *testing.T) {
         defer os.RemoveAll(to_add)
 
         {
-            comments, err := addDirectory(dbconn, to_add, map[string]bool{ "metadata.json": true, "other.json": true }, "myself", tokr)
+            comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr)
             if err != nil {
                 t.Fatalf(err.Error())
             }
@@ -874,7 +874,7 @@ func TestUpdatePaths(t *testing.T) {
         }
 
         // Now actually running the update.
-        comments, err := updatePaths(dbconn, tokr)
+        comments, err := updateDirectories(dbconn, tokr)
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -954,7 +954,7 @@ func TestUpdatePaths(t *testing.T) {
         defer os.RemoveAll(to_add)
 
         {
-            comments, err := addDirectory(dbconn, to_add, map[string]bool{ "metadata.json": true, "other.json": true }, "myself", tokr)
+            comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr)
             if err != nil {
                 t.Fatalf(err.Error())
             }
@@ -1001,7 +1001,7 @@ func TestUpdatePaths(t *testing.T) {
         }
 
         // Now actually running the update.
-        comments, err := updatePaths(dbconn, tokr)
+        comments, err := updateDirectories(dbconn, tokr)
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -1084,7 +1084,7 @@ func TestUpdatePaths(t *testing.T) {
         }
         defer os.RemoveAll(to_add)
 
-        comments, err := addDirectory(dbconn, to_add, map[string]bool{ "metadata.json": true, "other.json": true }, "myself", tokr)
+        comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr)
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -1099,7 +1099,7 @@ func TestUpdatePaths(t *testing.T) {
             t.Fatalf(err.Error())
         }
 
-        comments, err = updatePaths(dbconn, tokr)
+        comments, err = updateDirectories(dbconn, tokr)
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -1143,7 +1143,7 @@ func TestBackupDatabase(t *testing.T) {
         t.Fatalf(err.Error())
     }
 
-    comments, err := addDirectory(dbconn, to_add, map[string]bool{ "metadata.json": true, "other.json": true }, "myself", tokr)
+    comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr)
     if err != nil {
         t.Fatalf(err.Error())
     }
@@ -1212,7 +1212,7 @@ func TestQueryTokens(t *testing.T) {
         t.Fatalf(err.Error())
     }
 
-    comments, err := addDirectory(dbconn, to_add, map[string]bool{ "metadata.json": true, "other.json": true }, "myself", tokr)
+    comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr)
     if err != nil {
         t.Fatalf(err.Error())
     }
@@ -1220,12 +1220,21 @@ func TestQueryTokens(t *testing.T) {
         t.Fatalf("unexpected comments from the directory addition %v", comments)
     }
 
+    extractSortedPaths := func(input []queryResult) []string {
+        output := []string{}
+        for _, x := range input {
+            output = append(output, x.Path)
+        }
+        sort.Strings(output)
+        return output
+    }
+
     t.Run("basic text", func(t *testing.T) {
         res, err := queryTokens(dbconn, &searchClause{ Type: "text", Text: "lamb" }, nil, 0)
         if err != nil {
             t.Fatalf(err.Error())
         }
-        if len(res) != 2 || res[0].Path != filepath.Join(to_add, "stuff/other.json") || res[1].Path != filepath.Join(to_add, "metadata.json") { // ordered by descending time and PID
+        if !equalPathArrays(extractSortedPaths(res), []string{ "metadata.json", "stuff/other.json" }, to_add) {
             t.Fatalf("search results are not as expected %v", res)
         }
     })
@@ -1235,7 +1244,7 @@ func TestQueryTokens(t *testing.T) {
         if err != nil {
             t.Fatalf(err.Error())
         }
-        if len(res) != 1 || res[0].Path != filepath.Join(to_add, "stuff/other.json") {
+        if !equalPathArrays(extractSortedPaths(res), []string{ "stuff/other.json" }, to_add) {
             t.Fatalf("search results are not as expected %v", res)
         }
     })
@@ -1245,7 +1254,7 @@ func TestQueryTokens(t *testing.T) {
         if err != nil {
             t.Fatalf(err.Error())
         }
-        if len(res) != 3 || res[0].Path != filepath.Join(to_add, "stuff/other.json") || res[1].Path != filepath.Join(to_add, "stuff/metadata.json") || res[2].Path != filepath.Join(to_add, "metadata.json") {
+        if !equalPathArrays(extractSortedPaths(res), []string{ "metadata.json", "stuff/metadata.json", "stuff/other.json" }, to_add) {
             t.Fatalf("search results are not as expected %v", res)
         }
     })
@@ -1263,7 +1272,7 @@ func TestQueryTokens(t *testing.T) {
         if err != nil {
             t.Fatalf(err.Error())
         }
-        if len(res) != 2 || res[0].Path != filepath.Join(to_add, "stuff/other.json") || res[1].Path != filepath.Join(to_add, "metadata.json") {
+        if !equalPathArrays(extractSortedPaths(res), []string{ "metadata.json", "stuff/other.json" }, to_add) {
             t.Fatalf("search results are not as expected %v", res)
         }
     })
@@ -1329,7 +1338,7 @@ func TestQueryTokens(t *testing.T) {
         if err != nil {
             t.Fatalf(err.Error())
         }
-        if len(res) != 1 || res[0].Path != filepath.Join(to_add, "stuff/metadata.json") {
+        if !equalPathArrays(extractSortedPaths(res), []string{ "stuff/metadata.json" }, to_add) {
             t.Fatalf("search results are not as expected %v", res)
         }
     })
@@ -1350,29 +1359,7 @@ func TestQueryTokens(t *testing.T) {
         if err != nil {
             t.Fatalf(err.Error())
         }
-        if len(res) != 1 || res[0].Path != filepath.Join(to_add, "whee/other.json") {
-            t.Fatalf("search results are not as expected %v", res)
-        }
-    })
-
-
-    t.Run("and (simple)", func(t *testing.T) {
-        res, err := queryTokens(
-            dbconn, 
-            &searchClause{ 
-                Type: "and", 
-                Children: []*searchClause{ 
-                    &searchClause{ Type: "text", Text: "yuru" }, 
-                    &searchClause{ Type: "text", Text: "non" },
-                },
-            }, 
-            nil, 
-            0,
-        )
-        if err != nil {
-            t.Fatalf(err.Error())
-        }
-        if len(res) != 1 || res[0].Path != filepath.Join(to_add, "whee/other.json") {
+        if !equalPathArrays(extractSortedPaths(res), []string{ "whee/other.json" }, to_add) {
             t.Fatalf("search results are not as expected %v", res)
         }
     })
@@ -1414,7 +1401,7 @@ func TestQueryTokens(t *testing.T) {
         if err != nil {
             t.Fatalf(err.Error())
         }
-        if len(res) != 2 || res[0].Path != filepath.Join(to_add, "whee/other.json") || res[1].Path != filepath.Join(to_add, "metadata.json") {
+        if !equalStringArrays(extractSortedPaths(res), []string{ filepath.Join(to_add, "metadata.json"), filepath.Join(to_add, "whee/other.json") }) {
             t.Fatalf("search results are not as expected %v", res)
         }
     })
@@ -1435,7 +1422,7 @@ func TestQueryTokens(t *testing.T) {
         if err != nil {
             t.Fatalf(err.Error())
         }
-        if len(res) != 2 || res[0].Path != filepath.Join(to_add, "whee/other.json") || res[1].Path != filepath.Join(to_add, "metadata.json") {
+        if !equalPathArrays(extractSortedPaths(res), []string{ "metadata.json", "whee/other.json" }, to_add) {
             t.Fatalf("search results are not as expected %v", res)
         }
     })
@@ -1456,7 +1443,7 @@ func TestQueryTokens(t *testing.T) {
         if err != nil {
             t.Fatalf(err.Error())
         }
-        if len(res) != 2 || res[0].Path != filepath.Join(to_add, "stuff/metadata.json") || res[1].Path != filepath.Join(to_add, "metadata.json") {
+        if !equalPathArrays(extractSortedPaths(res), []string{ "metadata.json", "stuff/metadata.json" }, to_add) {
             t.Fatalf("search results are not as expected %v", res)
         }
     })
@@ -1477,7 +1464,7 @@ func TestQueryTokens(t *testing.T) {
         if err != nil {
             t.Fatalf(err.Error())
         }
-        if len(res) != 2 || res[0].Path != filepath.Join(to_add, "stuff/metadata.json") || res[1].Path != filepath.Join(to_add, "metadata.json") {
+        if !equalPathArrays(extractSortedPaths(res), []string{ "metadata.json", "stuff/metadata.json" }, to_add) {
             t.Fatalf("search results are not as expected %v", res)
         }
     })
@@ -1510,7 +1497,7 @@ func TestQueryTokens(t *testing.T) {
         if err != nil {
             t.Fatalf(err.Error())
         }
-        if len(res) != 2 || res[0].Path != filepath.Join(to_add, "stuff/other.json") || res[1].Path != filepath.Join(to_add, "stuff/metadata.json") {
+        if !equalPathArrays(extractSortedPaths(res), []string{ "stuff/metadata.json", "stuff/other.json" }, to_add) {
             t.Fatalf("search results are not as expected %v", res)
         }
     })
@@ -1546,8 +1533,13 @@ func TestQueryTokens(t *testing.T) {
         if err != nil {
             t.Fatalf(err.Error())
         }
-        if len(res) != 2 || res[0].Path != filepath.Join(to_add, "whee/other.json") || res[1].Path != filepath.Join(to_add, "stuff/other.json") {
+        if len(res) != 2 {
             t.Fatalf("search results are not as expected")
+        }
+
+        collected := []string{}
+        for _, x := range res {
+            collected = append(collected, x.Path)
         }
 
         // Picking up from the last position.
@@ -1555,8 +1547,17 @@ func TestQueryTokens(t *testing.T) {
         if err != nil {
             t.Fatalf(err.Error())
         }
-        if len(res) != 2 || res[0].Path != filepath.Join(to_add, "stuff/metadata.json") || res[1].Path != filepath.Join(to_add, "metadata.json") {
+        if len(res) != 2 {
             t.Fatalf("search results are not as expected")
+        }
+
+        for _, x := range res {
+            collected = append(collected, x.Path)
+        }
+        sort.Strings(collected)
+
+        if !equalPathArrays(collected, []string{ "metadata.json", "stuff/metadata.json", "stuff/other.json", "whee/other.json" }, to_add) {
+            t.Fatalf("search results are not as expected %v", collected)
         }
 
         // Checking that it works even after we've exhausted all records.
@@ -1606,7 +1607,7 @@ func TestRetrievePath(t *testing.T) {
         t.Fatalf(err.Error())
     }
 
-    comments, err := addDirectory(dbconn, to_add, map[string]bool{ "metadata.json": true, "other.json": true }, "myself", tokr)
+    comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr)
     if err != nil {
         t.Fatalf(err.Error())
     }
@@ -1689,7 +1690,7 @@ func TestIsDirectoryRegistered(t *testing.T) {
         t.Fatalf(err.Error())
     }
 
-    comments, err := addDirectory(dbconn, to_add, map[string]bool{ "metadata.json": true, "other.json": true }, "myself", tokr)
+    comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr)
     if err != nil {
         t.Fatalf(err.Error())
     }
@@ -1761,7 +1762,7 @@ func TestIsDirectoryRegistered(t *testing.T) {
     }
 
     to_add2 := filepath.Join(linkparent, "stuff")
-    comments, err = addDirectory(dbconn, to_add2, map[string]bool{ "metadata.json": true, "other.json": true }, "myself", tokr)
+    comments, err = addNewDirectory(dbconn, to_add2, []string{ "metadata.json", "other.json" }, "myself", tokr)
     if err != nil {
         t.Fatal(err)
     }

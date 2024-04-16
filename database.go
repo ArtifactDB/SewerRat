@@ -216,169 +216,6 @@ func newInsertStatements(tx *sql.Tx) (*insertStatements, error) {
 
 /**********************************************************************/
 
-type loadedMetadata struct {
-    Path string
-    Failure error
-    Raw []byte
-    User string
-    Time time.Time
-    Parsed interface{}
-}
-
-func loadMetadata(paths []string, stats []fs.FileInfo) []*loadedMetadata {
-    assets := make([]*loadedMetadata, len(paths))
-
-    var wg sync.WaitGroup
-    wg.Add(len(paths))
-
-    for i, f := range paths {
-        go func(i int, f string) {
-            defer wg.Done()
-            assets[i] = &loadedMetadata{ Path: f, Failure: nil }
-
-            raw, err := os.ReadFile(f)
-            if err != nil {
-                assets[i].Failure = fmt.Errorf("failed to read %q; %w", f, err)
-                return
-            }
-
-            var vals interface{}
-            err = json.Unmarshal(raw, &vals)
-            if err != nil {
-                assets[i].Failure = fmt.Errorf("failed to parse %q; %w", f, err)
-                return
-            }
-
-            var info fs.FileInfo
-            if stats != nil {
-                info = stats[i]
-            } else {
-                raw_info, err := os.Lstat(f)
-                if err != nil {
-                    assets[i].Failure = fmt.Errorf("failed to stat %q; %w", f, err)
-                    return
-                }
-                if raw_info.Mode() & fs.ModeSymlink != 0 {
-                    assets[i].Failure = fmt.Errorf("not following symbolic link at %q", f)
-                    return
-                }
-                info = raw_info
-            }
-
-            username, err := identifyUser(info)
-            if err != nil {
-                assets[i].Failure = fmt.Errorf("failed to determine author of %q; %w", f, err)
-                return
-            }
-
-            assets[i].User = username
-            assets[i].Time = info.ModTime()
-            assets[i].Raw = raw
-            assets[i].Parsed = vals
-        }(i, f)
-    }
-
-    wg.Wait()
-    return assets
-}
-
-/**********************************************************************/
-
-func addDirectory(db *sql.DB, directory string, of_interest map[string]bool, user string, tokenizer *unicodeTokenizer) ([]string, error) {
-    all_failures := []string{}
-
-    paths := []string{}
-    safeWalkDir(directory, func(path string, d fs.DirEntry, err error) error {
-        // Just skip any directories that we can't access.
-        if err != nil {
-            all_failures = append(all_failures, fmt.Sprintf("failed to walk %q; %v", path, err))
-        }
-
-        if !d.IsDir() {
-            if _, ok := of_interest[d.Name()]; ok {
-                paths = append(paths, path)
-            }
-        }
-        return nil
-    })
-    assets := loadMetadata(paths, nil)
-
-    atx, err := createTransaction(db)
-    if err != nil {
-        return nil, fmt.Errorf("failed to prepare transaction for directory addition; %w", err)
-    }
-    defer atx.Finish()
-
-    // Delete all previously registered paths for this directory for a fresh start;
-    // otherwise there's no way to easily get rid of old paths that are no longer here.
-    _, err = atx.Tx.Exec("DELETE FROM dirs WHERE path == ?", directory)
-    if err != nil {
-        return nil, fmt.Errorf("failed to delete %q; %w", directory, err)
-    }
-
-    var did int64
-    {
-
-        names := []string{}
-        for k, _ := range of_interest {
-            names = append(names, k)
-        }
-
-        b, err := json.Marshal(names)
-        if err != nil {
-            return nil, fmt.Errorf("failed to encode names as JSON; %w", err)
-        }
-
-        err = atx.Tx.QueryRow(
-            "INSERT INTO dirs(path, user, time, names) VALUES(?, ?, ?, ?) RETURNING did",
-            directory, 
-            user, 
-            time.Now().Unix(), 
-            b,
-        ).Scan(&did)
-        if err != nil {
-            return nil, fmt.Errorf("failed to insert directory; %w", err)
-        }
-    }
-
-    // Adding the directory contents.
-    prepped, err := newInsertStatements(atx.Tx)
-    if err != nil {
-        return nil, fmt.Errorf("failed to create prepared insertion statements for %q; %w", directory, err)
-    }
-    defer prepped.Close()
-
-    pstmt, err := atx.Tx.Prepare("INSERT INTO paths(path, did, user, time, metadata) VALUES(?, ?, ?, ?, ?) RETURNING pid")
-    if err != nil {
-        return nil, fmt.Errorf("failed to prepare path insertion statement; %w", err)
-    }
-    defer pstmt.Close()
-
-    for _, a := range assets {
-        if a.Failure != nil {
-            all_failures = append(all_failures, a.Failure.Error())
-            continue
-        }
-
-        var pid int64
-        err := pstmt.QueryRow(a.Path, did, a.User, a.Time.Unix(), a.Raw).Scan(&pid)
-        if err != nil {
-            all_failures = append(all_failures, fmt.Sprintf("failed to insert %q into the database; %v", a.Path, err))
-            continue
-        }
-
-        tokfails := tokenizeMetadata(atx.Tx, a.Parsed, a.Path, pid, "", prepped, tokenizer)
-        all_failures = append(all_failures, tokfails...)
-    }
-
-    err = atx.Tx.Commit()
-    if err != nil {
-        return nil, fmt.Errorf("failed to commit the transaction for %q; %w", directory, err)
-    }
-
-    return all_failures, nil
-}
-
 // Recurse through the metadata structure to disassemble the tokens.
 func tokenizeMetadata(tx *sql.Tx, parsed interface{}, path string, pid int64, field string, prepped *insertStatements, tokenizer *unicodeTokenizer) []string {
     failures := []string{}
@@ -454,294 +291,301 @@ func deleteDirectory(db *sql.DB, directory string) error {
 
 /**********************************************************************/
 
-type directoryEntry struct {
-    Parent int64
+type FileInfoWithPath struct {
+    Path string
     Info fs.FileInfo
 }
 
-func scanDirectories(db *sql.DB) (map[string]*directoryEntry, []string, error) {
-    type Directory struct {
-        Path string
-        Id int64
-        Names []string
-    }
-
-    // Wrapped inside a function so that 'rows' are closed before further ops.
-    all_dirs, err := func() ([]*Directory, error) {
-        rows, err := db.Query("SELECT did, path, names from dirs") 
-        if err != nil {
-            return nil, fmt.Errorf("failed to query the 'dirs' table; %w", err)
-        }
-        defer rows.Close()
-
-        all_dirs := []*Directory{}
-        for rows.Next() {
-            var id int64
-            var path string
-            var names_raw []byte
-            if err := rows.Scan(&id, &path, &names_raw); err != nil {
-                return nil, fmt.Errorf("failed to traverse rows of the 'dirs' table; %w", err)
-            }
-
-            var names []string
-            err = json.Unmarshal(names_raw, &names)
-            if err != nil {
-                return nil, fmt.Errorf("failed to parse names of 'dirs' for %q; %w", path, err)
-            }
-
-            all_dirs = append(all_dirs, &Directory{ Id: id, Path: path, Names: names })
-        }
-
-        return all_dirs, nil
-    }()
+func compareToExistingPaths(tx *sql.Tx, did int64, all_paths map[string]fs.FileInfo) ([]*FileInfoWithPath, []*FileInfoWithPath, []string, error) {
+    rows, err := tx.Query("SELECT path, time from paths WHERE did = ?", did) 
     if err != nil {
-        return nil, nil, fmt.Errorf("failed to scan directories; %w", err)
+        return nil, nil, nil, fmt.Errorf("failed to query the 'paths' table; %w", err)
+    }
+    defer rows.Close()
+
+    update_paths := []*FileInfoWithPath{}
+    found := map[string]bool{}
+    purge_paths := []string{}
+
+    for rows.Next() {
+        var path string
+        var time int64
+        if err := rows.Scan(&path, &time); err != nil {
+            return nil, nil, nil, fmt.Errorf("failed to traverse rows of the 'paths' table; %w", err)
+        }
+
+        candidate, ok := all_paths[path]
+        if !ok {
+            purge_paths = append(purge_paths, path)
+            continue
+        }
+        found[path] = true
+
+        newtime := candidate.ModTime().Unix()
+        if newtime == time {
+            continue
+        }
+
+        update_paths = append(update_paths, &FileInfoWithPath{ Path: path, Info: candidate })
     }
 
-    // Listing the contents of all registered directories, in parallel.
-    dircontents := make([]map[string]*directoryEntry, len(all_dirs))
-    dirfailures := make([][]string, len(all_dirs))
-
-    var wg sync.WaitGroup
-    wg.Add(len(all_dirs))
-
-    for i, dir := range all_dirs {
-        go func(i int, dir *Directory) {
-            defer wg.Done()
-
-            curcontents := map[string]*directoryEntry{}
-            curfailures := []string{}
-            curnames := map[string]bool{}
-            for _, n := range dir.Names {
-                curnames[n] = true
-            }
-
-            // Just skip any directories that we can't access, no need to check the error.
-            safeWalkDir(dir.Path, func(path string, d fs.DirEntry, err error) error {
-                if err != nil {
-                    curfailures = append(curfailures, fmt.Sprintf("failed to walk %q; %v", path, err))
-                    return nil
-                }
-
-                if d.IsDir() {
-                    return nil
-                }
-
-                _, ok := curnames[filepath.Base(path)]
-                if !ok {
-                    return nil
-                }
-                info, err := d.Info()
-                if err != nil {
-                    curfailures = append(curfailures, fmt.Sprintf("failed to stat %q; %v", path, err))
-                    return nil
-                }
-                curcontents[path] = &directoryEntry{ Parent: dir.Id, Info: info }
-                return nil
-            })
-
-            dircontents[i] = curcontents 
-            dirfailures[i] = curfailures
-        }(i, dir)
-    }
-
-    wg.Wait()
-
-    out_contents := map[string]*directoryEntry{}
-    for _, d := range dircontents {
-        for k, v := range d {
-            out_contents[k] = v
+    new_paths := []*FileInfoWithPath{}
+    for k, v:= range all_paths {
+        if _, ok := found[k]; !ok {
+            new_paths = append(new_paths, &FileInfoWithPath{ Path: k, Info: v })
         }
     }
 
-    out_failures := []string{}
-    for _, f := range dirfailures {
-        out_failures = append(out_failures, f...)
-    }
-
-    return out_contents, out_failures, nil
+    return new_paths, update_paths, purge_paths, nil
 }
 
-func checkExistingPaths(db *sql.DB, all_contents map[string]*directoryEntry) ([]*loadedMetadata, []string, error) {
-    // Scan through all registered paths to check if any of these
-    // already exist. This is again wrapped inside a function so that 'rows'
-    // are closed before further ops.
-    update_paths, update_stats, purge_paths, err := func() ([]string, []fs.FileInfo, []string, error) {
-        rows, err := db.Query("SELECT path, time from paths") 
-        if err != nil {
-            return nil, nil, nil, fmt.Errorf("failed to query the 'paths' table; %w", err)
-        }
-        defer rows.Close()
-
-        update_paths := []string{}
-        update_stats := []fs.FileInfo{}
-        purge_paths := []string{}
-
-        for rows.Next() {
-            var path string
-            var time int64
-            if err := rows.Scan(&path, &time); err != nil {
-                return nil, nil, nil, fmt.Errorf("failed to traverse rows of the 'paths' table; %w", err)
-            }
-
-            candidate, ok := all_contents[path]
-            if !ok {
-                purge_paths = append(purge_paths, path)
-                continue
-            }
-            delete(all_contents, path) // indicate that this does not need to be updated anymore.
-
-            newtime := candidate.Info.ModTime().Unix()
-            if newtime == time {
-                continue
-            }
-
-            // No need to track the directory ID, as that is already present in the row.
-            update_paths = append(update_paths, path)
-            update_stats = append(update_stats, candidate.Info)
-        }
-
-        return update_paths, update_stats, purge_paths, nil
-    }()
-    if err != nil {
-        return nil, nil, err
-    }
-
-    return loadMetadata(update_paths, update_stats), purge_paths, nil
-}
-
-func updatePaths(db *sql.DB, tokenizer* unicodeTokenizer) ([]string, error) {
+func addDirectoryContents(tx *sql.Tx, path string, did int64, base_names []string, tokenizer* unicodeTokenizer) ([]string, error) {
     all_failures := []string{}
 
-    dir_contents, dir_failures, err := scanDirectories(db)
+    dir_contents, dir_failures, err := listMetadata(path, base_names)
     if err != nil {
         return nil, err
     }
     all_failures = append(all_failures, dir_failures...)
 
-    // This step will also prune 'dir_contents' to remove the paths that
-    // are already present in 'db', such that the subsequent creation of
-    // 'new_assets' doesn't include paths that are already indexed.
-    update_assets, purge_paths, err := checkExistingPaths(db, dir_contents)
+    new_paths, update_paths, purge_paths, err := compareToExistingPaths(tx, did, dir_contents)
     if err != nil {
         return nil, err
     }
 
-    new_ids := []int64{}
-    new_stats := []fs.FileInfo{}
-    new_paths := []string{}    
-    for k, v := range dir_contents {
-        new_paths = append(new_paths, k)
-        new_ids = append(new_ids, v.Parent)
-        new_stats = append(new_stats, v.Info)
-    }
-    new_assets := loadMetadata(new_paths, new_stats)
+    // Loading the metadata into memory.
+    new_assets := make([]*loadedMetadata, len(new_paths))
+    update_assets := make([]*loadedMetadata, len(update_paths))
+    {
+        var wg sync.WaitGroup
+        wg.Add(len(new_paths) + len(update_paths))
 
-    atx, err := createTransaction(db)
-    if err != nil {
-        return nil, fmt.Errorf("failed to prepare a database transaction for path updates; %w", err)
-    }
-    defer atx.Finish()
+        for i, e := range new_paths {
+            go func(i int, e *FileInfoWithPath) {
+                defer wg.Done()
+                new_assets[i] = loadMetadata(e.Path, e.Info)
+            }(i, e)
+        }
 
-    prepped, err := newInsertStatements(atx.Tx)
+        for i, e := range update_paths {
+            go func(i int, e *FileInfoWithPath) {
+                defer wg.Done()
+                update_assets[i] = loadMetadata(e.Path, e.Info)
+            }(i, e)
+        }
+
+        wg.Wait()
+    }
+
+    token_stmts, err := newInsertStatements(tx)
     if err != nil {
         return nil, fmt.Errorf("failed to prepare token insertion statements for the update; %w", err)
     }
-    defer prepped.Close()
+    defer token_stmts.Close()
 
-    {
-        pustmt, err := atx.Tx.Prepare("UPDATE paths SET user = ?, time = ?, metadata = ? WHERE path = ?")
-        if err != nil {
-            return nil, fmt.Errorf("failed to prepare path update statement; %w", err)
-        }
-        defer pustmt.Close()
-
-        pistmt, err := atx.Tx.Prepare("SELECT pid FROM paths WHERE path = ?")
-        if err != nil {
-            return nil, fmt.Errorf("failed to prepare path ID statement; %w", err)
-        }
-        defer pistmt.Close()
-
-        delstmt, err := atx.Tx.Prepare("DELETE FROM links WHERE pid = ?")
-        if err != nil {
-            return nil, fmt.Errorf("failed to prepare link deletion statement; %w", err)
-        }
-        defer delstmt.Close()
-
-        for _, u := range update_assets {
-            if u.Failure != nil {
-                all_failures = append(all_failures, u.Failure.Error())
-                purge_paths = append(purge_paths, u.Path) // reassign it for purging.
-                continue
-            }
-
-            _, err := pustmt.Exec(u.User, u.Time.Unix(), u.Raw, u.Path)
-            if err != nil {
-                all_failures = append(all_failures, fmt.Sprintf("failed to update %q in the database; %v", u.Path, err))
-                continue
-            }
-
-            var pid int64
-            err = pistmt.QueryRow(u.Path).Scan(&pid)
-            if err != nil {
-                all_failures = append(all_failures, fmt.Sprintf("failed to inspect path ID for %q; %v", u.Path, err))
-                continue
-            }
-
-            _, err = delstmt.Exec(pid)
-            if err != nil {
-                all_failures = append(all_failures, fmt.Sprintf("failed to delete links for %q; %v", u.Path, err))
-                continue
-            }
-
-            tokfails := tokenizeMetadata(atx.Tx, u.Parsed, u.Path, pid, "", prepped, tokenizer)
-            all_failures = append(all_failures, tokfails...)
-        }
-    }
-
-    {
-        pstmt, err := atx.Tx.Prepare("INSERT INTO paths(path, did, user, time, metadata) VALUES(?, ?, ?, ?, ?) RETURNING pid")
+    if len(new_assets) > 0 {
+        new_stmt, err := tx.Prepare("INSERT INTO paths(path, did, user, time, metadata) VALUES(?, ?, ?, ?, ?) RETURNING pid")
         if err != nil {
             return nil, fmt.Errorf("failed to prepare path insertion statement; %w", err)
         }
-        defer pstmt.Close()
+        defer new_stmt.Close()
 
-        for i, a := range new_assets {
-            if a.Failure != nil {
-                all_failures = append(all_failures, a.Failure.Error())
+        for _, loaded := range new_assets {
+            if loaded.Failure != nil {
+                all_failures = append(all_failures, loaded.Failure.Error())
                 continue
             }
 
             var pid int64
-            err := pstmt.QueryRow(a.Path, new_ids[i], a.User, a.Time.Unix(), a.Raw).Scan(&pid)
+            err := new_stmt.QueryRow(loaded.Path, did, loaded.User, loaded.Time.Unix(), loaded.Raw).Scan(&pid)
             if err != nil {
-                all_failures = append(all_failures, fmt.Sprintf("failed to insert %q into the database; %v", a.Path, err))
+                all_failures = append(all_failures, fmt.Sprintf("failed to insert %q into the database; %v", loaded.Path, err))
                 continue
             }
 
-            tokfails := tokenizeMetadata(atx.Tx, a.Parsed, a.Path, pid, "", prepped, tokenizer)
+            tokfails := tokenizeMetadata(tx, loaded.Parsed, loaded.Path, pid, "", token_stmts, tokenizer)
             all_failures = append(all_failures, tokfails...)
         }
     }
 
-    {
-        delstmt, err := atx.Tx.Prepare("DELETE FROM paths WHERE path = ?")
+    if len(update_assets) > 0 {
+        update_stmt, err := tx.Prepare("UPDATE paths SET user = ?, time = ?, metadata = ? WHERE path = ?")
+        if err != nil {
+            return nil, fmt.Errorf("failed to prepare path update statement; %w", err)
+        }
+        defer update_stmt.Close()
+
+        pid_stmt, err := tx.Prepare("SELECT pid FROM paths WHERE path = ?")
+        if err != nil {
+            return nil, fmt.Errorf("failed to prepare path ID statement; %w", err)
+        }
+        defer pid_stmt.Close()
+
+        dellnk_stmt, err := tx.Prepare("DELETE FROM links WHERE pid = ?")
+        if err != nil {
+            return nil, fmt.Errorf("failed to prepare link deletion statement; %w", err)
+        }
+        defer dellnk_stmt.Close()
+
+        for _, loaded := range update_assets {
+            if loaded.Failure != nil {
+                purge_paths = append(purge_paths, loaded.Path)
+                all_failures = append(all_failures, loaded.Failure.Error())
+                continue
+            }
+
+            var pid int64
+            _, err := update_stmt.Exec(loaded.User, loaded.Time.Unix(), loaded.Raw, loaded.Path)
+            if err != nil {
+                all_failures = append(all_failures, fmt.Sprintf("failed to update %q in the database; %v", loaded.Path, err))
+                continue
+            }
+
+            err = pid_stmt.QueryRow(loaded.Path).Scan(&pid)
+            if err != nil {
+                all_failures = append(all_failures, fmt.Sprintf("failed to inspect path ID for %q; %v", loaded.Path, err))
+                continue
+            }
+
+            _, err = dellnk_stmt.Exec(pid)
+            if err != nil {
+                all_failures = append(all_failures, fmt.Sprintf("failed to delete links for %q; %v", loaded.Path, err))
+                continue
+            }
+
+            tokfails := tokenizeMetadata(tx, loaded.Parsed, loaded.Path, pid, "", token_stmts, tokenizer)
+            all_failures = append(all_failures, tokfails...)
+        }
+    }
+
+    if len(purge_paths) > 0 {
+        del_stmt, err := tx.Prepare("DELETE FROM paths WHERE path = ?")
         if err != nil {
             return nil, fmt.Errorf("failed to prepare the delete transaction; %w", err)
         }
-        defer delstmt.Close()
+        defer del_stmt.Close()
 
         for _, x := range purge_paths {
-            _, err := delstmt.Exec(x)
+            _, err := del_stmt.Exec(x)
             if err != nil {
                 all_failures = append(all_failures, fmt.Sprintf("failed to purge path %q from the database; %v", x, err))
             }
         }
     }
 
+    return all_failures, nil
+}
+
+/**********************************************************************/
+
+func addNewDirectory(db *sql.DB, path string, base_names []string, user string, tokenizer* unicodeTokenizer) ([]string, error) {
+    b, err := json.Marshal(base_names)
+    if err != nil {
+        return nil, fmt.Errorf("failed to encode names as JSON; %w", err)
+    }
+
+    atx, err := createTransaction(db)
+    if err != nil {
+        return nil, fmt.Errorf("failed to prepare transaction for table setup; %w", err)
+    }
+    defer atx.Finish()
+
+    var did int64
+    row := atx.Tx.QueryRow("SELECT did FROM dirs WHERE path = ?", path)
+    err = row.Scan(&did)
+    if errors.Is(err, sql.ErrNoRows) {
+        err = atx.Tx.QueryRow(
+            "INSERT INTO dirs(path, user, time, names) VALUES(?, ?, ?, ?) RETURNING did",
+            path, 
+            user, 
+            time.Now().Unix(), 
+            b,
+        ).Scan(&did)
+
+    } else {
+        _, err = atx.Tx.Exec(
+            "UPDATE dirs SET user = ?, time = ?, names = ? WHERE did = ?",
+            user, 
+            time.Now().Unix(), 
+            b,
+            did,
+        )
+    }
+
+    if err != nil {
+        return nil, fmt.Errorf("failed to insert new directory; %w", err)
+    }
+
+    failures, err := addDirectoryContents(atx.Tx, path, did, base_names, tokenizer)
+
     err = atx.Tx.Commit()
     if err != nil {
-        return nil, fmt.Errorf("failed to commit the update transaction; %w", err)
+        return nil, fmt.Errorf("failed to commit the transaction to add a new directory; %w", err)
+    }
+
+    return failures, err
+}
+
+/**********************************************************************/
+
+type registeredDirectory struct {
+    Path string
+    Id int64
+    Names []string
+}
+
+func listDirectories(tx *sql.Tx) ([]*registeredDirectory, error) {
+    rows, err := tx.Query("SELECT did, path, names from dirs") 
+    if err != nil {
+        return nil, fmt.Errorf("failed to query the 'dirs' table; %w", err)
+    }
+    defer rows.Close()
+
+    all_dirs := []*registeredDirectory{}
+    for rows.Next() {
+        var id int64
+        var path string
+        var names_raw []byte
+        if err := rows.Scan(&id, &path, &names_raw); err != nil {
+            return nil, fmt.Errorf("failed to traverse rows of the 'dirs' table; %w", err)
+        }
+
+        var names []string
+        err = json.Unmarshal(names_raw, &names)
+        if err != nil {
+            return nil, fmt.Errorf("failed to parse names of 'dirs' for %q; %w", path, err)
+        }
+
+        all_dirs = append(all_dirs, &registeredDirectory{ Id: id, Path: path, Names: names })
+    }
+
+    return all_dirs, nil
+}
+
+func updateDirectories(db *sql.DB, tokenizer* unicodeTokenizer) ([]string, error) {
+    atx, err := createTransaction(db)
+    if err != nil {
+        return nil, fmt.Errorf("failed to prepare transaction for table setup; %w", err)
+    }
+    defer atx.Finish()
+
+    all_dirs, err := listDirectories(atx.Tx)
+    if err != nil {
+        return nil, err
+    }
+
+    all_failures := []string{}
+    for _, d := range all_dirs {
+        curfailures, err := addDirectoryContents(atx.Tx, d.Path, d.Id, d.Names, tokenizer)
+        if err != nil {
+            return nil, err
+        }
+        all_failures = append(all_failures, curfailures...)
+    }
+
+    err = atx.Tx.Commit()
+    if err != nil {
+        return nil, fmt.Errorf("failed to commit the transaction to update directories; %w", err)
     }
 
     return all_failures, nil
