@@ -1018,6 +1018,39 @@ func TestRetrieveFileHandler(t *testing.T) {
             t.Fatalf("should have failed with a 400")
         }
     })
+
+    // Making some symlinks and seeing whether we behave correctly.
+    newpath := filepath.Join(to_add, "foobar.json")
+    err = os.Symlink(filepath.Join(to_add, "whee", "other.json"), newpath)
+    if err != nil {
+        t.Fatal(err)
+    }
+
+    normed, err := normalizePath(to_add)
+    if err != nil {
+        t.Fatal(err)
+    }
+
+    whitelisted_handler := http.HandlerFunc(newRetrieveFileHandler(dbconn, []string{ normed }))
+
+    t.Run("symlinks", func (t *testing.T) {
+        req, err := http.NewRequest("GET", "/retrieve/file?path=" + url.QueryEscape(newpath), nil)
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        rr := httptest.NewRecorder()
+        handler.ServeHTTP(rr, req)
+        if rr.Code != http.StatusBadRequest {
+            t.Fatalf("should have failed with a 400")
+        }
+
+        rr = httptest.NewRecorder()
+        whitelisted_handler.ServeHTTP(rr, req)
+        if rr.Code != http.StatusOK {
+            t.Fatalf("should have succeeded after whitelisting")
+        }
+    })
 }
 
 func TestListFilesHandler(t *testing.T) {

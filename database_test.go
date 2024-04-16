@@ -453,6 +453,38 @@ func TestAddNewDirectory(t *testing.T) {
             t.Fatalf("unexpected paths %v", all_paths)
         }
     })
+
+    t.Run("symlink whitelisted", func(t *testing.T) {
+        dbconn, err := initializeDatabase(dbpath)
+        if err != nil {
+            t.Fatalf(err.Error())
+        }
+        defer dbconn.Close()
+        defer os.Remove(dbpath)
+
+        normed, err := normalizePath(to_add)
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        comments, err := addNewDirectory(dbconn, symdir, []string{ "metadata.json", "other.json" }, "myself", tokr, []string{ normed })
+        if err != nil {
+            t.Fatal(err)
+        }
+        if len(comments) > 0 {
+            t.Fatalf("expected no comments about symbol link failure %v", comments)
+        }
+
+        all_paths, err := listPaths(dbconn, tmp)
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        // Symlinked files can now join in, though symlinked directories are still not traversed.
+        if !equalStringArrays(all_paths, []string{ "symlink/metadata.json", "symlink/other.json" }) {
+            t.Fatalf("unexpected paths %v", all_paths)
+        }
+    })
 }
 
 func TestDeleteDirectory(t *testing.T) {
