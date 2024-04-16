@@ -486,7 +486,7 @@ func addNewDirectory(db *sql.DB, path string, base_names []string, user string, 
 
     atx, err := createTransaction(db)
     if err != nil {
-        return nil, fmt.Errorf("failed to prepare transaction for table setup; %w", err)
+        return nil, fmt.Errorf("failed to prepare transaction for adding a new directory; %w", err)
     }
     defer atx.Finish()
 
@@ -565,7 +565,7 @@ func listDirectories(tx *sql.Tx) ([]*registeredDirectory, error) {
 func updateDirectories(db *sql.DB, tokenizer* unicodeTokenizer) ([]string, error) {
     atx, err := createTransaction(db)
     if err != nil {
-        return nil, fmt.Errorf("failed to prepare transaction for table setup; %w", err)
+        return nil, fmt.Errorf("failed to prepare transaction for update; %w", err)
     }
     defer atx.Finish()
 
