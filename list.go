@@ -4,27 +4,12 @@ import (
     "fmt"
     "io/fs"
     "path/filepath"
-    "os"
 )
-
-func safeWalkDir(dir string, fn fs.WalkDirFunc) error {
-    info, err := os.Lstat(dir)
-    if err != nil {
-        return err
-    }
-
-    // Just skipping the path if it turns out to be a symbolic link.
-    if info.Mode() & fs.ModeSymlink != 0 {
-        return nil
-    }
-
-    return filepath.WalkDir(dir, fn)
-}
 
 func listFiles(dir string, recursive bool) ([]string, error) {
     to_report := []string{}
 
-    err := safeWalkDir(dir, func(path string, info fs.DirEntry, err error) error {
+    err := filepath.WalkDir(dir, func(path string, info fs.DirEntry, err error) error {
         if err != nil {
             return err
         }
@@ -59,4 +44,40 @@ func listFiles(dir string, recursive bool) ([]string, error) {
     }
 
     return to_report, nil
+}
+
+func listMetadata(dir string, base_names []string) (map[string]fs.FileInfo, []string, error) {
+    curcontents := map[string]fs.FileInfo{}
+    curfailures := []string{}
+    curnames := map[string]bool{}
+    for _, n := range base_names {
+        curnames[n] = true
+    }
+
+    // Just skip any directories that we can't access, no need to check the error.
+    err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+        if err != nil {
+            curfailures = append(curfailures, fmt.Sprintf("failed to walk %q; %v", path, err))
+            return nil
+        }
+
+        if d.IsDir() {
+            return nil
+        }
+
+        if _, ok := curnames[filepath.Base(path)]; !ok {
+            return nil
+        }
+
+        info, err := d.Info()
+        if err != nil {
+            curfailures = append(curfailures, fmt.Sprintf("failed to stat %q; %v", path, err))
+            return nil
+        }
+
+        curcontents[path] = info
+        return nil
+    })
+
+    return curcontents, curfailures, err
 }

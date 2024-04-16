@@ -67,7 +67,7 @@ func main() {
         go func() {
             for {
                 <-ticker.C
-                fails, err := updatePaths(db, tokenizer)
+                fails, err := updateDirectories(db, tokenizer)
                 if err != nil {
                     log.Println(err)
                 } else {

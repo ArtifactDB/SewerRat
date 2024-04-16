@@ -186,25 +186,21 @@ func newRegisterFinishHandler(db *sql.DB, verifier *verificationRegistry, tokeni
             return
         }
 
-        allowed := map[string]bool{}
+        var allowed []string
         if output.Base != nil {
-            for _, a := range output.Base {
+            allowed = output.Base
+            for _, a := range allowed {
                 if len(a) == 0 {
                     dumpErrorResponse(w, http.StatusBadRequest, "empty name in 'base'")
                     return
                 }
-                if _, ok := allowed[a]; ok {
-                    dumpErrorResponse(w, http.StatusBadRequest, "duplicate names in 'base'")
-                    return
-                }
-                allowed[a] = true
             }
             if len(allowed) == 0 {
                 dumpErrorResponse(w, http.StatusBadRequest, "'base' should have at least one name")
                 return
             }
         } else {
-            allowed["metadata.json"] = true
+            allowed = []string{ "metadata.json" }
         }
 
         code_info, err := checkVerificationCode(regpath, verifier)
@@ -218,7 +214,7 @@ func newRegisterFinishHandler(db *sql.DB, verifier *verificationRegistry, tokeni
             return
         }
 
-        failures, err := addDirectory(db, regpath, allowed, username, tokenizer)
+        failures, err := addNewDirectory(db, regpath, allowed, username, tokenizer)
         if err != nil {
             dumpHttpErrorResponse(w, fmt.Errorf("failed to index directory; %w", err))
             return
