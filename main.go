@@ -15,7 +15,7 @@ func main() {
     backup0 := flag.Int("backup", 24, "Frequency of back-ups, in hours")
     update0 := flag.Int("update", 24, "Frequency of updates, in hours")
     lifetime0 := flag.Int("session", 10, "Session lifetime, in minutes")
-    whitelist0 := flag.String("whitelist", "", "Comma-separated whitelist of absolute paths of directories for symbolic link targets")
+    whitelist0 := flag.String("symlink-whitelist", "", "Comma-separated whitelist of directories for symbolic link targets")
     flag.Parse()
 
     dbpath := *dbpath0

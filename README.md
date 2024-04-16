@@ -327,6 +327,8 @@ Additional arguments can be passed to `./SewerRat` to control its behavior (chec
 - `-session` specifies the lifetime of a registration sesssion 
   (i.e., the maximum time between starting and finishing the registration, see below).
   This defaults to 10 minutes.
+- `-symlink-whitelist` defines the directories that are allowed to contain targets of symbolic links in the registered directories, see [below](#handling-symbolic links).
+  This defaults to an empty string, i.e., an empty whitelist.
 
 The [`html/`](html) subdirectory contains a minimal search page that queries a local SewerRat instance.
 Developers can copy this page and change the `base_url` to point to their production instance.
@@ -376,9 +378,20 @@ In this case, `/deregister/start` may return a `SUCCESS` status instead of `PEND
 
 On error, the request body will contain an `ERROR` status with the `reason` string property containing the reason for the failure.
 
-## Further comments
+## Handling symbolic links
 
-Any symbolic links inside the registered directory are ignored during indexing and by the `/list` and `/retrieve` endpoints.
-This is done as a security precaution as such links may redirect to files outside of the directory that were not intended for sharing.
-It is also forbidden to register a symbolic link referencing a directory, as the link target could change after registration without the accompanying re-authorization.
-(However, symbolic links in the `dirname` of the to-be-registered directory are still allowed.)
+Symbolic links are problematic as the target of the symbolic link might not be in the registered directory.
+This poses a security risk as malicious users could craft symbolic links to targets that are private to the service account running the API.
+These private files would then be incorporated into the index, or fetched via the `/retrieve/file` endpoints, both of which allow public access to the file contents.
+For example, a user creating a symbolic link to `~/.aws/credentials` in their directory would allow retrieval of the AWS credentials of the service account.
+
+To avoid this, SewerRat will only follow a symbolic link if its target lies inside a whitelist of approved directories.
+This whitelist is specified via the `-symlink-whitelist` command-line option and does not change in response to user inputs.
+For example, if a filesystem contains a separate partition for storing user data, this path can be included in the whitelist to allow users to link to each other's files.
+In contrast, locations like the service account's home directory should not be included to avoid leaking cached credentials.
+
+Note that the whitelisting only applies to symbolic links to files.
+Symbolic links to directories are always ignored by SewerRat, i.e., they are treated as regular files without any further traversal of the target directory.
+This prevents abuse whereby a user creates a symbolic link to someone else's directory, degrading SewerRat's performance without any consequence to their own usage quota.
+(That said, symbolic links in the `dirname` of the to-be-registered directory are allowed.
+Such links are not problematic as the user still needs to demonstrate write access in order to perform registration.)
