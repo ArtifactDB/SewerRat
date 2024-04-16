@@ -99,7 +99,7 @@ func checkVerificationCode(path string, verifier *verificationRegistry) (fs.File
 /**********************************************************************/
 
 func checkValidRegistrationPath(path string) error {
-    info, err := os.Lstat(path)
+    info, err := os.Lstat(path) // distinguish between directories and symlinks to one.
     if err != nil {
         return fmt.Errorf("failed to stat; %w", err)
     } else if info.Mode() & fs.ModeSymlink != 0 {
@@ -254,7 +254,7 @@ func newDeregisterStartHandler(db *sql.DB, verifier *verificationRegistry) func(
 
         // No need to check for a valid directory, as we want to be able to deregister missing/symlinked directories.
         // If the directory doesn't exist, then we don't need to attempt to create a verification code.
-        if _, err := os.Lstat(regpath); errors.Is(err, os.ErrNotExist) {
+        if _, err := os.Stat(regpath); errors.Is(err, os.ErrNotExist) {
             err := deleteDirectory(db, regpath)
             if err != nil {
                 dumpHttpErrorResponse(w, fmt.Errorf("failed to deregister %q; %w", regpath, err))
@@ -517,7 +517,7 @@ func newRetrieveFileHandler(db *sql.DB) func(http.ResponseWriter, *http.Request)
             return
         }
 
-        info, err := os.Lstat(path)
+        info, err := os.Lstat(path) // intential Lstat() to avoid unnecessary link following.
         if err != nil {
             if errors.Is(err, os.ErrNotExist) {
                 err = newHttpError(http.StatusNotFound, errors.New("path does not exist"))

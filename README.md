@@ -242,14 +242,16 @@ curl -L ${SEWER_RAT_URL}/list -G --data-urlencode "path=${path}" --data "recursi
 All returned paths are relative to the specified `path`.
 The `recursive=` parameter specifies whether a recursive listing should be performed.
 If true, all paths refer to files; otherwise, the names of directories may be returned and will be suffixed with `/`.
+All symbolic links are reported as files in the response. 
+Symbolic links to directories will not be recursively traversed, even if `recursive=true`.
 
-If the path doesn't exist in the index, a standard 404 error is returned.
+If the path does not exist in the index, a standard 404 error is returned.
 
 ### Fetching file contents
 
 We can obtain the contents for a path inside any registered directory by making a GET request to the `/retrieve/file` endpoint of the SewerRat API,
 where the URL-encoded path of interest is provided as a query parameter.
-This isn't limited to the registered metadata files - any file inside a registered directory can be extracted in this manner.
+This is not limited to the registered metadata files - any file inside a registered directory can be extracted in this manner.
 
 ```shell
 # Mocking up a non-metadata file.
@@ -261,7 +263,11 @@ curl -L ${SEWER_RAT_URL}/retrieve/file -G --data-urlencode "path=${path}"
 ## HELLO
 ```
 
-If the path doesn't exist in the index, a standard 404 error is returned.
+If `path` is a symbolic link to a file, the contents of the target file will be returned by this endpoint.
+However, if a registered directory contains a symbolic link to a directory, the contents of the target directory cannot be retrieved if `path` needs to traverse that symbolic link.
+This is consistent with the [registration policy](#registration-in-more-details) whereby symbolic links to directories are not recursively traversed during indexing.
+
+If the path does not exist in the index, a standard 404 error is returned.
 
 ### Fetching metadata
 
@@ -366,19 +372,13 @@ curl -X POST -L ${SEWER_RAT_URL}/register/finish \
 ```
 
 On success, the files in the specified directory will be registered in the index.
-Note that SewerRat will just skip problematic files, e.g., invalid JSON, insufficient permissions.
-Any such problems are reported in the `comments` array rather than blocking the entire indexing process.
-The verification code file can also be deleted from the directory once the registration is complete.
+If the directory contains symbolic links to metadata files, the contents of those files will be indexed as long as the link itself has one of the requested `base` names.
+If the directory contains symbolic links to other directories, these will not be recursively traversed.
+SewerRat will skip any problematic files that cannot be indexed (e.g., invalid JSON, insufficient permissions), and the causes of any failures are reported in the `comments` array in the response.
+Finally, the verification code file can be deleted from the directory once registration is complete.
 
 The deregistration process is identical if we replace the `/register/*` endpoints with `/deregister/*`.
 The only exception is when the caller requests deregistration of a directory that does not exist.
 In this case, `/deregister/start` may return a `SUCCESS` status instead of `PENDING`, after which `/deregister/finish` does not need to be called.
 
 On error, the request body will contain an `ERROR` status with the `reason` string property containing the reason for the failure.
-
-## Further comments
-
-Any symbolic links inside the registered directory are ignored during indexing and by the `/list` and `/retrieve` endpoints.
-This is done as a security precaution as such links may redirect to files outside of the directory that were not intended for sharing.
-It is also forbidden to register a symbolic link referencing a directory, as the link target could change after registration without the accompanying re-authorization.
-(However, symbolic links in the `dirname` of the to-be-registered directory are still allowed.)

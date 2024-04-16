@@ -48,7 +48,7 @@ func (vr *verificationRegistry) Provision(path string) (string, error) {
 
         candidate = ".sewer_" + base64.RawURLEncoding.EncodeToString(buff)
 
-        _, err = os.Lstat(filepath.Join(path, candidate))
+        _, err = os.Lstat(filepath.Join(path, candidate)) // intential Lstat() to avoid unnecessary link following.
         if err != nil {
             if errors.Is(err, os.ErrNotExist) {
                 found = true
