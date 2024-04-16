@@ -33,11 +33,6 @@ func loadMetadata(f string, info fs.FileInfo) *loadedMetadata {
         return output
     }
 
-    if info.Mode() & fs.ModeSymlink != 0 {
-        output.Failure = fmt.Errorf("not following symbolic link at %q", f)
-        return output
-    }
-
     username, err := identifyUser(info)
     if err != nil {
         output.Failure = fmt.Errorf("failed to determine author of %q; %w", f, err)

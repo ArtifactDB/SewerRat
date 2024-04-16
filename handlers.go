@@ -524,8 +524,6 @@ func newRetrieveFileHandler(db *sql.DB) func(http.ResponseWriter, *http.Request)
             } else {
                 err = fmt.Errorf("inaccessible path; %w", err)
             }
-        } else if info.Mode() & fs.ModeSymlink != 0 {
-            err = newHttpError(http.StatusBadRequest, fmt.Errorf("cannot retrieve contents of a symbolic link; %w", err))
         } else if info.IsDir() {
             err = newHttpError(http.StatusBadRequest, errors.New("path should refer to a file, not a directory"))
         }

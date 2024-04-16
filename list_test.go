@@ -58,29 +58,6 @@ func TestListFiles(t *testing.T) {
         }
     })
 
-    // Checking that we skip top-level symbolic links.
-    parent_symdir, err := os.MkdirTemp("", "")
-    if err != nil {
-        t.Fatal(err)
-    }
-
-    symdir := filepath.Join(parent_symdir, "symlink")
-    err = os.Symlink(dir, symdir)
-    if err != nil {
-        t.Fatal(err)
-    }
-
-    t.Run("skip symbolic top-level", func(t *testing.T) {
-        all, err := listFiles(symdir, false)
-        if err != nil {
-            t.Fatal(err)
-        }
-
-        if len(all) != 0 {
-            t.Error("should not list symbolic links")
-        }
-    })
-
     // Checking that we skip symbolic links inside the directory.
     more_symdir, err := os.MkdirTemp("", "")
     if err != nil {
@@ -108,8 +85,8 @@ func TestListFiles(t *testing.T) {
             t.Fatal(err)
         }
 
-        if !equalStringArrays(all, []string{ "extra" }) {
-            t.Error("should not list symbolic links")
+        if !equalStringArrays(all, []string{ "A", "extra", "sub" }) {
+            t.Fatalf("should not list symbolic links %q", all)
         }
     })
 }

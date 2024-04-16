@@ -21,10 +21,6 @@ func listFiles(dir string, recursive bool) ([]string, error) {
             }
         }
 
-        if info.Type() & fs.ModeSymlink != 0 {
-            return nil
-        }
-
         rel, err := filepath.Rel(dir, path)
         if err != nil {
             return err

@@ -749,9 +749,9 @@ func isDirectoryRegistered(db * sql.DB, path string) (bool, error) {
             } else {
                 return false, fmt.Errorf("inaccessible path; %v", err)
             }
-        } else if info.Mode() & fs.ModeSymlink != 0 { 
-            // Normally, we would throw an error here as symlinks are persona
-            // non grata within a registry. However, it's legal for a
+        } else if info.Mode() & fs.ModeSymlink != 0 {
+            // Normally, we would throw an error here as symlinked directories
+            // aren't traversed within a registry. However, it's legal for a
             // registered directory to have a symlink in its parents. Thus, we
             // quit the loop and search on the current 'collected'; if any of
             // these are registered, all is fine as the symlink occurs in the
