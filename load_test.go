@@ -77,21 +77,25 @@ func TestLoadMetadata(t *testing.T) {
         }
     })
 
-    t.Run("symlink failure", func(t *testing.T) {
+    t.Run("symlink okay", func(t *testing.T) {
         path := filepath.Join(dir, "C")
         err = os.Symlink(filepath.Join(dir, "A"), path)
         if err != nil {
             t.Fatalf("failed to create a symlink; %v", err)
         }
 
-        info, err := os.Lstat(path)
+        info, err := os.Lstat(path) // check that symlinks are correctly loaded.
         if err != nil {
             t.Fatal(err)
         }
 
         loaded := loadMetadata(path, info)
-        if loaded.Failure == nil || !strings.Contains(loaded.Failure.Error(), "symbolic link") {
-            t.Fatalf("expected a symbolic link error %v", *loaded)
+        if loaded.Failure != nil {
+            t.Fatal(loaded.Failure)
+        }
+
+        if loaded.Path != path || len(loaded.User) == 0 || len(loaded.Raw) == 0 || time.Now().Sub(loaded.Time) < 0 {
+            t.Fatalf("unexpected values from symlink-loaded metadata %v", *loaded)
         }
     })
 }

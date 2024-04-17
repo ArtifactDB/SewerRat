@@ -28,7 +28,7 @@ func TestInitializeDatabase(t *testing.T) {
         }
         defer dbconn.Close()
 
-        if _, err := os.Lstat(dbpath); err != nil {
+        if _, err := os.Stat(dbpath); err != nil {
             t.Fatalf("database file doesn't seem to exist; %v", err)
         }
 
@@ -433,14 +433,8 @@ func TestAddNewDirectory(t *testing.T) {
         if err != nil {
             t.Fatal(err)
         }
-        has_link_comment := false
-        for _, c := range comments {
-            if strings.Contains(c, "symbolic link") {
-                has_link_comment = true
-            }
-        }
-        if !has_link_comment {
-            t.Fatalf("expected at least one comment about symbol link failure %v", comments)
+        if len(comments) != 0 {
+            t.Fatalf("unexpected comments from the directory addition %v", comments)
         }
 
         all_paths, err := listPaths(dbconn, tmp)
@@ -449,7 +443,7 @@ func TestAddNewDirectory(t *testing.T) {
         }
 
         // All symlink paths to directories/files are ignored.
-        if !equalStringArrays(all_paths, []string{ "symlink/other.json" }) {
+        if !equalStringArrays(all_paths, []string{ "symlink/metadata.json", "symlink/other.json" }) {
             t.Fatalf("unexpected paths %v", all_paths)
         }
     })

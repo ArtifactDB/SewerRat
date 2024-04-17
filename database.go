@@ -81,7 +81,7 @@ func createTransaction(db *sql.DB) (*ActiveTransaction, error) {
 
 func initializeDatabase(path string) (*sql.DB, error) {
     accessible := false
-    if _, err := os.Lstat(path); err == nil {
+    if _, err := os.Stat(path); err == nil {
         accessible = true
     }
 
@@ -595,7 +595,7 @@ func updateDirectories(db *sql.DB, tokenizer* unicodeTokenizer) ([]string, error
 
 func backupDatabase(db *sql.DB, path string) error {
     var existing bool
-    _, err := os.Lstat(path)
+    _, err := os.Stat(path)
     if err == nil {
         existing = true
         err = os.Rename(path, path + ".backup")
@@ -742,19 +742,19 @@ func retrievePath(db * sql.DB, path string, include_metadata bool) (*queryResult
 func isDirectoryRegistered(db * sql.DB, path string) (bool, error) {
     collected := []interface{}{}
     for {
-        info, err := os.Lstat(path)
+        info, err := os.Lstat(path) // Lstat() is deliberate as we need to distinguish symlinks, see below.
+
         if err != nil {
             if errors.Is(err, os.ErrNotExist) {
                 return false, newHttpError(http.StatusNotFound, errors.New("path does not exist"))
             } else {
                 return false, fmt.Errorf("inaccessible path; %v", err)
             }
-        } else if info.Mode() & fs.ModeSymlink != 0 { 
-            // Normally, we would throw an error here as symlinks are persona
-            // non grata within a registry. However, it's legal for a
-            // registered directory to have a symlink in its parents. Thus, we
-            // quit the loop and search on the current 'collected'; if any of
-            // these are registered, all is fine as the symlink occurs in the
+        } else if info.Mode() & fs.ModeSymlink != 0 {
+            // Symlinks to directories within a registered directory are not
+            // followed during registration or updates. This allows us to quit
+            // the loop and search on the current 'collected'; if any of these
+            // are registered, all is fine as the symlink occurs in the
             // parents. Had we kept on taking the dirnames, all would NOT be
             // fine as the symlink would have been inside the registered
             // directory of subsequent additions to 'collected'.
@@ -763,8 +763,8 @@ func isDirectoryRegistered(db * sql.DB, path string) (bool, error) {
             return false, newHttpError(http.StatusBadRequest, errors.New("path should refer to a directory"))
         }
 
-        // Note that there's no need to defend against '..', as it is assumed
-        // that all paths are Cleaned before this point.
+        // Incidentally, note that there's no need to defend against '..', as
+        // it is assumed that all paths are Cleaned before this point.
         collected = append(collected, path)
 
         newpath := filepath.Dir(path)
