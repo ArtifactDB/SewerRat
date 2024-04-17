@@ -16,6 +16,8 @@ SewerRat can be considered a much more relaxed version of the [Gobbler](https://
 
 ## Registering a directory
 
+### Step-by-step
+
 Any directory can be indexed as long as (i) the requesting user has write access to it and (ii) the account running the SewerRat service has read access to it.
 To demonstrate, let's make a directory containing JSON-formatted metadata files.
 Other files may be present, of course, but SewerRat only cares about the metadata.
@@ -29,40 +31,72 @@ echo '{ "authors": { "first": "Aaron", "last": "Lun" } }' > test/sub/A.json
 echo '{ "foo": "bar", "gunk": [ "stuff", "blah" ] }' > test/sub/B.json
 ```
 
-We define some small utility functions from [`scripts/functions.sh`](scripts/functions.sh) to perform the registration.
-This is best placed in our `.bash_profile` so that we don't need to do this every time.
-These functions are pretty simple and it should be trivial to define equivalents in any programming framework like R or Python -
-see [below](#registration-in-more-detail) for more details.
+For convenience, we'll store the SewerRat API in an environment variable.
 
 ```shell
 export SEWER_RAT_URL=<INSERT URL HERE> # get this from your SewerRat admin.
-source scripts/functions.sh
 ```
 
-Once this is done, we can register our directory by calling the `registerSewerRat` function.
-This requires a path to the directory along with a comma-separated list of file names to be indexed from that directory.
+To start the registration process, we make a POST request to the `/register/start` endpoint.
+This should have a JSON-encoded request body that contains the `path`, the absolute path to our directory that we want to register.
 
 ```shell
-registerSewerRat test A.json,B.json
+PWD=$(pwd)
+curl -X POST -L ${SEWER_RAT_URL}/register/start \
+    -H "Content-Type: application/json" \
+    -d '{ "path": "'${PWD}'/test" }' | jq
+## {
+##   "code": ".sewer_HP0JOaQ14NBadaLGDPjOW712S2SIA_u-9yQH6AKbaQ8",
+##   "status": "PENDING"
+## }
 ```
 
-The registration process will walk recursively through the specified directory, indexing all files named `A.json` and `B.json`. 
+On success, this returns a `PENDING` status with a verification code.
+The caller is expected to verify that they have write access to the specified directory by creating a file with the same name as the verification code (i.e., `.sewer_XXX`) inside that directory.
+Once this is done, we call the `/register/finish` endpoint with a request body that contains the same directory `path`.
+The body may also contain `base`, an array of strings containing the names of the files to register within the directory -
+if this is not provided, only files named `metadata.json` will be registered.
+
+```shell
+curl -X POST -L ${SEWER_RAT_URL}/register/finish \
+    -H "Content-Type: application/json" \
+    -d '{ "path": "'${PWD}'/test", "base": [ "A.json", "B.json" ] }' | jq
+## {
+##   "comments": [],
+##   "status": "SUCCESS"
+## }
+```
+
+On success, the files in the specified directory will be registered in the SQLite index.
 We can then perform some complex searches on the contents of these files (see [below](#querying-the-index)).
-There is no limit on the number of times that a directory can be registered, though every new registration will replace all previously-registered files from that directory.
+On error, the response body will contain an `ERROR` status with the `reason` string property containing the reason for the failure.
+In both cases, the verification code file can be deleted from the directory after a response is received.
+
+We provide some small utility functions from [`scripts/functions.sh`](scripts/functions.sh) to perform the registration from the command line.
+The process should still be simple enough to implement equivalent functions in any language.
+
+### Behind the scenes
+
+Once verified in `/register/finish`, SewerRat will walk recursively through the specified directory.
+It will identify all files with the specified `base` names (i.e., `A.json` and `B.json` in our example above), parsing them as JSON for indexing.
+SewerRat will skip any problematic files that cannot be indexed (e.g., invalid JSON, insufficient permissions).
+the causes of any failures are reported in the `comments` array in the HTTP response.
+
+Symbolic links in the specified directory are treated differently depending on their target.
+If the directory contains symbolic links to files, the contents of the target files can be indexed as long as the link has one of the `base` names.
+If the directory contains symbolic links to other directories, these will not be recursively traversed.
 
 SewerRat will periodically update the index by inspecting all of its registered directories for new content.
 If we added or modified a file with one of the registered names (e.g., `A.json`), SewerRat will (re-)index that file.
 Similarly, if we deleted a file, SewerRat will remove it from the index.
 This ensures that the information in the index reflects the directory contents on the filesystem.
+Users can also manually update a directory by repeating the process above to re-index the directory's contents.
 
-To remove files from the registry, we call the `deregisterSewerRat` function from [`scripts/functions.sh`](scripts/functions.sh).
-This will remove all files in the registry that were previously registered from the specified directory.
-Note that, if the directory no longer exists, the normalized absolute path should be supplied to `deregisterSewerRat`.
-(Or we could just wait for the periodic updates to remove those paths automatically.)
+### Deregistering
 
-```shell
-deregisterSewerRat test
-```
+To remove files from the index, we use the same procedure as above but replacing the `/register/*` endpoints with `/deregister/*`.
+The only potential difference is when the caller requests deregistration of a directory that does not exist.
+In this case, `/deregister/start` may return a `SUCCESS` status instead of `PENDING`, after which `/deregister/finish` does not need to be called.
 
 ## Querying the index
 
@@ -265,7 +299,7 @@ curl -L ${SEWER_RAT_URL}/retrieve/file -G --data-urlencode "path=${path}"
 
 If `path` is a symbolic link to a file, the contents of the target file will be returned by this endpoint.
 However, if a registered directory contains a symbolic link to a directory, the contents of the target directory cannot be retrieved if `path` needs to traverse that symbolic link.
-This is consistent with the [registration policy](#registration-in-more-details) whereby symbolic links to directories are not recursively traversed during indexing.
+This is consistent with the registration policy whereby symbolic links to directories are not recursively traversed during indexing.
 
 If the path does not exist in the index, a standard 404 error is returned.
 
@@ -340,49 +374,3 @@ Any file path that can be accessed by the service account should be assumed to b
 
 The [`html/`](html) subdirectory contains a minimal search page that queries a local SewerRat instance.
 Developers can copy this page and change the `base_url` to point to their production instance.
-
-## Registration in more detail
-
-We previously glossed over the registration process by presenting users with the `registerSewerRat` function.
-The process itself is slightly involved but it should still be simple enough to implement in any language.
-First, we make a call to the `/register/start` endpoint with a request body that contains `path`, the absolute path to our directory that we want to register.
-As mentioned previously, the directory itself should be world-readable, and we (i.e., the registering user) should have at least write access to it.
-
-```shell
-PWD=$(pwd)
-curl -X POST -L ${SEWER_RAT_URL}/register/start \
-    -H "Content-Type: application/json" \
-    -d '{ "path": "'${PWD}'/test" }' | jq
-## {
-##   "code": ".sewer_HP0JOaQ14NBadaLGDPjOW712S2SIA_u-9yQH6AKbaQ8",
-##   "status": "PENDING"
-## }
-```
-
-On success, this returns a `PENDING` status with a verification code.
-The caller is expected to verify that they have write access to the specified directory by creating a file with the same name as the verification code (i.e., `.sewer_XXX`) inside that directory.
-Once this is done, we call the `/register/finish` endpoint with a request body that contains the same directory `path`.
-The body may also contain `base`, an array of strings containing the names of the files to register within the directory -
-if this is not provided, only files named `metadata.json` will be registered.
-
-```shell
-curl -X POST -L ${SEWER_RAT_URL}/register/finish \
-    -H "Content-Type: application/json" \
-    -d '{ "path": "'${PWD}'/test", "base": [ "A.json", "B.json" ] }' | jq
-## {
-##   "comments": [],
-##   "status": "SUCCESS"
-## }
-```
-
-On success, the files in the specified directory will be registered in the index.
-If the directory contains symbolic links to metadata files, the contents of those files will be indexed as long as the link itself has one of the requested `base` names.
-If the directory contains symbolic links to other directories, these will not be recursively traversed.
-SewerRat will skip any problematic files that cannot be indexed (e.g., invalid JSON, insufficient permissions), and the causes of any failures are reported in the `comments` array in the response.
-Finally, the verification code file can be deleted from the directory once registration is complete.
-
-The deregistration process is identical if we replace the `/register/*` endpoints with `/deregister/*`.
-The only exception is when the caller requests deregistration of a directory that does not exist.
-In this case, `/deregister/start` may return a `SUCCESS` status instead of `PENDING`, after which `/deregister/finish` does not need to be called.
-
-On error, the request body will contain an `ERROR` status with the `reason` string property containing the reason for the failure.
