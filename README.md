@@ -84,6 +84,8 @@ the causes of any failures are reported in the `comments` array in the HTTP resp
 
 Symbolic links in the specified directory are treated differently depending on their target.
 If the directory contains symbolic links to files, the contents of the target files can be indexed as long as the link has one of the `base` names.
+All file information (e.g., modification time, owner) is taken from the link target, not the link itself;
+SewerRat effectively treats the symbolic link as a proxy for the target file.
 If the directory contains symbolic links to other directories, these will not be recursively traversed.
 
 SewerRat will periodically update the index by inspecting all of its registered directories for new content.
@@ -91,6 +93,11 @@ If we added or modified a file with one of the registered names (e.g., `A.json`)
 Similarly, if we deleted a file, SewerRat will remove it from the index.
 This ensures that the information in the index reflects the directory contents on the filesystem.
 Users can also manually update a directory by repeating the process above to re-index the directory's contents.
+
+As an aside: updates and symbolic links can occasionally interact in strange ways.
+Specifically, updates to the indexed information for symbolic links are based on the modification time of the link target.
+One can imagine a pathological case where a symbolic link is changed to a different target with the same modification time as the previous target, which will not be captured by SewerRat.
+Currently, this can only be resolved by deleting all affected symbolic links, re-registering the directory, and then restoring the links and re-registering again.
 
 ### Deregistering
 

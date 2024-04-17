@@ -181,4 +181,38 @@ func TestListMetadata(t *testing.T) {
             t.Fatal("unexpected file")
         }
     })
+
+    // Throwing in some symbolic links.
+    err = os.Symlink(path, filepath.Join(dir, "foo.json"))
+    if err != nil {
+        t.Fatal(err)
+    }
+
+    err = os.Symlink(subdir, filepath.Join(dir, "bar.json"))
+    if err != nil {
+        t.Fatal(err)
+    }
+
+    t.Run("symlink", func(t *testing.T) {
+        found, fails, err := listMetadata(dir, []string{ "foo.json", "bar.json" })
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        if len(fails) > 0 {
+            t.Fatal("unexpected failures")
+        }
+
+        if len(found) != 1 {
+            t.Fatal("expected exactly one file")
+        }
+
+        info, ok := found[filepath.Join(dir, "foo.json")]
+        if !ok {
+            t.Fatal("missing file")
+        }
+        if info.Mode() & os.ModeSymlink != 0 { // uses information from the link.
+            t.Fatal("expected file info from link target")
+        }
+    })
 }

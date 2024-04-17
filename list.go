@@ -3,6 +3,7 @@ package main
 import (
     "fmt"
     "io/fs"
+    "os"
     "path/filepath"
 )
 
@@ -65,7 +66,20 @@ func listMetadata(dir string, base_names []string) (map[string]fs.FileInfo, []st
             return nil
         }
 
-        info, err := d.Info()
+        var info fs.FileInfo
+        if d.Type() & os.ModeSymlink == 0 {
+            info, err = d.Info()
+        } else {
+            // Resolve any symbolic links to files at this point. This is important
+            // as it ensures that we include the target file's modification time in
+            // our index, so that the index is updated when the target is changed
+            // (rather than when the link itself is changed).
+            info, err = os.Stat(path)
+            if err == nil && info.IsDir() {
+                return nil
+            }
+        }
+
         if err != nil {
             curfailures = append(curfailures, fmt.Sprintf("failed to stat %q; %v", path, err))
             return nil
