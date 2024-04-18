@@ -13,6 +13,7 @@ func main() {
     port0 := flag.Int("port", 8080, "Port to listen to for requests")
     backup0 := flag.Int("backup", 24, "Frequency of back-ups, in hours")
     update0 := flag.Int("update", 24, "Frequency of updates, in hours")
+    prefix0 := flag.String("prefix", "", "Prefix to add to each endpoint, excluding the first and last slashes")
     lifetime0 := flag.Int("session", 10, "Session lifetime, in minutes")
     flag.Parse()
 
@@ -37,15 +38,27 @@ func main() {
     const num_verification_threads = 64
     verifier := newVerificationRegistry(num_verification_threads)
 
+    prefix := *prefix0
+    if prefix != "" {
+        prefix = "/" + prefix
+    }
+
     // Setting up the endpoints.
-    http.HandleFunc("/register/start", newRegisterStartHandler(verifier))
-    http.HandleFunc("/register/finish", newRegisterFinishHandler(db, verifier, tokenizer))
-    http.HandleFunc("/deregister/start", newDeregisterStartHandler(db, verifier))
-    http.HandleFunc("/deregister/finish", newDeregisterFinishHandler(db, verifier))
-    http.HandleFunc("/query", newQueryHandler(db, tokenizer, wild_tokenizer, "/query"))
-    http.HandleFunc("/retrieve/metadata", newRetrieveMetadataHandler(db))
-    http.HandleFunc("/retrieve/file", newRetrieveFileHandler(db))
-    http.HandleFunc("/list", newListFilesHandler(db))
+    http.HandleFunc("POST " + prefix + "/register/start", newRegisterStartHandler(verifier))
+    http.HandleFunc("POST " + prefix + "/register/finish", newRegisterFinishHandler(db, verifier, tokenizer))
+    http.HandleFunc("POST " + prefix + "/deregister/start", newDeregisterStartHandler(db, verifier))
+    http.HandleFunc("POST " + prefix + "/deregister/finish", newDeregisterFinishHandler(db, verifier))
+
+    full_query := prefix + "/query"
+    http.HandleFunc("POST " + full_query, newQueryHandler(db, tokenizer, wild_tokenizer, full_query))
+
+    http.HandleFunc("GET " + prefix + "/retrieve/metadata", newRetrieveMetadataHandler(db))
+    http.HandleFunc("GET " + prefix + "/retrieve/file", newRetrieveFileHandler(db))
+    http.HandleFunc("GET " + prefix + "/list", newListFilesHandler(db))
+
+    http.HandleFunc("GET " + prefix + "/", func(w http.ResponseWriter, r *http.Request) {
+        dumpJsonResponse(w, http.StatusOK, map[string]string{ "name": "SewerRat API", "url": "https://github.com/ArtifactDB/SewerRat" })
+    })
 
     // Adding a hour job that purges various old verification sessions.
     {

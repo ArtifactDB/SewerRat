@@ -112,11 +112,6 @@ func checkValidRegistrationPath(path string) error {
 
 func newRegisterStartHandler(verifier *verificationRegistry) func(http.ResponseWriter, *http.Request) {
     return func(w http.ResponseWriter, r *http.Request) {
-        if r.Method != "POST" {
-            dumpErrorResponse(w, http.StatusMethodNotAllowed, "expected a POST request")
-            return
-        }
-
         if r.Body == nil {
             dumpErrorResponse(w, http.StatusBadRequest, "expected a non-empty request body")
             return
@@ -154,11 +149,6 @@ func newRegisterStartHandler(verifier *verificationRegistry) func(http.ResponseW
 
 func newRegisterFinishHandler(db *sql.DB, verifier *verificationRegistry, tokenizer *unicodeTokenizer) func(http.ResponseWriter, *http.Request) {
     return func(w http.ResponseWriter, r *http.Request) {
-        if r.Method != "POST" {
-            dumpErrorResponse(w, http.StatusMethodNotAllowed, "expected a POST request")
-            return
-        }
-
         if r.Body == nil {
             dumpErrorResponse(w, http.StatusBadRequest, "expected a non-empty request body")
             return
@@ -229,11 +219,6 @@ func newRegisterFinishHandler(db *sql.DB, verifier *verificationRegistry, tokeni
 
 func newDeregisterStartHandler(db *sql.DB, verifier *verificationRegistry) func(http.ResponseWriter, *http.Request) {
     return func(w http.ResponseWriter, r *http.Request) {
-        if r.Method != "POST" {
-            dumpErrorResponse(w, http.StatusMethodNotAllowed, "expected a POST request")
-            return
-        }
-
         if r.Body == nil {
             dumpErrorResponse(w, http.StatusBadRequest, "expected a non-empty request body")
             return
@@ -278,11 +263,6 @@ func newDeregisterStartHandler(db *sql.DB, verifier *verificationRegistry) func(
 
 func newDeregisterFinishHandler(db *sql.DB, verifier *verificationRegistry) func(http.ResponseWriter, *http.Request) {
     return func(w http.ResponseWriter, r *http.Request) {
-        if r.Method != "POST" {
-            dumpErrorResponse(w, http.StatusMethodNotAllowed, "expected a POST request")
-            return
-        }
-
         if r.Body == nil {
             dumpErrorResponse(w, http.StatusBadRequest, "expected a non-empty request body")
             return
@@ -335,10 +315,6 @@ func configureCors(w http.ResponseWriter, r *http.Request) bool {
 func newQueryHandler(db *sql.DB, tokenizer *unicodeTokenizer, wild_tokenizer *unicodeTokenizer, endpoint string) func(http.ResponseWriter, *http.Request) {
     return func(w http.ResponseWriter, r *http.Request) {
         if configureCors(w, r) {
-            return
-        }
-        if r.Method != "POST" {
-            dumpJsonResponse(w, http.StatusMethodNotAllowed, map[string]string{ "status": "ERROR", "reason": "expected a POST request" })
             return
         }
 
@@ -449,10 +425,6 @@ func newRetrieveMetadataHandler(db *sql.DB) func(http.ResponseWriter, *http.Requ
         if configureCors(w, r) {
             return
         }
-        if r.Method != "GET" {
-            dumpErrorResponse(w, http.StatusMethodNotAllowed, "expected a GET request")
-            return
-        }
 
         params := r.URL.Query()
         path, err := getRetrievePath(params)
@@ -487,10 +459,6 @@ func newRetrieveMetadataHandler(db *sql.DB) func(http.ResponseWriter, *http.Requ
 func newRetrieveFileHandler(db *sql.DB) func(http.ResponseWriter, *http.Request) {
     return func(w http.ResponseWriter, r *http.Request) {
         if configureCors(w, r) {
-            return
-        }
-        if r.Method != "GET" {
-            dumpErrorResponse(w, http.StatusMethodNotAllowed, "expected a GET request")
             return
         }
 
@@ -541,10 +509,6 @@ func newRetrieveFileHandler(db *sql.DB) func(http.ResponseWriter, *http.Request)
 func newListFilesHandler(db *sql.DB) func(http.ResponseWriter, *http.Request) {
     return func(w http.ResponseWriter, r *http.Request) {
         if configureCors(w, r) {
-            return
-        }
-        if r.Method != "GET" {
-            dumpErrorResponse(w, http.StatusMethodNotAllowed, "expected a GET request")
             return
         }
 
