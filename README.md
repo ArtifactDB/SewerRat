@@ -384,6 +384,7 @@ Additional arguments can be passed to `./SewerRat` to control its behavior (chec
   This defaults to 10 minutes.
 - `-prefix` adds an extra prefix to all endpoints, e.g., to disambiguate between versions.
   For example, a prefix of `api/v2` would change the list endpoint to `/api/v2/list`.
+  This defaults to an empty string, i.e., no prefix.
 
 It is assumed that SewerRat runs under a service account with no access to credentials or other sensitive information.
 This is because users can, in their registered directories, craft symlinks to arbitrary locations that will be followed by SewerRat.

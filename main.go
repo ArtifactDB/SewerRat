@@ -13,7 +13,7 @@ func main() {
     port0 := flag.Int("port", 8080, "Port to listen to for requests")
     backup0 := flag.Int("backup", 24, "Frequency of back-ups, in hours")
     update0 := flag.Int("update", 24, "Frequency of updates, in hours")
-    prefix0 := flag.String("prefix", "", "Prefix to add to each endpoint, excluding the first and last slashes")
+    prefix0 := flag.String("prefix", "", "Prefix to add to each endpoint, excluding the first and last slashes (default \"\")")
     lifetime0 := flag.Int("session", 10, "Session lifetime, in minutes")
     flag.Parse()
 
