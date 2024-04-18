@@ -68,9 +68,10 @@ curl -X POST -L ${SEWER_RAT_URL}/register/finish \
 ```
 
 On success, the files in the specified directory will be registered in the SQLite index.
-We can then perform some complex searches on the contents of these files (see [below](#querying-the-index)).
-On error, the response body will contain an `ERROR` status with the `reason` string property containing the reason for the failure.
-In both cases, the verification code file can be deleted from the directory after a response is received.
+We can then [search on the contents of these files](#querying-the-index) or [fetch the contents of any file](#fetching-file-contents) in the registered directory.
+On error, the response usually has the `application-json` content type, where the body encodes a JSON object with an `ERROR` status and a `reason` string property explaining the reason for the failure.
+Note that some error types (e.g., 404, 405) may instead return a `text/plain` content type with the reason directly in the response body.
+In either case, the verification code file is no longer needed after a response is received and can be deleted from the directory to reduce clutter.
 
 We provide some small utility functions from [`scripts/functions.sh`](scripts/functions.sh) to perform the registration from the command line.
 The process should still be simple enough to implement equivalent functions in any language.
@@ -280,12 +281,14 @@ curl -L ${SEWER_RAT_URL}/list -G --data-urlencode "path=${path}" --data "recursi
 ## ]
 ```
 
-All returned paths are relative to the specified `path`.
+On success, the response contains a JSON-encoded array of strings, each of which is a relative path in the directory at `path`.
 The `recursive=` parameter specifies whether a recursive listing should be performed.
 If true, all paths refer to files; otherwise, the names of directories may be returned and will be suffixed with `/`.
 All symbolic links are reported as files in the response. 
 Symbolic links to directories will not be recursively traversed, even if `recursive=true`.
 
+On error, the exact response may either be `text/plain` content containing the error message directly,
+or `application/json` content encoding a JSON object with the `reason` for the error.
 If the path does not exist in the index, a standard 404 error is returned.
 
 ### Fetching file contents
@@ -304,10 +307,13 @@ curl -L ${SEWER_RAT_URL}/retrieve/file -G --data-urlencode "path=${path}"
 ## HELLO
 ```
 
+On success, the contents of the target file are returned with a content type guessed from its name.
 If `path` is a symbolic link to a file, the contents of the target file will be returned by this endpoint.
 However, if a registered directory contains a symbolic link to a directory, the contents of the target directory cannot be retrieved if `path` needs to traverse that symbolic link.
 This is consistent with the registration policy whereby symbolic links to directories are not recursively traversed during indexing.
 
+On error, the exact response may either be `text/plain` content containing the error message directly,
+or `application/json` content encoding a JSON object with the `reason` for the error.
 If the path does not exist in the index, a standard 404 error is returned.
 
 ### Fetching metadata
@@ -329,17 +335,19 @@ curl -L ${SEWER_RAT_URL}/retrieve/metadata -G --data-urlencode "path=${path}" | 
 ## }
 ```
 
-This returns an object containing:
+On success, this returns an object containing:
 
 - `path`, a string containing the path to the file.
 - `user`, the identity of the file owner.
 - `time`, the Unix time of most recent file modification.
 - `metadata`, the contents of the file.
 
-If we don't actually need the metadata (e.g., we just want to check if the file exists),
+If we do not actually need the metadata (e.g., we just want to check if the file exists),
 we can skip it by setting the `metadata=false` URL query parameter in our request.
 
-If the path doesn't exist in the index, a 404 error is returned.
+On error, the exact response may either be `text/plain` content containing the error message directly,
+or `application/json` content encoding a JSON object with the `reason` for the error.
+If the path does not exist in the index, a standard 404 error is returned.
 
 ## Administration
 
