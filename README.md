@@ -80,8 +80,8 @@ The process should still be simple enough to implement equivalent functions in a
 
 Once verified in `/register/finish`, SewerRat will walk recursively through the specified directory.
 It will identify all files with the specified `base` names (i.e., `A.json` and `B.json` in our example above), parsing them as JSON for indexing.
-SewerRat will skip any problematic files that cannot be indexed (e.g., invalid JSON, insufficient permissions).
-the causes of any failures are reported in the `comments` array in the HTTP response.
+SewerRat will skip any problematic files that cannot be indexed due to, e.g., invalid JSON, insufficient permissions.
+The causes of any failures are reported in the `comments` array in the HTTP response.
 
 Symbolic links in the specified directory are treated differently depending on their target.
 If the directory contains symbolic links to files, the contents of the target files can be indexed as long as the link has one of the `base` names.
@@ -256,6 +256,9 @@ curl -X POST -L ${SEWER_RAT_URL}/query?translate=true \
 ## }
 ```
 
+The [`html/`](html) subdirectory contains a minimal search page that queries a local SewerRat instance using this syntax.
+Developers can copy this page and change the `base_url` to point to their production instance.
+
 ## Accessing registered directories
 
 ### Motivation
@@ -386,9 +389,7 @@ Additional arguments can be passed to `./SewerRat` to control its behavior (chec
   For example, a prefix of `api/v2` would change the list endpoint to `/api/v2/list`.
   This defaults to an empty string, i.e., no prefix.
 
+🚨🚨🚨 **IMPORTANT!** 🚨🚨🚨
 It is assumed that SewerRat runs under a service account with no access to credentials or other sensitive information.
 This is because users can, in their registered directories, craft symlinks to arbitrary locations that will be followed by SewerRat.
 Any file path that can be accessed by the service account should be assumed to be public when the SewerRat API is active.
-
-The [`html/`](html) subdirectory contains a minimal search page that queries a local SewerRat instance.
-Developers can copy this page and change the `base_url` to point to their production instance.
