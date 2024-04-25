@@ -50,15 +50,13 @@ func main() {
     http.HandleFunc("POST " + prefix + "/deregister/finish", newDeregisterFinishHandler(db, verifier))
 
     full_query := prefix + "/query"
-    http.HandleFunc("POST " + full_query, newQueryHandler(db, tokenizer, wild_tokenizer, full_query))
+    http.HandleFunc(full_query, newQueryHandler(db, tokenizer, wild_tokenizer, full_query))
 
-    http.HandleFunc("GET " + prefix + "/retrieve/metadata", newRetrieveMetadataHandler(db))
-    http.HandleFunc("GET " + prefix + "/retrieve/file", newRetrieveFileHandler(db))
-    http.HandleFunc("GET " + prefix + "/list", newListFilesHandler(db))
+    http.HandleFunc(prefix + "/retrieve/metadata", newRetrieveMetadataHandler(db))
+    http.HandleFunc(prefix + "/retrieve/file", newRetrieveFileHandler(db))
+    http.HandleFunc(prefix + "/list", newListFilesHandler(db))
 
-    http.HandleFunc("GET " + prefix + "/", func(w http.ResponseWriter, r *http.Request) {
-        dumpJsonResponse(w, http.StatusOK, map[string]string{ "name": "SewerRat API", "url": "https://github.com/ArtifactDB/SewerRat" })
-    })
+    http.HandleFunc(prefix + "/", newDefaultHandler())
 
     // Adding a hour job that purges various old verification sessions.
     {

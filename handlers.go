@@ -317,6 +317,10 @@ func newQueryHandler(db *sql.DB, tokenizer *unicodeTokenizer, wild_tokenizer *un
         if configureCors(w, r) {
             return
         }
+        if r.Method != "POST" {
+            w.WriteHeader(http.StatusMethodNotAllowed)
+            return
+        }
 
         params := r.URL.Query()
         var scroll *scrollPosition
@@ -425,6 +429,10 @@ func newRetrieveMetadataHandler(db *sql.DB) func(http.ResponseWriter, *http.Requ
         if configureCors(w, r) {
             return
         }
+        if r.Method != "GET" {
+            w.WriteHeader(http.StatusMethodNotAllowed)
+            return
+        }
 
         params := r.URL.Query()
         path, err := getRetrievePath(params)
@@ -461,6 +469,11 @@ func newRetrieveFileHandler(db *sql.DB) func(http.ResponseWriter, *http.Request)
         if configureCors(w, r) {
             return
         }
+        if r.Method != "GET" {
+            w.WriteHeader(http.StatusMethodNotAllowed)
+            return
+        }
+
 
         params := r.URL.Query()
         path, err := getRetrievePath(params)
@@ -511,6 +524,10 @@ func newListFilesHandler(db *sql.DB) func(http.ResponseWriter, *http.Request) {
         if configureCors(w, r) {
             return
         }
+        if r.Method != "GET" {
+            w.WriteHeader(http.StatusMethodNotAllowed)
+            return
+        }
 
         params := r.URL.Query()
         recursive := params.Get("recursive") == "true"
@@ -536,5 +553,20 @@ func newListFilesHandler(db *sql.DB) func(http.ResponseWriter, *http.Request) {
             return
         }
         dumpJsonResponse(w, http.StatusOK, listing)
+    }
+}
+
+/**********************************************************************/
+
+func newDefaultHandler() func(http.ResponseWriter, *http.Request) {
+    return func(w http.ResponseWriter, r *http.Request) {
+        if configureCors(w, r) {
+            return
+        }
+        if r.Method != "GET" {
+            w.WriteHeader(http.StatusMethodNotAllowed)
+            return
+        }
+        dumpJsonResponse(w, http.StatusOK, map[string]string{ "name": "SewerRat API", "url": "https://github.com/ArtifactDB/SewerRat" })
     }
 }
