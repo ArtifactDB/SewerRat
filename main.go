@@ -49,9 +49,7 @@ func main() {
     http.HandleFunc("POST " + prefix + "/deregister/start", newDeregisterStartHandler(db, verifier))
     http.HandleFunc("POST " + prefix + "/deregister/finish", newDeregisterFinishHandler(db, verifier))
 
-    full_query := prefix + "/query"
-    http.HandleFunc(full_query, newQueryHandler(db, tokenizer, wild_tokenizer, full_query))
-
+    http.HandleFunc(prefix + "/query", newQueryHandler(db, tokenizer, wild_tokenizer, "/query"))
     http.HandleFunc(prefix + "/retrieve/metadata", newRetrieveMetadataHandler(db))
     http.HandleFunc(prefix + "/retrieve/file", newRetrieveFileHandler(db))
     http.HandleFunc(prefix + "/list", newListFilesHandler(db))
