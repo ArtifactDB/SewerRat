@@ -121,11 +121,17 @@ func sanitizeQuery(original *searchClause, deftok, wildtok *unicodeTokenizer) (*
         if original.Child == nil {
             return nil, fmt.Errorf("search clause of type %q should have non-empty 'child'", original.Type)
         }
+
         san, err := sanitizeQuery(original.Child, deftok, wildtok)
         if err != nil {
             return nil, err
         }
-        return &searchClause { Type: original.Type, Child: san }, nil
+
+        if san.Type == "not" {
+            return san.Child, nil
+        } else {
+            return &searchClause { Type: original.Type, Child: san }, nil
+        }
     }
 
     if original.Type == "text" {
