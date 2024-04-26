@@ -20,21 +20,29 @@ type searchClause struct {
     IsSuffix bool `json:"is_suffix"`
 
     // Only relevant for type = user.
+    // Unchanged before/after sanitization.
     User string `json:"user"`
 
     // Only relevant for type = time.
+    // Unchanged before/after sanitization.
     Time int64 `json:"time"`
     After bool `json:"after"`
 
     // Only relevant for text.
+    // - Before sanitization: Text may consist of multiple tokens, effectively combined with an AND statement.
+    // - After sanitization: Text will consist of only one token (possibly with wildcards if Partial = true, otherwise there will be no wildcards).
     Text string `json:"text"`
     Field string `json:"field"`
     Partial bool `json:"partial"`
 
     // Only relevant for type = and/or.
+    // - Before sanitization: any child may be an AND (for type = and) or OR (for type = or) clause, and there may be any number of children.
+    // - After sanitization: no child will be an AND (for type = and) or OR (for type = or) clause as any nesting is flattened, and there must be at least two children.
     Children []*searchClause `json:"children"`
 
     // Only relevant for type = not.
+    // - Before sanitization: the child may be a NOT clause.
+    // - After sanitization: no child will be a NOT clause.
     Child *searchClause `json:"child"`
 }
 
