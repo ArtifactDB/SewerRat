@@ -9,8 +9,15 @@ type searchClause struct {
     Type string `json:"type"`
 
     // Only relevant for type = path.
+    // - Before sanitization: if Escape is empty, Path is assumed to contain a substring of the path, to be extended at the front/back depending on IsPrefix and IsSuffix.
+    //   If Escape is not empty, Path is assumed to be a wildcard-containing pattern.
+    // - After sanitization: Path is a wildcard-containing pattern.
+    //   Escape may or may not be an empty string, depending on whether Path needed escaping of wildcard characters.
+    //   IsPrefix and IsSuffix are no longer used.
     Path string `json:"path"`
-    PathEscape string
+    Escape string `json:"escape"`
+    IsPrefix bool `json:"is_prefix"`
+    IsSuffix bool `json:"is_suffix"`
 
     // Only relevant for type = user.
     User string `json:"user"`
@@ -151,11 +158,24 @@ func sanitizeQuery(original *searchClause, deftok, wildtok *unicodeTokenizer) (*
     }
 
     if original.Type == "path" {
-        pattern, escape, err := escapeWildcards(original.Path)
-        if err != nil {
-            return nil, fmt.Errorf("failed to escape wildcards for path %q; %w", original.Path, err)
+        if original.Escape != "" {
+            if len(original.Escape) != 1 {
+                return nil, fmt.Errorf("'escape' must be a single character (got %s)", original.Escape)
+            }
+            return &searchClause { Type: "path", Path: original.Path, Escape: original.Escape }, nil
+        } else {
+            pattern, escape, err := escapeWildcards(original.Path)
+            if err != nil {
+                return nil, fmt.Errorf("failed to escape wildcards for path %q; %w", original.Path, err)
+            }
+            if !original.IsPrefix {
+                pattern = "%" + pattern
+            }
+            if !original.IsSuffix {
+                pattern += "%"
+            }
+            return &searchClause { Type: "path", Path: pattern, Escape: escape }, nil
         }
-        return &searchClause { Type: "path", Path: pattern, PathEscape: escape }, nil
     }
 
     return nil, fmt.Errorf("unknown search type %q", original.Type)
@@ -191,7 +211,11 @@ func assembleFilter(query *searchClause) (string, []interface{}) {
     }
 
     if query.Type == "path" {
-        return "paths.path LIKE ?", []interface{}{ "%" + query.Path + "%" }
+        if query.Escape != "" {
+            return "paths.path LIKE ? ESCAPE ?", []interface{}{ query.Path, query.Escape }
+        } else {
+            return "paths.path LIKE ?", []interface{}{ query.Path }
+        }
     }
 
     if query.Type == "time" {

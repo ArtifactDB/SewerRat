@@ -176,8 +176,16 @@ The nature of the search depends on the value of `type`:
   A file is considered to be a match if the owning user is the same as that in `user`.
   Note that this only considered the most recent owner if the file was written by multiple people.
 - For `"path"`, SewerRat searches on the path to each file. 
-  The search clause should contain the `path` string property.
-  A file is considered to be a match if its path contains `path` as a substring.
+  The search clause should contain the following additional properties:
+  - `path`, a substring of the absolute path to each file.
+    A file is considered to be a match if its path contains `path` as a substring.
+  - (optional) `is_prefix`, a boolean indicating whether to search for absolute paths that start with `path`. 
+    Defaults to `false`.
+  - (optional) `is_suffix`, a boolean indicating whether to search for absolute paths that end with `path`. 
+    Defaults to `false`.
+  - (optional) `escape`, a string containing a single escape character for SQLite pattern matching.
+    If provided, `path` is used verbatim as a SQLite pattern to be matched to the absolute path.
+    Any existing wildcards in `path` (or escapes thereof) are respected.
 - For `"time"`, SewerRat searches on the latest modification time of each file.
   The search clause should contain the following additional properties:
   - `time`, an integer containing the Unix time.

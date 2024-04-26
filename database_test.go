@@ -1487,11 +1487,28 @@ func TestQueryTokens(t *testing.T) {
     })
 
     t.Run("path", func(t *testing.T) {
-        res, err := queryTokens(dbconn, &searchClause{ Type: "path", Path: "stuff" }, nil, 0)
+        res, err := queryTokens(dbconn, &searchClause{ Type: "path", Path: "%stuff%" }, nil, 0)
         if err != nil {
             t.Fatalf(err.Error())
         }
         if !equalPathArrays(extractSortedPaths(res), []string{ "stuff/metadata.json", "stuff/other.json" }, to_add) {
+            t.Fatalf("search results are not as expected %v", res)
+        }
+
+        // Check that the escapes are set up correctly:
+        res, err = queryTokens(dbconn, &searchClause{ Type: "path", Path: "%/metadata.%json", Escape: "\\" }, nil, 0)
+        if err != nil {
+            t.Fatalf(err.Error())
+        }
+        if !equalPathArrays(extractSortedPaths(res), []string{ "metadata.json", "stuff/metadata.json" }, to_add) {
+            t.Fatalf("search results are not as expected %v", res)
+        }
+
+        res, err = queryTokens(dbconn, &searchClause{ Type: "path", Path: "%/metadata.%json", Escape: "." }, nil, 0) // whoops, escaped the %.
+        if err != nil {
+            t.Fatalf(err.Error())
+        }
+        if len(res) != 0 {
             t.Fatalf("search results are not as expected %v", res)
         }
     })
