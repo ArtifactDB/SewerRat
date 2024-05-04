@@ -6,11 +6,14 @@ import (
 
     "os"
     "path/filepath"
+    "io"
     "io/fs"
     "syscall"
 
     "net/http"
     "net/url"
+    "mime"
+
     "encoding/json"
     "errors"
     "strings"
@@ -469,11 +472,10 @@ func newRetrieveFileHandler(db *sql.DB) func(http.ResponseWriter, *http.Request)
         if configureCors(w, r) {
             return
         }
-        if r.Method != "GET" {
+        if r.Method != "GET" && r.Method != "HEAD" {
             w.WriteHeader(http.StatusMethodNotAllowed)
             return
         }
-
 
         params := r.URL.Query()
         path, err := getRetrievePath(params)
@@ -513,7 +515,32 @@ func newRetrieveFileHandler(db *sql.DB) func(http.ResponseWriter, *http.Request)
             return
         }
 
-        http.ServeFile(w, r, path)
+        if (r.Method == "HEAD") {
+            w.Header().Set("Content-Length", strconv.FormatInt(info.Size(), 10))
+            w.Header().Set("Last-Modified", info.ModTime().UTC().Format(http.TimeFormat))
+            w.Header().Set("Accept-Ranges", "bytes")
+
+            ctype := mime.TypeByExtension(filepath.Ext(path))
+            if (ctype == "") {
+                r, err := os.Open(path)
+                if err == nil {
+                    // Copied from https://cs.opensource.google/go/go/+/refs/tags/go1.22.2:src/net/http/fs.go;l=239-246.
+                    defer r.Close()
+                    buf := make([]byte, 512)
+                    n, err := io.ReadFull(r, buf[:])
+                    if err == nil {
+                        ctype = http.DetectContentType(buf[:n])
+                    }
+                }
+            }
+            if (ctype != "") {
+                w.Header().Set("Content-Type", ctype)
+            }
+
+            w.WriteHeader(http.StatusOK);
+        } else {
+            http.ServeFile(w, r, path)
+        }
     }
 }
 

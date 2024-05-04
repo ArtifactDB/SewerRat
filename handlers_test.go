@@ -13,6 +13,8 @@ import (
     "net/url"
     "encoding/json"
     "sort"
+    "time"
+    "strconv"
 )
 
 func TestDumpJsonResponse(t *testing.T) {
@@ -977,6 +979,36 @@ func TestRetrieveFileHandler(t *testing.T) {
         foo, ok := r["foo"]
         if !ok || foo != "Aaron had a little lamb" {
             t.Fatal("unexpected result from file retrieval")
+        }
+    })
+
+    t.Run("head", func (t *testing.T) {
+        req, err := http.NewRequest("HEAD", "/retrieve/file?path=" + url.QueryEscape(filepath.Join(to_add, "metadata.json")), nil)
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        rr := httptest.NewRecorder()
+        handler.ServeHTTP(rr, req)
+        if rr.Code != http.StatusOK {
+            t.Fatalf("should have succeeded")
+        }
+
+        headers := rr.Header()
+        cl, err := strconv.Atoi(headers.Get("content-length"))
+        if err != nil || cl == 0 {
+            t.Fatal("expected a non-zero content-length header");
+        }
+
+        ct := headers.Get("content-type")
+        if ct != "application/json" {
+            t.Fatal("expected a JSON content type header");
+        }
+
+        lm := headers.Get("last-modified")
+        _, err = time.Parse(time.RFC1123, lm)
+        if err != nil {
+            t.Fatalf("failed to parse the last-modified header; %v", err);
         }
     })
 
