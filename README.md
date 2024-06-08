@@ -416,3 +416,9 @@ Additional arguments can be passed to `./SewerRat` to control its behavior (chec
 It is assumed that SewerRat runs under a service account with no access to credentials or other sensitive information.
 This is because users can, in their registered directories, craft symlinks to arbitrary locations that will be followed by SewerRat.
 Any file path that can be accessed by the service account should be assumed to be public when the SewerRat API is active.
+
+## Links
+
+Clients to the SewerRat API are available in [R](https://github.com/ArtifactDB/SewerRat-R) and [Python](https://github.com/ArtifactDB/SewerRat-py).
+
+The [Gobbler](https://github.com/ArtifactDB/gobbler)'s registry can serve as a source of files for the SewerRat search index.
