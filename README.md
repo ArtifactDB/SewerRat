@@ -72,7 +72,11 @@ Upon receiving a valid request, SewerRat will walk recursively through the direc
 It will identify all metadata files with the specified `base` names (i.e., `A.json` and `B.json` in our example above), parsing them as JSON for indexing.
 SewerRat will skip any problematic files that cannot be indexed due to, e.g., invalid JSON, insufficient permissions.
 The causes of any failures are reported in the `comments` array in the HTTP response.
-Subdirectories with names starting with `.` are also skipped during the recursive walk, so any metadata files therein will be ignored.
+
+Subdirectories with names starting with `.` are skipped during the recursive walk, so any metadata files therein will be ignored.
+This is generally a sensible choice as these directories usually do not contain any interesting (scientific) information. 
+If any such subdirectory is relevant, a user can force SewerRat to include it in the index by passing its path directly as `path`.
+This is because leading dots are allowed in the components of the supplied `path`, just not in its subdirectories.
 
 Symbolic links in the specified directory are treated differently depending on their target.
 If the directory contains symbolic links to files, the contents of the target files can be indexed as long as the link has one of the `base` names.
