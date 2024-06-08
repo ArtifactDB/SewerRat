@@ -14,6 +14,11 @@ we do not impose schemas on the metadata format,
 and we re-use the existing storage facilities on the HPC cluster.
 SewerRat can be considered a much more relaxed version of the [Gobbler](https://github.com/ArtifactDB/gobbler) that federates the storage across users.
 
+For convenience, we'll assume that the URL to the SewerRat API is present in an environment variable named `SEWER_RAT_URL`.
+Readers should obtain an appropriate URL for their SewerRat deployment before trying the code examples below.
+Alternatively, readers can spin up their own instance on `localhost` by running the binaries [here](https://github.com/ArtifactDB/SewerRat/releases)
+or building the executable from source with the usual `go build .` command.
+
 ## Registering a directory
 
 ### Step-by-step
@@ -21,7 +26,8 @@ SewerRat can be considered a much more relaxed version of the [Gobbler](https://
 Any directory can be indexed as long as (i) the requesting user has write access to it and (ii) the account running the SewerRat service has read access to it.
 To demonstrate, let's make a directory containing JSON-formatted metadata files.
 Other files may be present, of course, but SewerRat only cares about the metadata.
-Metadata files can be anywhere in this directory (including within subdirectories) and they can have any base name (here, `A.json` and `B.json`).
+If subdirectories are present, these will be searched recursively for metadata files, though any subdirectory starting with `.` will not be searched.
+The base names of the metadata files are left to the user's discretion - here, `A.json` and `B.json`.
 
 ```shell
 mkdir test 
@@ -29,12 +35,6 @@ echo '{ "title": "YAY", "description": "whee" }' > test/A.json
 mkdir test/sub
 echo '{ "authors": { "first": "Aaron", "last": "Lun" } }' > test/sub/A.json
 echo '{ "foo": "bar", "gunk": [ "stuff", "blah" ] }' > test/sub/B.json
-```
-
-For convenience, we'll store the SewerRat API in an environment variable.
-
-```shell
-export SEWER_RAT_URL=<INSERT URL HERE> # get this from your SewerRat admin.
 ```
 
 To start the registration process, we make a POST request to the `/register/start` endpoint.
@@ -54,8 +54,8 @@ curl -X POST -L ${SEWER_RAT_URL}/register/start \
 On success, this returns a `PENDING` status with a verification code.
 The caller is expected to verify that they have write access to the specified directory by creating a file with the same name as the verification code (i.e., `.sewer_XXX`) inside that directory.
 Once this is done, we call the `/register/finish` endpoint with a request body that contains the same directory `path`.
-The body may also contain `base`, an array of strings containing the names of the files to register within the directory -
-if this is not provided, only files named `metadata.json` will be registered.
+The body may also contain `base`, an array of strings containing the names of the metadata files in the directory to be indexed -
+if this is not provided, only files named `metadata.json` will be indexed.
 
 ```shell
 curl -X POST -L ${SEWER_RAT_URL}/register/finish \
@@ -67,7 +67,7 @@ curl -X POST -L ${SEWER_RAT_URL}/register/finish \
 ## }
 ```
 
-On success, the files in the specified directory will be registered in the SQLite index.
+On success, the metadata files in the specified directory will be incorporated into the SQLite index.
 We can then [search on the contents of these files](#querying-the-index) or [fetch the contents of any file](#fetching-file-contents) in the registered directory.
 On error, the response usually has the `application-json` content type, where the body encodes a JSON object with an `ERROR` status and a `reason` string property explaining the reason for the failure.
 Note that some error types (e.g., 404, 405) may instead return a `text/plain` content type with the reason directly in the response body.

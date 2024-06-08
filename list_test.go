@@ -188,13 +188,13 @@ func TestListMetadata(t *testing.T) {
         t.Fatal(err)
     }
 
-    err = os.Symlink(subdir, filepath.Join(dir, "bar.json"))
+    err = os.Symlink(subdir, filepath.Join(dir, "symlinked"))
     if err != nil {
         t.Fatal(err)
     }
 
     t.Run("symlink", func(t *testing.T) {
-        found, fails, err := listMetadata(dir, []string{ "foo.json", "bar.json" })
+        found, fails, err := listMetadata(dir, []string{ "foo.json", "B.json" })
         if err != nil {
             t.Fatal(err)
         }
@@ -203,6 +203,7 @@ func TestListMetadata(t *testing.T) {
             t.Fatal("unexpected failures")
         }
 
+        // B.json in the linked directory should be ignored as we don't recurse into them.
         if len(found) != 1 {
             t.Fatal("expected exactly one file")
         }
@@ -213,6 +214,38 @@ func TestListMetadata(t *testing.T) {
         }
         if info.Mode() & os.ModeSymlink != 0 { // uses information from the link.
             t.Fatal("expected file info from link target")
+        }
+    })
+
+    // Throwing in a hidden directory.
+    dotsubdir := filepath.Join(dir, ".git")
+    err = os.Mkdir(dotsubdir, 0755)
+    if err != nil {
+        t.Fatalf("failed to create a temporary subdirectory; %v", err)
+    }
+
+    dotsubpath2 := filepath.Join(dotsubdir, "B.json")
+    err = os.WriteFile(dotsubpath2, []byte(""), 0644)
+    if err != nil {
+        t.Fatalf("failed to create a mock file; %v", err)
+    }
+
+    t.Run("symlink", func(t *testing.T) {
+        found, fails, err := listMetadata(dir, []string{ "B.json" })
+        if err != nil {
+            t.Fatal(err)
+        }
+        if len(fails) > 0 {
+            t.Fatal("unexpected failures")
+        }
+
+        // B.json in the linked directory should be ignored as we don't recurse into them.
+        if len(found) != 1 {
+            t.Fatal("expected exactly one file")
+        }
+        _, ok := found[filepath.Join(dir, "sub/B.json")]
+        if !ok {
+            t.Fatal("missing file")
         }
     })
 }
