@@ -181,6 +181,26 @@ func TestListMetadata(t *testing.T) {
             t.Fatal("unexpected file")
         }
     })
+}
+
+func TestListMetadataSymlink(t *testing.T) {
+    dir, err := os.MkdirTemp("", "")
+    if (err != nil) {
+        t.Fatalf("failed to create a temporary directory; %v", err)
+    }
+
+    path := filepath.Join(dir, "A.json")
+    err = os.WriteFile(path, []byte(""), 0644)
+    if err != nil {
+        t.Fatalf("failed to create a mock file; %v", err)
+    }
+
+    hostdir, err := os.MkdirTemp("", "")
+    hostpath := filepath.Join(hostdir, "B.json")
+    err = os.WriteFile(hostpath, []byte(""), 0644)
+    if err != nil {
+        t.Fatalf("failed to create a mock file; %v", err)
+    }
 
     // Throwing in some symbolic links.
     err = os.Symlink(path, filepath.Join(dir, "foo.json"))
@@ -188,13 +208,13 @@ func TestListMetadata(t *testing.T) {
         t.Fatal(err)
     }
 
-    err = os.Symlink(subdir, filepath.Join(dir, "bar.json"))
+    err = os.Symlink(hostdir, filepath.Join(dir, "symlinked"))
     if err != nil {
         t.Fatal(err)
     }
 
     t.Run("symlink", func(t *testing.T) {
-        found, fails, err := listMetadata(dir, []string{ "foo.json", "bar.json" })
+        found, fails, err := listMetadata(dir, []string{ "foo.json", "B.json" })
         if err != nil {
             t.Fatal(err)
         }
@@ -203,6 +223,7 @@ func TestListMetadata(t *testing.T) {
             t.Fatal("unexpected failures")
         }
 
+        // B.json in the linked directory should be ignored as we don't recurse into them.
         if len(found) != 1 {
             t.Fatal("expected exactly one file")
         }
@@ -213,6 +234,51 @@ func TestListMetadata(t *testing.T) {
         }
         if info.Mode() & os.ModeSymlink != 0 { // uses information from the link.
             t.Fatal("expected file info from link target")
+        }
+    })
+}
+
+func TestListMetadataDot(t *testing.T) {
+    dir, err := os.MkdirTemp("", "")
+    if (err != nil) {
+        t.Fatalf("failed to create a temporary directory; %v", err)
+    }
+
+    path := filepath.Join(dir, "A.json")
+    err = os.WriteFile(path, []byte(""), 0644)
+    if err != nil {
+        t.Fatalf("failed to create a mock file; %v", err)
+    }
+
+    // Throwing in a hidden directory.
+    subdir := filepath.Join(dir, ".git")
+    err = os.Mkdir(subdir, 0755)
+    if err != nil {
+        t.Fatalf("failed to create a temporary subdirectory; %v", err)
+    }
+
+    subpath1 := filepath.Join(subdir, "A.json")
+    err = os.WriteFile(subpath1, []byte(""), 0644)
+    if err != nil {
+        t.Fatalf("failed to create a mock file; %v", err)
+    }
+
+    t.Run("dot", func(t *testing.T) {
+        found, fails, err := listMetadata(dir, []string{ "A.json" })
+        if err != nil {
+            t.Fatal(err)
+        }
+        if len(fails) > 0 {
+            t.Fatal("unexpected failures")
+        }
+
+        // A.json in the subdirectory should be ignored as we don't recurse into dots.
+        if len(found) != 1 {
+            t.Fatal("expected exactly one file")
+        }
+        _, ok := found[filepath.Join(dir, "A.json")]
+        if !ok {
+            t.Fatal("missing file")
         }
     })
 }

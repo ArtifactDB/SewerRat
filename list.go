@@ -5,6 +5,7 @@ import (
     "io/fs"
     "os"
     "path/filepath"
+    "strings"
 )
 
 func listFiles(dir string, recursive bool) ([]string, error) {
@@ -59,7 +60,12 @@ func listMetadata(dir string, base_names []string) (map[string]fs.FileInfo, []st
         }
 
         if d.IsDir() {
-            return nil
+            base := filepath.Base(path)
+            if strings.HasPrefix(base, ".") {
+                return fs.SkipDir
+            } else {
+                return nil
+            }
         }
 
         if _, ok := curnames[filepath.Base(path)]; !ok {

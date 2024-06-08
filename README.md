@@ -14,14 +14,18 @@ we do not impose schemas on the metadata format,
 and we re-use the existing storage facilities on the HPC cluster.
 SewerRat can be considered a much more relaxed version of the [Gobbler](https://github.com/ArtifactDB/gobbler) that federates the storage across users.
 
+For convenience, we'll assume that the URL to the SewerRat API is present in an environment variable named `SEWER_RAT_URL`.
+Readers should obtain an appropriate URL for their SewerRat deployment before trying the code examples below.
+Alternatively, readers can spin up their own instance on `localhost` by running the binaries [here](https://github.com/ArtifactDB/SewerRat/releases)
+or building the executable from source with the usual `go build .` command.
+
 ## Registering a directory
 
-### Step-by-step
+### Initialization
 
 Any directory can be indexed as long as (i) the requesting user has write access to it and (ii) the account running the SewerRat service has read access to it.
 To demonstrate, let's make a directory containing JSON-formatted metadata files.
 Other files may be present, of course, but SewerRat only cares about the metadata.
-Metadata files can be anywhere in this directory (including within subdirectories) and they can have any base name (here, `A.json` and `B.json`).
 
 ```shell
 mkdir test 
@@ -29,12 +33,6 @@ echo '{ "title": "YAY", "description": "whee" }' > test/A.json
 mkdir test/sub
 echo '{ "authors": { "first": "Aaron", "last": "Lun" } }' > test/sub/A.json
 echo '{ "foo": "bar", "gunk": [ "stuff", "blah" ] }' > test/sub/B.json
-```
-
-For convenience, we'll store the SewerRat API in an environment variable.
-
-```shell
-export SEWER_RAT_URL=<INSERT URL HERE> # get this from your SewerRat admin.
 ```
 
 To start the registration process, we make a POST request to the `/register/start` endpoint.
@@ -53,9 +51,12 @@ curl -X POST -L ${SEWER_RAT_URL}/register/start \
 
 On success, this returns a `PENDING` status with a verification code.
 The caller is expected to verify that they have write access to the specified directory by creating a file with the same name as the verification code (i.e., `.sewer_XXX`) inside that directory.
-Once this is done, we call the `/register/finish` endpoint with a request body that contains the same directory `path`.
-The body may also contain `base`, an array of strings containing the names of the files to register within the directory -
-if this is not provided, only files named `metadata.json` will be registered.
+
+### Verification 
+
+Once this is done, we call the `/register/finish` endpoint with a JSON-encoded request body that contains the same directory path in `path`.
+The body may also contain `base`, an array of strings containing the names of the metadata files in the directory to be indexed.
+If `base` is not provided, only files named `metadata.json` will be indexed.
 
 ```shell
 curl -X POST -L ${SEWER_RAT_URL}/register/finish \
@@ -67,21 +68,15 @@ curl -X POST -L ${SEWER_RAT_URL}/register/finish \
 ## }
 ```
 
-On success, the files in the specified directory will be registered in the SQLite index.
-We can then [search on the contents of these files](#querying-the-index) or [fetch the contents of any file](#fetching-file-contents) in the registered directory.
-On error, the response usually has the `application-json` content type, where the body encodes a JSON object with an `ERROR` status and a `reason` string property explaining the reason for the failure.
-Note that some error types (e.g., 404, 405) may instead return a `text/plain` content type with the reason directly in the response body.
-In either case, the verification code file is no longer needed after a response is received and can be deleted from the directory to reduce clutter.
-
-We provide some small utility functions from [`scripts/functions.sh`](scripts/functions.sh) to perform the registration from the command line.
-The process should still be simple enough to implement equivalent functions in any language.
-
-### Behind the scenes
-
-Once verified in `/register/finish`, SewerRat will walk recursively through the specified directory.
-It will identify all files with the specified `base` names (i.e., `A.json` and `B.json` in our example above), parsing them as JSON for indexing.
+Upon receiving a valid request, SewerRat will walk recursively through the directory specified in `path`.
+It will identify all metadata files with the specified `base` names (i.e., `A.json` and `B.json` in our example above), parsing them as JSON for indexing.
 SewerRat will skip any problematic files that cannot be indexed due to, e.g., invalid JSON, insufficient permissions.
 The causes of any failures are reported in the `comments` array in the HTTP response.
+
+Subdirectories with names starting with `.` are skipped during the recursive walk, so any metadata files therein will be ignored.
+This is generally a sensible choice as these directories usually do not contain any interesting (scientific) information. 
+If any such subdirectory is relevant, a user can force SewerRat to include it in the index by passing its path directly as `path`.
+This is because leading dots are allowed in the components of the supplied `path`, just not in its subdirectories.
 
 Symbolic links in the specified directory are treated differently depending on their target.
 If the directory contains symbolic links to files, the contents of the target files can be indexed as long as the link has one of the `base` names.
@@ -89,13 +84,18 @@ All file information (e.g., modification time, owner) is taken from the link tar
 SewerRat effectively treats the symbolic link as a proxy for the target file.
 If the directory contains symbolic links to other directories, these will not be recursively traversed.
 
+On success, the metadata files in the specified directory will be incorporated into the SQLite index.
+We can then [search on the contents of these files](#querying-the-index) or [fetch the contents of any file](#fetching-file-contents) in the registered directory.
+
+### Automatic updates
+
 SewerRat will periodically update the index by inspecting all of its registered directories for new content.
 If we added or modified a file with one of the registered names (e.g., `A.json`), SewerRat will (re-)index that file.
 Similarly, if we deleted a file, SewerRat will remove it from the index.
 This ensures that the information in the index reflects the directory contents on the filesystem.
 Users can also manually update a directory by repeating the process above to re-index the directory's contents.
 
-As an aside: updates and symbolic links can occasionally interact in strange ways.
+Updates and symbolic links can occasionally interact in strange ways.
 Specifically, updates to the indexed information for symbolic links are based on the modification time of the link target.
 One can imagine a pathological case where a symbolic link is changed to a different target with the same modification time as the previous target, which will not be captured by SewerRat.
 Currently, this can only be resolved by deleting all affected symbolic links, re-registering the directory, and then restoring the links and re-registering again.
@@ -105,6 +105,21 @@ Currently, this can only be resolved by deleting all affected symbolic links, re
 To remove files from the index, we use the same procedure as above but replacing the `/register/*` endpoints with `/deregister/*`.
 The only potential difference is when the caller requests deregistration of a directory that does not exist.
 In this case, `/deregister/start` may return a `SUCCESS` status instead of `PENDING`, after which `/deregister/finish` does not need to be called.
+
+### Other comments
+
+If an error is encountered in the `/register/*` or `/deregister/*` endpoints, the response usually has the `application-json` content type.
+The body encodes a JSON object with an `ERROR` status and a `reason` string property explaining the reason for the failure.
+That said, some error types (e.g., 404, 405) may instead return a `text/plain` content type with the reason directly in the response body.
+
+Any failure to parse specific JSON files is not considered an error and will only show up in the `comments` of a successful response from `/register/finish`.
+This provides some robustness to partial writes or invalid files inside directories with complex internal structure.
+
+Regardless of whether the registration is successful or not, the verification code file is no longer needed after a response is received.
+This can be deleted from the directory to reduce clutter.
+
+We provide some small utility functions from [`scripts/functions.sh`](scripts/functions.sh) to perform the registration from the command line.
+The process should still be simple enough to implement equivalent functions in any language.
 
 ## Querying the index
 
