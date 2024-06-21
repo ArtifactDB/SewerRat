@@ -238,7 +238,14 @@ For example:
 (title: prostate cancer) AND (genome: GRCh38 OR genome: GRCm38)
 ```
 
-Note that this does not extend to the `AND`, `OR` and `NOT` keywords,
+This also works for properties of JSON objects that are nested in other objects.
+Here, the name of the field is defined by concatenating all property names with an intervening period, e.g.:
+
+```
+publication.author.first_name: Aaron
+```
+
+Note that this scoping-by-field does not extend to the `AND`, `OR` and `NOT` keywords,
 e.g., `title:foo OR bar` will not limit the search for `bar` to the `title` field.
 
 If a `%` wildcard is present in a search term, its local search clause is set to perform a partial search.

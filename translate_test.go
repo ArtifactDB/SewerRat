@@ -19,7 +19,7 @@ func TestTranslateTextQuerySimple(t *testing.T) {
     if err != nil {
         t.Fatal(err)
     }
-    if out.Type != "text" || out.Text != "foo bar whee" {
+    if out.Type != "and" || out.Children[0].Text != "foo" || out.Children[1].Text != "bar" || out.Children[2].Text != "whee" {
         t.Fatal("unexpected text query")
     }
 
@@ -37,7 +37,9 @@ func TestTranslateTextQuerySimple(t *testing.T) {
     if err != nil {
         t.Fatal(err)
     }
-    if out.Type != "text" || out.Text != "yay blah" || out.Field != "stuff" {
+    if out.Type != "and" || 
+        out.Children[0].Text != "yay" || out.Children[0].Field != "stuff" || 
+        out.Children[1].Text != "blah" || out.Children[1].Field != "stuff" {
         t.Fatal("unexpected text query")
     }
 
@@ -47,6 +49,16 @@ func TestTranslateTextQuerySimple(t *testing.T) {
         t.Fatal(err)
     }
     if out.Type != "text" || out.Text != "foo%" || !out.Partial {
+        t.Fatal("unexpected text query")
+    }
+
+    out, err = translateTextQuery("foo% bar")
+    if err != nil {
+        t.Fatal(err)
+    }
+    if out.Type != "and" || 
+        out.Children[0].Text != "foo%" || !out.Children[0].Partial ||
+        out.Children[1].Text != "bar" || out.Children[1].Partial {
         t.Fatal("unexpected text query")
     }
 
@@ -71,7 +83,7 @@ func TestTranslateTextQueryNot(t *testing.T) {
     if err != nil {
         t.Fatal(err)
     }
-    if out.Type != "not" || out.Child.Type != "text" || out.Child.Text != "foo bar" {
+    if out.Type != "not" || out.Child.Type != "and" || out.Child.Children[0].Text != "foo" || out.Child.Children[1].Text != "bar" {
         t.Fatal("unexpected NOT query")
     }
 
@@ -99,6 +111,16 @@ func TestTranslateTextQueryNot(t *testing.T) {
     if err == nil || strings.Index(err.Error(), "illegal placement") < 0 {
         t.Fatal("should have failed")
     }
+
+    out, err = translateTextQuery("(foo)NOT(bar)") // ... should be (foo) AND NOT (bar)
+    if err == nil || strings.Index(err.Error(), "illegal placement") < 0 {
+        t.Fatal("should have failed")
+    }
+
+    out, err = translateTextQuery("(foo)NOT bar") // ... should be (foo) AND NOT bar
+    if err == nil || strings.Index(err.Error(), "illegal placement") < 0 {
+        t.Fatal("should have failed")
+    }
 }
 
 func TestTranslateTextQueryAnd(t *testing.T) {
@@ -116,8 +138,8 @@ func TestTranslateTextQueryAnd(t *testing.T) {
         t.Fatal(err)
     }
     if out.Type != "and" || len(out.Children) != 3 || 
-        out.Children[0].Type != "text" || out.Children[0].Text != "foo bar" || 
-        out.Children[1].Type != "text" || out.Children[1].Text != "whee stuff" ||
+        out.Children[0].Type != "and" || out.Children[0].Children[0].Text != "foo" || out.Children[0].Children[1].Text != "bar" ||
+        out.Children[1].Type != "and" || out.Children[1].Children[0].Text != "whee" || out.Children[1].Children[1].Text != "stuff" ||
         out.Children[2].Type != "text" || out.Children[2].Text != "other" {
         t.Fatal("unexpected AND query")
     }
@@ -163,8 +185,8 @@ func TestTranslateTextQueryOr(t *testing.T) {
         t.Fatal(err)
     }
     if out.Type != "or" || len(out.Children) != 3 || 
-        out.Children[0].Type != "text" || out.Children[0].Text != "foo bar" || 
-        out.Children[1].Type != "text" || out.Children[1].Text != "whee stuff" ||
+        out.Children[0].Type != "and" || out.Children[0].Children[0].Text != "foo" || out.Children[0].Children[1].Text != "bar" ||
+        out.Children[1].Type != "and" || out.Children[1].Children[0].Text != "whee" || out.Children[1].Children[1].Text != "stuff" ||
         out.Children[2].Type != "text" || out.Children[2].Text != "other" {
         t.Fatal("unexpected OR query")
     }

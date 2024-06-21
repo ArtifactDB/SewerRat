@@ -54,6 +54,9 @@ func translateTextQueryInternal(query []rune, at int, open_par bool) (*searchCla
                     return nil, 0, err
                 }
             } else if isWordEqualTo(status.Word, "NOT") {
+                if len(status.Words) > 0 || len(status.Operations) < len(status.Clauses) {
+                    return nil, 0, fmt.Errorf("illegal placement of NOT at position %d", at) 
+                }
                 status.Negation = true
                 status.Word = []rune{}
             } else if len(status.Word) > 0 || len(status.Words) > 0 {
@@ -158,9 +161,6 @@ func translateTextQueryInternal(query []rune, at int, open_par bool) (*searchCla
 }
 
 func translateTextClause(status *translationStatus, at int) error {
-    new_component := &searchClause{}
-    new_component.Type = "text"
-
     if len(status.Words) == 0 {
         return fmt.Errorf("no search terms at position %d", at)
     }
@@ -170,14 +170,16 @@ func translateTextClause(status *translationStatus, at int) error {
     for i, x := range first_word {
         if x == ':' {
             fi = i
+            break
         }
     }
     if fi == 0 {
         return fmt.Errorf("search field should be non-empty for terms ending at %d", at)
     }
 
+    field := ""
     if fi > 0 {
-        new_component.Field = string(first_word[:fi])
+        field = string(first_word[:fi])
         leftover := first_word[fi+1:]
         if len(leftover) == 0 {
             if len(status.Words) == 1 {
@@ -189,18 +191,23 @@ func translateTextClause(status *translationStatus, at int) error {
         }
     }
 
-    converted := []string{}
+    converted := []*searchClause{}
     for _, x := range status.Words {
-        converted = append(converted, string(x))
+        word := string(x)
+        converted = append(converted, &searchClause{ Type: "text", Text: word, Field: field, Partial: strings.Index(word, "%") >= 0 })
     }
-    new_component.Text = strings.Join(converted, " ")
-    if strings.Index(new_component.Text, "%") >= 0 {
-        new_component.Partial = true
+
+    var new_component *searchClause
+    if len(converted) == 1 {
+        new_component = converted[0]
+    } else {
+        new_component = &searchClause{ Type: "and", Children: converted }
     }
 
     if status.Negation {
         // Two-step replacement, otherwise it becomes a circular reference.
-        new_component = &searchClause{ Type: "not", Child: new_component }
+        replacement := &searchClause{ Type: "not", Child: new_component }
+        new_component = replacement
         status.Negation = false
     }
 
