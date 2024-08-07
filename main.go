@@ -11,11 +11,11 @@ import (
 func main() {
     dbpath0 := flag.String("db", "index.sqlite3", "Path to the SQLite file for the metadata")
     port0 := flag.Int("port", 8080, "Port to listen to for requests")
-    backup0 := flag.Int("backup", 24, "Frequency of back-ups, in hours")
-    update0 := flag.Int("update", 24, "Frequency of updates, in hours")
-    timeout0 := flag.Int("finish", 30, "Time spent polling for the verification code when finishing (de)registration, in seconds")
-    prefix0 := flag.String("prefix", "", "Prefix to add to each endpoint, excluding the first and last slashes (default \"\")")
-    lifetime0 := flag.Int("session", 10, "Session lifetime, in minutes")
+    backup0 := flag.Int("backup", 24, "Frequency of creating or updating back-ups, in hours")
+    update0 := flag.Int("update", 24, "Frequency of updating the index by scanning registered directories, in hours")
+    timeout0 := flag.Int("finish", 30, "Maximum time spent polling for the verification code when finishing (de)registration, in seconds")
+    prefix0 := flag.String("prefix", "", "Prefix to add to each endpoint, after removing any leading or trailing slashes (default \"\")")
+    lifetime0 := flag.Int("session", 10, "Maximum lifetime of a (de)registration session from start to finish, in minutes")
     flag.Parse()
 
     dbpath := *dbpath0
