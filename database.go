@@ -217,13 +217,13 @@ func newInsertStatements(tx *sql.Tx) (*insertStatements, error) {
 /**********************************************************************/
 
 // Recurse through the metadata structure to disassemble the tokens.
-func tokenizeMetadata(tx *sql.Tx, parsed interface{}, path string, pid int64, field string, prepped *insertStatements, tokenizer *unicodeTokenizer) []string {
+func tokenizeMetadata(parsed interface{}, path string, pid int64, field string, prepped *insertStatements, tokenizer *unicodeTokenizer) []string {
     failures := []string{}
 
     switch v := parsed.(type) {
     case []interface{}:
         for _, w := range v {
-            tokfails := tokenizeMetadata(tx, w, path, pid, field, prepped, tokenizer)
+            tokfails := tokenizeMetadata(w, path, pid, field, prepped, tokenizer)
             failures = append(failures, tokfails...)
         }
 
@@ -233,7 +233,7 @@ func tokenizeMetadata(tx *sql.Tx, parsed interface{}, path string, pid int64, fi
             if field != "" {
                 new_field = field + "." + k
             }
-            tokfails := tokenizeMetadata(tx, w, path, pid, new_field, prepped, tokenizer)
+            tokfails := tokenizeMetadata(w, path, pid, new_field, prepped, tokenizer)
             failures = append(failures, tokfails...)
         }
 
@@ -403,7 +403,7 @@ func addDirectoryContents(tx *sql.Tx, path string, did int64, base_names []strin
                 continue
             }
 
-            tokfails := tokenizeMetadata(tx, loaded.Parsed, loaded.Path, pid, "", token_stmts, tokenizer)
+            tokfails := tokenizeMetadata(loaded.Parsed, loaded.Path, pid, "", token_stmts, tokenizer)
             all_failures = append(all_failures, tokfails...)
         }
     }
@@ -453,7 +453,7 @@ func addDirectoryContents(tx *sql.Tx, path string, did int64, base_names []strin
                 continue
             }
 
-            tokfails := tokenizeMetadata(tx, loaded.Parsed, loaded.Path, pid, "", token_stmts, tokenizer)
+            tokfails := tokenizeMetadata(loaded.Parsed, loaded.Path, pid, "", token_stmts, tokenizer)
             all_failures = append(all_failures, tokfails...)
         }
     }
