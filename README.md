@@ -415,6 +415,9 @@ Additional arguments can be passed to `./SewerRat` to control its behavior (chec
 - `-session` specifies the lifetime of a registration sesssion 
   (i.e., the maximum time between starting and finishing the registration, see below).
   This defaults to 10 minutes.
+- `-finish` specifies the time spent polling for the verification code after a request has been made to `/register/finish` or `/deregister/finish`.
+  A non-zero value is often necessary on network filesystems where newly written files do not immediately synchronize.
+  This defaults to 30 seconds.
 - `-prefix` adds an extra prefix to all endpoints, e.g., to disambiguate between versions.
   For example, a prefix of `api/v2` would change the list endpoint to `/api/v2/list`.
   This defaults to an empty string, i.e., no prefix.

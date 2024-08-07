@@ -85,7 +85,7 @@ func TestCheckVerificationCode(t *testing.T) {
             t.Fatal(err)
         }
 
-        info, err := checkVerificationCode(target, v)
+        info, err := checkVerificationCode(target, v, 1)
         if err != nil {
             t.Fatal(err)
         }
@@ -101,7 +101,7 @@ func TestCheckVerificationCode(t *testing.T) {
             t.Fatal(err)
         }
 
-        _, err = checkVerificationCode(target, v)
+        _, err = checkVerificationCode(target, v, 1)
         if err == nil || !strings.Contains(err.Error(), "no verification code") {
             t.Fatal("should have failed")
         }
@@ -118,7 +118,7 @@ func TestCheckVerificationCode(t *testing.T) {
             t.Fatal(err)
         }
 
-        _, err = checkVerificationCode(target, v)
+        _, err = checkVerificationCode(target, v, 1)
         if err == nil || !strings.Contains(err.Error(), "verification failed") {
             t.Fatal("should have failed")
         }
@@ -145,7 +145,7 @@ func TestCheckVerificationCode(t *testing.T) {
             t.Fatal(err)
         }
 
-        _, err = checkVerificationCode(target, v)
+        _, err = checkVerificationCode(target, v, 1)
         if err == nil || !strings.Contains(err.Error(), "hard link") {
             t.Fatal("should have failed")
         }
@@ -273,7 +273,7 @@ func TestRegisterHandlers(t *testing.T) {
 
     t.Run("register finish without verification", func(t *testing.T) {
         quickRegisterStart()
-        handler := http.HandlerFunc(newRegisterFinishHandler(dbconn, verifier, tokr))
+        handler := http.HandlerFunc(newRegisterFinishHandler(dbconn, verifier, tokr, 1))
         req := createJsonRequest("POST", "/register/finish", map[string]interface{}{ "path": to_add }, t)
         rr := httptest.NewRecorder()
         handler.ServeHTTP(rr, req)
@@ -289,7 +289,7 @@ func TestRegisterHandlers(t *testing.T) {
             t.Fatal(err)
         }
 
-        handler := http.HandlerFunc(newRegisterFinishHandler(dbconn, verifier, tokr))
+        handler := http.HandlerFunc(newRegisterFinishHandler(dbconn, verifier, tokr, 1))
         req := createJsonRequest("POST", "/register/finish", map[string]interface{}{ "path": to_add }, t)
         rr := httptest.NewRecorder()
         handler.ServeHTTP(rr, req)
@@ -321,7 +321,7 @@ func TestRegisterHandlers(t *testing.T) {
 
     t.Run("register finish with empty names", func(t *testing.T) {
         quickRegisterStart()
-        handler := http.HandlerFunc(newRegisterFinishHandler(dbconn, verifier, tokr))
+        handler := http.HandlerFunc(newRegisterFinishHandler(dbconn, verifier, tokr, 1))
         req := createJsonRequest("POST", "/register/finish", map[string]interface{}{ "path": to_add, "base": []string{ "", "metadata.json" } }, t)
         rr := httptest.NewRecorder()
         handler.ServeHTTP(rr, req)
@@ -337,7 +337,7 @@ func TestRegisterHandlers(t *testing.T) {
             t.Fatal(err)
         }
 
-        handler := http.HandlerFunc(newRegisterFinishHandler(dbconn, verifier, tokr))
+        handler := http.HandlerFunc(newRegisterFinishHandler(dbconn, verifier, tokr, 1))
         req := createJsonRequest("POST", "/register/finish", map[string]interface{}{ "path": to_add, "base": []string{ "metadata.json", "other.json" } }, t)
         rr := httptest.NewRecorder()
         handler.ServeHTTP(rr, req)
@@ -450,7 +450,7 @@ func TestDeregisterHandlers(t *testing.T) {
 
     t.Run("deregister fail", func(t *testing.T) {
         quickDeregisterStart()
-        handler := http.HandlerFunc(newDeregisterFinishHandler(dbconn, verifier))
+        handler := http.HandlerFunc(newDeregisterFinishHandler(dbconn, verifier, 1))
 
         // First attempt fails, because we didn't add the registration code.
         req := createJsonRequest("POST", "/deregister/finish", map[string]interface{}{ "path": to_add }, t)
@@ -472,7 +472,7 @@ func TestDeregisterHandlers(t *testing.T) {
             t.Fatal(err)
         }
 
-        handler := http.HandlerFunc(newDeregisterFinishHandler(dbconn, verifier))
+        handler := http.HandlerFunc(newDeregisterFinishHandler(dbconn, verifier, 1))
         req := createJsonRequest("POST", "/deregister/finish", map[string]interface{}{ "path": to_add }, t)
         if err != nil {
             t.Fatal(err)

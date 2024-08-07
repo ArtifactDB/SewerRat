@@ -13,6 +13,7 @@ func main() {
     port0 := flag.Int("port", 8080, "Port to listen to for requests")
     backup0 := flag.Int("backup", 24, "Frequency of back-ups, in hours")
     update0 := flag.Int("update", 24, "Frequency of updates, in hours")
+    timeout0 := flag.Int("finish", 30, "Time spent polling for the verification code when finishing (de)registration, in seconds")
     prefix0 := flag.String("prefix", "", "Prefix to add to each endpoint, excluding the first and last slashes (default \"\")")
     lifetime0 := flag.Int("session", 10, "Session lifetime, in minutes")
     flag.Parse()
@@ -43,11 +44,13 @@ func main() {
         prefix = "/" + prefix
     }
 
+    timeout := time.Duration(*timeout0)
+
     // Setting up the endpoints.
     http.HandleFunc("POST " + prefix + "/register/start", newRegisterStartHandler(verifier))
-    http.HandleFunc("POST " + prefix + "/register/finish", newRegisterFinishHandler(db, verifier, tokenizer))
+    http.HandleFunc("POST " + prefix + "/register/finish", newRegisterFinishHandler(db, verifier, tokenizer, timeout))
     http.HandleFunc("POST " + prefix + "/deregister/start", newDeregisterStartHandler(db, verifier))
-    http.HandleFunc("POST " + prefix + "/deregister/finish", newDeregisterFinishHandler(db, verifier))
+    http.HandleFunc("POST " + prefix + "/deregister/finish", newDeregisterFinishHandler(db, verifier, timeout))
 
     http.HandleFunc(prefix + "/query", newQueryHandler(db, tokenizer, wild_tokenizer, "/query"))
     http.HandleFunc(prefix + "/retrieve/metadata", newRetrieveMetadataHandler(db))

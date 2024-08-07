@@ -14,6 +14,8 @@ import (
     "net/url"
     "mime"
 
+    "time"
+
     "encoding/json"
     "errors"
     "strings"
@@ -69,7 +71,7 @@ func dumpHttpErrorResponse(w http.ResponseWriter, err error) {
     dumpErrorResponse(w, status_code, err.Error())
 }
 
-func checkVerificationCode(path string, verifier *verificationRegistry) (fs.FileInfo, error) {
+func checkVerificationCode(path string, verifier *verificationRegistry, timeout time.Duration) (fs.FileInfo, error) {
     expected_code, ok := verifier.Pop(path)
     if !ok {
         return nil, newHttpError(http.StatusBadRequest, fmt.Errorf("no verification code available for %q", path))
@@ -80,10 +82,29 @@ func checkVerificationCode(path string, verifier *verificationRegistry) (fs.File
     // that person when registering a directory.
     expected_path := filepath.Join(path, expected_code)
     code_info, err := os.Lstat(expected_path)
-    if errors.Is(err, os.ErrNotExist) {
-        return nil, newHttpError(http.StatusUnauthorized, fmt.Errorf("verification failed for %q; %w", path, err))
-    } else if err != nil {
-        return nil, fmt.Errorf("failed to inspect verification code for %q; %w", path, err)
+
+    // Exponential back-off up to the time limit.
+    until := time.Now().Add(timeout)
+    sleep := time.Duration(1)
+    for err != nil {
+        if !errors.Is(err, os.ErrNotExist) {
+            return nil, fmt.Errorf("failed to inspect verification code for %q; %w", path, err)
+        }
+
+        remaining := until.Sub(time.Now())
+        if remaining <= 0 {
+            return nil, newHttpError(http.StatusUnauthorized, fmt.Errorf("verification failed for %q; %w", path, err))
+        }
+
+        if sleep > remaining {
+            sleep = remaining
+        }
+        time.Sleep(sleep)
+        if sleep < 32 {
+            sleep *= 2
+        }
+
+        code_info, err = os.Lstat(expected_path)
     }
 
     // Similarly, prohibit hard links to avoid spoofing identities. Admittedly,
@@ -150,7 +171,7 @@ func newRegisterStartHandler(verifier *verificationRegistry) func(http.ResponseW
     }
 }
 
-func newRegisterFinishHandler(db *sql.DB, verifier *verificationRegistry, tokenizer *unicodeTokenizer) func(http.ResponseWriter, *http.Request) {
+func newRegisterFinishHandler(db *sql.DB, verifier *verificationRegistry, tokenizer *unicodeTokenizer, timeout time.Duration) func(http.ResponseWriter, *http.Request) {
     return func(w http.ResponseWriter, r *http.Request) {
         if r.Body == nil {
             dumpErrorResponse(w, http.StatusBadRequest, "expected a non-empty request body")
@@ -196,7 +217,7 @@ func newRegisterFinishHandler(db *sql.DB, verifier *verificationRegistry, tokeni
             allowed = []string{ "metadata.json" }
         }
 
-        code_info, err := checkVerificationCode(regpath, verifier)
+        code_info, err := checkVerificationCode(regpath, verifier, timeout)
         if err != nil {
             dumpHttpErrorResponse(w, err)
             return
@@ -264,7 +285,7 @@ func newDeregisterStartHandler(db *sql.DB, verifier *verificationRegistry) func(
     }
 }
 
-func newDeregisterFinishHandler(db *sql.DB, verifier *verificationRegistry) func(http.ResponseWriter, *http.Request) {
+func newDeregisterFinishHandler(db *sql.DB, verifier *verificationRegistry, timeout time.Duration) func(http.ResponseWriter, *http.Request) {
     return func(w http.ResponseWriter, r *http.Request) {
         if r.Body == nil {
             dumpErrorResponse(w, http.StatusBadRequest, "expected a non-empty request body")
@@ -284,7 +305,7 @@ func newDeregisterFinishHandler(db *sql.DB, verifier *verificationRegistry) func
             return
         }
 
-        _, err = checkVerificationCode(regpath, verifier)
+        _, err = checkVerificationCode(regpath, verifier, timeout)
         if err != nil {
             dumpHttpErrorResponse(w, err)
             return
