@@ -84,8 +84,8 @@ func checkVerificationCode(path string, verifier *verificationRegistry, timeout 
     code_info, err := os.Lstat(expected_path)
 
     // Exponential back-off up to the time limit.
-    until := time.Now().Add(timeout)
-    sleep := time.Duration(1)
+    until := time.Now().Add(timeout * time.Second)
+    sleep := time.Duration(1 * time.Second) 
     for err != nil {
         if !errors.Is(err, os.ErrNotExist) {
             return nil, fmt.Errorf("failed to inspect verification code for %q; %w", path, err)
