@@ -44,7 +44,7 @@ func main() {
         prefix = "/" + prefix
     }
 
-    timeout := time.Duration(*timeout0)
+    timeout := time.Duration(*timeout0) * time.Second
 
     // Setting up the endpoints.
     http.HandleFunc("POST " + prefix + "/register/start", newRegisterStartHandler(verifier))
