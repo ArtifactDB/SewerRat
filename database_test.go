@@ -1758,6 +1758,16 @@ func TestListRegisteredDirectories(t *testing.T) {
         if out[0].User != desired {
             t.Fatalf("unexpected entry %v", out[0])
         }
+
+        desired = "bar_user2"
+        query.User = &desired
+        out, err = listRegisteredDirectories(dbconn, &query)
+        if err != nil {
+            t.Fatal(err)
+        }
+        if len(out) != 0 {
+            t.Fatal("should have found no matching paths")
+        }
     })
 }
 
