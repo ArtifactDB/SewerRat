@@ -16,6 +16,7 @@ func main() {
     timeout0 := flag.Int("finish", 30, "Maximum time spent polling for the verification code when finishing (de)registration, in seconds")
     prefix0 := flag.String("prefix", "", "Prefix to add to each endpoint, after removing any leading or trailing slashes (default \"\")")
     lifetime0 := flag.Int("session", 10, "Maximum lifetime of a (de)registration session from start to finish, in minutes")
+    checkpoint0 := flag.Int("checkpoint", 60, "Frequency of checkpoints to synchronise the WAL journal with the SQLite file, in minutes")
     flag.Parse()
 
     dbpath := *dbpath0
@@ -65,6 +66,19 @@ func main() {
     http.HandleFunc(prefix + "/list", newListFilesHandler(ro_db))
 
     http.HandleFunc(prefix + "/", newDefaultHandler())
+
+    // Adding an hourly job that does a full checkpoint.
+    {
+        lifetime := time.Duration(*checkpoint0) * time.Minute
+        ticker := time.NewTicker(lifetime)
+        defer ticker.Stop()
+        go func() {
+            for {
+                <-ticker.C
+                db.Exec("PRAGMA wal_checkpoint(PASSIVE)")
+            }
+        }()
+    }
 
     // Adding a hour job that purges various old verification sessions.
     {

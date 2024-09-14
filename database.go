@@ -97,10 +97,6 @@ func initializeDatabase(path string) (*sql.DB, error) {
     // time; everyone else will have to block on the connection availability.
     db.SetMaxOpenConns(1)
 
-    // Make sure to eventually close all idle connections in the pool so that
-    // SQLite actually commits its WAL journal. 
-    db.SetConnMaxIdleTime(1 * time.Minute)
-
     if (!accessible) {
         err := func () error {
             atx, err := createTransaction(db)
@@ -176,11 +172,6 @@ func initializeReadOnlyDatabase(path string) (*sql.DB, error) {
     if err != nil {
         return nil, fmt.Errorf("failed to open read-only SQLite handle; %w", err)
     }
-
-    // Make sure to eventually close all idle connections in the pool so that
-    // SQLite actually commits its WAL journal. 
-    ro_db.SetConnMaxIdleTime(1 * time.Minute)
-
     return ro_db, nil
 }
 

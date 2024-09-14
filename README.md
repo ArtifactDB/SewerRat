@@ -433,8 +433,10 @@ Additional arguments can be passed to `./SewerRat` to control its behavior (chec
 - `-update` controls the frequency of index updates.
   This defaults to 24 hours.
 - `-session` specifies the lifetime of a registration sesssion 
-  (i.e., the maximum time between starting and finishing the registration, see below).
+  (i.e., the maximum time between starting and finishing the registration, see above).
   This defaults to 10 minutes.
+- `-checkpoint` specifies the frequency of SQLite checkpoints, to manually synchronize the write-ahead log with the SQLite database file.
+  This defaults to 60 minutes.
 - `-finish` specifies the time spent polling for the verification code after a request has been made to `/register/finish` or `/deregister/finish`.
   A non-zero value is often necessary on network filesystems where newly written files do not immediately synchronize.
   This defaults to 30 seconds.
