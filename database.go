@@ -86,10 +86,16 @@ func initializeDatabase(path string) (*sql.DB, error) {
         accessible = true
     }
 
-	db, err := sql.Open("sqlite", path)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create SQLite file at %q; %w", path, err)
-	}
+    // This object's connections are intended for serial writing, so we set
+    // IMMEDIATE transactions to make debugging of locking issues easier.
+    db, err := sql.Open("sqlite", path + "?_txlock=immediate")
+    if err != nil {
+        return nil, fmt.Errorf("failed to open read/write SQLite handle; %w", err)
+    }
+
+    // Maxing out at one connection so that there can only be one write at any
+    // time; everyone else will have to block on the connection availability.
+    db.SetMaxOpenConns(1)
 
     // Make sure to eventually close all idle connections in the pool so that
     // SQLite actually commits its WAL journal. 
@@ -163,6 +169,19 @@ CREATE INDEX index_links ON links(tid, fid);
     }
 
     return db, nil
+}
+
+func initializeReadOnlyDatabase(path string) (*sql.DB, error) {
+    ro_db, err := sql.Open("sqlite", path + "?_pragma=query_only(1)")
+    if err != nil {
+        return nil, fmt.Errorf("failed to open read-only SQLite handle; %w", err)
+    }
+
+    // Make sure to eventually close all idle connections in the pool so that
+    // SQLite actually commits its WAL journal. 
+    ro_db.SetConnMaxIdleTime(1 * time.Minute)
+
+    return ro_db, nil
 }
 
 /**********************************************************************/

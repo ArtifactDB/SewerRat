@@ -23,9 +23,15 @@ func main() {
 
     db, err := initializeDatabase(dbpath)
     if err != nil {
-        log.Fatalf("failed to create the initial SQLite file at %q; %v", dbpath, err)
+        log.Fatalf("failed to initialize SQLite file at %q; %v", dbpath, err)
     }
     defer db.Close()
+
+    ro_db, err := initializeReadOnlyDatabase(dbpath)
+    if err != nil {
+        log.Fatalf("failed to create read-only connections to %q; %v", dbpath, err)
+    }
+    defer ro_db.Close()
 
     tokenizer, err := newUnicodeTokenizer(false)
     if err != nil {
@@ -49,14 +55,14 @@ func main() {
     // Setting up the endpoints.
     http.HandleFunc("POST " + prefix + "/register/start", newRegisterStartHandler(verifier))
     http.HandleFunc("POST " + prefix + "/register/finish", newRegisterFinishHandler(db, verifier, tokenizer, timeout))
-    http.HandleFunc("POST " + prefix + "/deregister/start", newDeregisterStartHandler(db, verifier))
+    http.HandleFunc("POST " + prefix + "/deregister/start", newDeregisterStartHandler(ro_db, verifier))
     http.HandleFunc("POST " + prefix + "/deregister/finish", newDeregisterFinishHandler(db, verifier, timeout))
 
-    http.HandleFunc(prefix + "/registered", newListRegisteredDirectoriesHandler(db))
-    http.HandleFunc(prefix + "/query", newQueryHandler(db, tokenizer, wild_tokenizer, "/query"))
-    http.HandleFunc(prefix + "/retrieve/metadata", newRetrieveMetadataHandler(db))
-    http.HandleFunc(prefix + "/retrieve/file", newRetrieveFileHandler(db))
-    http.HandleFunc(prefix + "/list", newListFilesHandler(db))
+    http.HandleFunc(prefix + "/registered", newListRegisteredDirectoriesHandler(ro_db))
+    http.HandleFunc(prefix + "/query", newQueryHandler(ro_db, tokenizer, wild_tokenizer, "/query"))
+    http.HandleFunc(prefix + "/retrieve/metadata", newRetrieveMetadataHandler(ro_db))
+    http.HandleFunc(prefix + "/retrieve/file", newRetrieveFileHandler(ro_db))
+    http.HandleFunc(prefix + "/list", newListFilesHandler(ro_db))
 
     http.HandleFunc(prefix + "/", newDefaultHandler())
 
