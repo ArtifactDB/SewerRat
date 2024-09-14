@@ -90,6 +90,10 @@ func initializeDatabase(path string) (*sql.DB, error) {
 		return nil, fmt.Errorf("failed to create SQLite file at %q; %w", path, err)
 	}
 
+    // Make sure to eventually close all idle connections in the pool so that
+    // SQLite actually commits its WAL journal. 
+    db.SetConnMaxIdleTime(1 * time.Minute)
+
     if (!accessible) {
         err := func () error {
             atx, err := createTransaction(db)
