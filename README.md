@@ -382,6 +382,26 @@ On error, the exact response may either be `text/plain` content containing the e
 or `application/json` content encoding a JSON object with the `reason` for the error.
 If the path does not exist in the index, a standard 404 error is returned.
 
+### Identifying registered directories
+
+We can determine which directories are actually registered by making a GET request to the `/registered` endpoint of the SewerRat API.
+
+```shell
+curl -L ${SEWER_RAT_URL}/registered | jq
+```
+
+On success, this returns an array of objects containing:
+
+- `path`, a string containing the path to the registered directory.
+- `user`, the identity of the user who registered this directory.
+- `time`, the Unix time of the registration.
+- `names`, the base names of the metadata files to be indexed in this directory.
+
+This can be filtered on user by passing the `user=` query parameter in the request.
+
+On error, the response may either be `text/plain` content containing the error message directly,
+or `application/json` content encoding a JSON object with the `reason` for the error.
+
 ## Administration
 
 Clone this repository and build the binary.

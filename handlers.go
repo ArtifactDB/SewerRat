@@ -605,6 +605,34 @@ func newListFilesHandler(db *sql.DB) func(http.ResponseWriter, *http.Request) {
     }
 }
 
+func newListRegisteredDirectoriesHandler(db *sql.DB) func(http.ResponseWriter, *http.Request) {
+    return func(w http.ResponseWriter, r *http.Request) {
+        if configureCors(w, r) {
+            return
+        }
+        if r.Method != "GET" {
+            w.WriteHeader(http.StatusMethodNotAllowed)
+            return
+        }
+
+        query := listRegisteredDirectoriesQuery{}
+
+        params := r.URL.Query()
+        if params.Has("user") {
+            user := params.Get("user")
+            query.User = &user
+        }
+
+        output, err := listRegisteredDirectories(db, &query)
+        if err != nil {
+            dumpHttpErrorResponse(w, fmt.Errorf("failed to check registered directories; %w", err))
+            return
+        }
+
+        dumpJsonResponse(w, http.StatusOK, output)
+    }
+}
+
 /**********************************************************************/
 
 func newDefaultHandler() func(http.ResponseWriter, *http.Request) {

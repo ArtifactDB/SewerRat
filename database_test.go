@@ -10,6 +10,7 @@ import (
     "strings"
     "errors"
     "database/sql"
+    "encoding/json"
 )
 
 func TestInitializeDatabase(t *testing.T) {
@@ -1671,6 +1672,91 @@ func TestRetrievePath(t *testing.T) {
         }
         if res != nil {
             t.Fatal("should not have matched anything")
+        }
+    })
+}
+
+func TestListRegisteredDirectories(t *testing.T) {
+    tmp, err := os.MkdirTemp("", "")
+    if err != nil {
+        t.Fatalf(err.Error())
+    }
+    defer os.RemoveAll(tmp)
+
+    dbpath := filepath.Join(tmp, "db.sqlite3")
+    dbconn, err := initializeDatabase(dbpath)
+    if err != nil {
+        t.Fatalf(err.Error())
+    }
+    defer dbconn.Close()
+
+    tokr, err := newUnicodeTokenizer(false)
+    if err != nil {
+        t.Fatalf(err.Error())
+    }
+
+    // Mocking up some contents.
+    for _, name := range []string{ "foo", "bar" } {
+        to_add := filepath.Join(tmp, name)
+        err = mockDirectory(to_add)
+        if err != nil {
+            t.Fatalf(err.Error())
+        }
+
+        comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, name + "_user", tokr)
+        if err != nil {
+            t.Fatalf(err.Error())
+        }
+        if len(comments) > 0 {
+            t.Fatalf("unexpected comments from the directory addition %v", comments)
+        }
+    }
+
+    t.Run("basic", func(t *testing.T) {
+        query := listRegisteredDirectoriesQuery{}
+        out, err := listRegisteredDirectories(dbconn, &query)
+        if err != nil {
+            t.Fatal(err)
+        }
+        if len(out) != 2 {
+            t.Fatal("should have found two matching paths")
+        }
+
+        for i := 0; i < 2; i++ {
+            name := "foo"
+            if i == 1 {
+                name = "bar"
+            }
+
+            if out[i].User != name + "_user" || filepath.Base(out[i].Path) != name || out[i].Time == 0 {
+                t.Fatalf("unexpected entry for path %d; %v", i, out[i])
+            }
+
+            var payload []string
+            err = json.Unmarshal(out[0].Names, &payload)
+            if err != nil {
+                t.Fatalf("failed to unmashal names; %v", string(out[0].Names))
+            }
+
+            if len(payload) != 2 || payload[0] != "metadata.json" || payload[1] != "other.json" {
+                t.Fatalf("unexpected value for names; %v", payload)
+            }
+        }
+    })
+
+    t.Run("filtered on user", func(t *testing.T) {
+        query := listRegisteredDirectoriesQuery{}
+        desired := "bar_user"
+        query.User = &desired
+        out, err := listRegisteredDirectories(dbconn, &query)
+        if err != nil {
+            t.Fatal(err)
+        }
+        if len(out) != 1 {
+            t.Fatal("should have found one matching path")
+        }
+        if out[0].User != desired {
+            t.Fatalf("unexpected entry %v", out[0])
         }
     })
 }

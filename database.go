@@ -6,6 +6,7 @@ import (
     "time"
     "sync"
     "errors"
+    "strings"
     "encoding/json"
     "path/filepath"
     "io/fs"
@@ -742,6 +743,52 @@ func retrievePath(db * sql.DB, path string, include_metadata bool) (*queryResult
 }
 
 /**********************************************************************/
+
+type listRegisteredDirectoriesQuery struct {
+    User *string `json:"user"`
+}
+
+type listRegisteredDirectoriesResult struct {
+    Path string `json:"path"`
+    User string `json:"user"`
+    Time int64 `json:"time"`
+    Names json.RawMessage `json:"names"`
+}
+
+func listRegisteredDirectories(db * sql.DB, query *listRegisteredDirectoriesQuery) ([]listRegisteredDirectoriesResult, error) {
+    q := "SELECT path, user, time, json_extract(names, '$') FROM dirs"
+
+    filters := []string{}
+    parameters := []interface{}{}
+    if query.User != nil {
+        filters = append(filters, "user == ?")
+        parameters = append(parameters, *(query.User))
+    }
+
+    if len(filters) > 0 {
+        q = q + " WHERE " + strings.Join(filters, " AND ")
+    }
+
+    rows, err := db.Query(q, parameters...)
+    if err != nil {
+        return nil, fmt.Errorf("failed to list registered directories; %w", err)
+    }
+    defer rows.Close()
+
+    output := []listRegisteredDirectoriesResult{}
+    for rows.Next() {
+        current := listRegisteredDirectoriesResult{}
+        var names string
+        err := rows.Scan(&(current.Path), &(current.User), &(current.Time), &names)
+        current.Names = []byte(names)
+        if err != nil {
+            return nil, fmt.Errorf("failed to traverse rows of the 'dir' table; %w", err)
+        }
+        output = append(output, current)
+    }
+
+    return output, nil
+}
 
 func isDirectoryRegistered(db * sql.DB, path string) (bool, error) {
     collected := []interface{}{}

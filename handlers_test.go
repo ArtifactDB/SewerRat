@@ -1201,3 +1201,107 @@ func TestListFilesHandler(t *testing.T) {
         }
     })
 }
+
+func TestListRegisteredDirectoriesHandler(t *testing.T) {
+    tmp, err := os.MkdirTemp("", "")
+    if err != nil {
+        t.Fatalf(err.Error())
+    }
+    defer os.RemoveAll(tmp)
+
+    dbpath := filepath.Join(tmp, "db.sqlite3")
+    dbconn, err := initializeDatabase(dbpath)
+    if err != nil {
+        t.Fatalf(err.Error())
+    }
+    defer dbconn.Close()
+
+    tokr, err := newUnicodeTokenizer(false)
+    if err != nil {
+        t.Fatalf(err.Error())
+    }
+
+    for _, name := range []string{ "akari", "ai", "alice" } {
+        to_add := filepath.Join(tmp, "to_add_" + name)
+        err = mockDirectory(to_add)
+        if err != nil {
+            t.Fatalf(err.Error())
+        }
+
+        comments, err := addNewDirectory(dbconn, to_add, []string{"metadata.json"}, name, tokr)
+        if err != nil {
+            t.Fatal(err)
+        }
+        if len(comments) != 0 {
+            t.Fatal("no comments should be present")
+        }
+    }
+
+    handler := http.HandlerFunc(newListRegisteredDirectoriesHandler(dbconn))
+
+    t.Run("basic", func (t *testing.T) {
+        req, err := http.NewRequest("GET", "/registered", nil)
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        rr := httptest.NewRecorder()
+        handler.ServeHTTP(rr, req)
+        if rr.Code != http.StatusOK {
+            t.Fatalf("should have succeeded (got %d)", rr.Code)
+        }
+
+        type lrdResult struct {
+            Path string
+            User string
+            Time int64
+            Names []string
+        }
+
+        r := []lrdResult{}
+        dec := json.NewDecoder(rr.Body)
+        err = dec.Decode(&r)
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        if len(r) != 3 || r[0].User != "akari" || r[1].User != "ai" || r[2].User != "alice" {
+            t.Fatalf("unexpected listing results for the users %q", r)
+        }
+
+        if filepath.Base(r[0].Path) != "to_add_akari" || r[0].Time == 0 || r[0].Names[0] != "metadata.json" {
+            t.Fatalf("unexpected listing results for the first entry %q", r)
+        }
+    })
+
+    t.Run("filtered by user", func (t *testing.T) {
+        req, err := http.NewRequest("GET", "/registered?user=alice", nil)
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        rr := httptest.NewRecorder()
+        handler.ServeHTTP(rr, req)
+        if rr.Code != http.StatusOK {
+            t.Fatalf("should have succeeded (got %d)", rr.Code)
+        }
+
+        type lrdResult struct {
+            Path string
+            User string
+            Time int64
+            Names []string
+        }
+
+        r := []lrdResult{}
+        dec := json.NewDecoder(rr.Body)
+        err = dec.Decode(&r)
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        if len(r) != 1 || r[0].User != "alice" || filepath.Base(r[0].Path) != "to_add_alice" || r[0].Time == 0 || r[0].Names[0] != "metadata.json" {
+            t.Fatalf("unexpected listing results %q", r)
+        }
+    })
+}
