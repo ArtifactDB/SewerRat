@@ -282,3 +282,64 @@ func TestListMetadataDot(t *testing.T) {
         }
     })
 }
+
+func TestListMetadataIgnored(t *testing.T) {
+    dir, err := os.MkdirTemp("", "")
+    if (err != nil) {
+        t.Fatalf("failed to create a temporary directory; %v", err)
+    }
+
+    path := filepath.Join(dir, "A.json")
+    err = os.WriteFile(path, []byte(""), 0644)
+    if err != nil {
+        t.Fatalf("failed to create a mock file; %v", err)
+    }
+
+    // Throwing in a hidden directory.
+    subdir := filepath.Join(dir, "super")
+    err = os.Mkdir(subdir, 0755)
+    if err != nil {
+        t.Fatalf("failed to create a temporary subdirectory; %v", err)
+    }
+
+    subpath1 := filepath.Join(subdir, "A.json")
+    err = os.WriteFile(subpath1, []byte(""), 0644)
+    if err != nil {
+        t.Fatalf("failed to create a mock file; %v", err)
+    }
+
+    t.Run("control", func(t *testing.T) {
+        found, fails, err := listMetadata(dir, []string{ "A.json" })
+        if err != nil {
+            t.Fatal(err)
+        }
+        if len(fails) > 0 {
+            t.Fatal("unexpected failures")
+        }
+        if len(found) != 2 {
+            t.Fatal("expected exactly two files")
+        }
+    })
+
+    err = os.WriteFile(filepath.Join(subdir, ".SewerRatignore"), []byte{}, 0644)
+    if err != nil {
+        t.Fatalf("failed to create the ignore file; %v", err)
+    }
+
+    t.Run("ignored", func(t *testing.T) {
+        found, fails, err := listMetadata(dir, []string{ "A.json" })
+        if err != nil {
+            t.Fatal(err)
+        }
+        if len(fails) > 0 {
+            t.Fatal("unexpected failures")
+        }
+        if len(found) != 1 {
+            t.Fatal("expected exactly one file")
+        }
+        _, ok := found[filepath.Join(dir, "A.json")]
+        if !ok {
+            t.Fatal("missing file")
+        }
+    })
+}

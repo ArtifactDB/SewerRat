@@ -6,6 +6,7 @@ import (
     "os"
     "path/filepath"
     "strings"
+    "errors"
 )
 
 func listFiles(dir string, recursive bool) ([]string, error) {
@@ -63,8 +64,13 @@ func listMetadata(dir string, base_names []string) (map[string]fs.FileInfo, []st
             base := filepath.Base(path)
             if strings.HasPrefix(base, ".") {
                 return fs.SkipDir
-            } else {
+            }
+
+            _, err := os.Lstat(filepath.Join(path, ".SewerRatignore"))
+            if err != nil && errors.Is(err, fs.ErrNotExist) {
                 return nil
+            } else {
+                return fs.SkipDir
             }
         }
 
