@@ -534,7 +534,7 @@ func newRetrieveFileHandler(db *sql.DB) func(http.ResponseWriter, *http.Request)
             return
         }
 
-        info, err := os.Lstat(path) // intential Lstat() to avoid unnecessary link following.
+        info, err := os.Stat(path)
         if err != nil {
             if errors.Is(err, os.ErrNotExist) {
                 err = newHttpError(http.StatusNotFound, errors.New("path does not exist"))

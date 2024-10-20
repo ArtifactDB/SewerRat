@@ -93,7 +93,7 @@ func listMetadata(dir string, base_names []string) (map[string]fs.FileInfo, []st
                 return fs.SkipDir
             }
 
-            _, err := os.Lstat(filepath.Join(path, ".SewerRatignore"))
+            _, err := os.Stat(filepath.Join(path, ".SewerRatignore"))
             if err != nil && errors.Is(err, fs.ErrNotExist) {
                 return nil
             } else {
@@ -114,6 +114,8 @@ func listMetadata(dir string, base_names []string) (map[string]fs.FileInfo, []st
             // our index, so that the index is updated when the target is changed
             // (rather than when the link itself is changed).
             info, err = os.Stat(path)
+
+            // We don't recurse into symlinked directories, though.
             if err == nil && info.IsDir() {
                 return nil
             }

@@ -84,7 +84,7 @@ func TestLoadMetadata(t *testing.T) {
             t.Fatalf("failed to create a symlink; %v", err)
         }
 
-        info, err := os.Lstat(path) // check that symlinks are correctly loaded.
+        info, err := os.Stat(path)
         if err != nil {
             t.Fatal(err)
         }
