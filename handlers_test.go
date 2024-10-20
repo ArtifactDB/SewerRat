@@ -237,7 +237,7 @@ func TestRegisterHandlers(t *testing.T) {
         }
     })
 
-    t.Run("register start failure", func(t *testing.T) {
+    t.Run("register start symlink", func(t *testing.T) {
         handler := http.HandlerFunc(newRegisterStartHandler(verifier))
 
         tmp, err := os.MkdirTemp("", "")
@@ -254,8 +254,8 @@ func TestRegisterHandlers(t *testing.T) {
         req := createJsonRequest("POST", "/register/start", map[string]interface{}{ "path": to_add2 }, t)
         rr := httptest.NewRecorder()
         handler.ServeHTTP(rr, req)
-        if rr.Code != http.StatusBadRequest {
-            t.Fatalf("registration of a symlink should have failed")
+        if rr.Code != http.StatusAccepted {
+            t.Fatalf("should have succeeded")
         }
     })
 

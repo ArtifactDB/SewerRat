@@ -123,18 +123,6 @@ func checkVerificationCode(path string, verifier *verificationRegistry, timeout 
 
 /**********************************************************************/
 
-func checkValidRegistrationPath(path string) error {
-    info, err := os.Lstat(path) // distinguish between directories and symlinks to one.
-    if err != nil {
-        return fmt.Errorf("failed to stat; %w", err)
-    } else if info.Mode() & fs.ModeSymlink != 0 {
-        return errors.New("path cannot be a symbolic link to a directory")
-    } else if !info.IsDir() {
-        return errors.New("path should be a directory")
-    }
-    return nil
-}
-
 func newRegisterStartHandler(verifier *verificationRegistry) func(http.ResponseWriter, *http.Request) {
     return func(w http.ResponseWriter, r *http.Request) {
         if r.Body == nil {
@@ -155,7 +143,7 @@ func newRegisterStartHandler(verifier *verificationRegistry) func(http.ResponseW
             return
         }
 
-        err = checkValidRegistrationPath(regpath)
+        err = verifyDirectory(regpath)
         if err != nil {
             dumpErrorResponse(w, http.StatusBadRequest, err.Error())
             return
@@ -195,7 +183,7 @@ func newRegisterFinishHandler(db *sql.DB, verifier *verificationRegistry, tokeni
             return
         }
 
-        err = checkValidRegistrationPath(regpath)
+        err = verifyDirectory(regpath)
         if err != nil {
             dumpHttpErrorResponse(w, err)
             return

@@ -7,25 +7,7 @@ import (
     "path/filepath"
     "strings"
     "errors"
-    "net/http"
 )
-
-func verifyDirectory(dir string) error {
-    info, err := os.Stat(dir)
-    if errors.Is(err, os.ErrNotExist) {
-        return newHttpError(http.StatusNotFound, fmt.Errorf("path %q does not exist", dir))
-    }
-
-    if err != nil {
-        return fmt.Errorf("failed to check %q; %w", dir, err)
-    }
-
-    if !info.IsDir() {
-        return newHttpError(http.StatusBadRequest, fmt.Errorf("%q is not a directory", dir))
-    }
-
-    return nil
-}
 
 func listFiles(dir string, recursive bool) ([]string, error) {
     err := verifyDirectory(dir)
