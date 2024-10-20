@@ -56,7 +56,8 @@ The caller is expected to verify that they have write access to the specified di
 
 Once this is done, we call the `/register/finish` endpoint with a JSON-encoded request body that contains the same directory path in `path`.
 The body may also contain `base`, an array of strings containing the names of the metadata files in the directory to be indexed.
-If `base` is not provided, only files named `metadata.json` will be indexed.
+If `base` is not provided and `path` has already been registered, the `base` associated with `path`'s prior registration is re-used;
+otherwise, if `path` was not previously registered, only files named `metadata.json` will be indexed.
 
 ```shell
 curl -X POST -L ${SEWER_RAT_URL}/register/finish \

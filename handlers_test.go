@@ -366,6 +366,76 @@ func TestRegisterHandlers(t *testing.T) {
             t.Fatalf("unexpected paths in the database %v", all_paths)
         }
     })
+
+    t.Run("register finish reuse names", func(t *testing.T) {
+        {
+            code := quickRegisterStart()
+            err := os.WriteFile(filepath.Join(to_add, code), []byte(""), 0644)
+            if err != nil {
+                t.Fatal(err)
+            }
+
+            handler := http.HandlerFunc(newRegisterFinishHandler(dbconn, verifier, tokr, 1))
+            rr := httptest.NewRecorder()
+            req := createJsonRequest("POST", "/register/finish", map[string]interface{}{ "path": to_add, "base": []string{ "alpha.json", "bravo.json" } }, t)
+            handler.ServeHTTP(rr, req)
+            if rr.Code != http.StatusOK {
+                t.Fatalf("should have succeeded")
+            }
+        }
+
+        // Re-registering with the same names.
+        {
+            code := quickRegisterStart()
+            err := os.WriteFile(filepath.Join(to_add, code), []byte(""), 0644)
+            if err != nil {
+                t.Fatal(err)
+            }
+
+            handler := http.HandlerFunc(newRegisterFinishHandler(dbconn, verifier, tokr, 1))
+            rr := httptest.NewRecorder()
+            req := createJsonRequest("POST", "/register/finish", map[string]interface{}{ "path": to_add }, t)
+            handler.ServeHTTP(rr, req)
+            if rr.Code != http.StatusOK {
+                t.Fatalf("should have succeeded")
+            }
+
+            all_paths, err := listDirs(dbconn)
+            if err != nil {
+                t.Fatal(err)
+            }
+            my_names, ok := all_paths[to_add]
+            if !ok || !equalStringArrays(my_names, []string{ "alpha.json", "bravo.json" }) {
+                t.Fatalf("unexpected paths in the database %v", my_names)
+            }
+        }
+
+        // Re-registering with different names, to check that it indeed gets overridden.
+        {
+            code := quickRegisterStart()
+            err := os.WriteFile(filepath.Join(to_add, code), []byte(""), 0644)
+            if err != nil {
+                t.Fatal(err)
+            }
+
+            handler := http.HandlerFunc(newRegisterFinishHandler(dbconn, verifier, tokr, 1))
+            rr := httptest.NewRecorder()
+            req := createJsonRequest("POST", "/register/finish", map[string]interface{}{ "path": to_add, "base": []string{ "metadata.json" } }, t)
+            handler.ServeHTTP(rr, req)
+            if rr.Code != http.StatusOK {
+                t.Fatalf("should have succeeded")
+            }
+
+            all_paths, err := listDirs(dbconn)
+            if err != nil {
+                t.Fatal(err)
+            }
+            my_names, ok := all_paths[to_add]
+            if !ok || !equalStringArrays(my_names, []string{ "metadata.json" }) {
+                t.Fatalf("unexpected paths in the database %v", my_names)
+            }
+        }
+    })
 }
 
 func TestDeregisterHandlers(t *testing.T) {

@@ -883,3 +883,26 @@ func isDirectoryRegistered(db * sql.DB, path string) (bool, error) {
     }
     return num > 0, nil
 }
+
+/**********************************************************************/
+
+func fetchRegisteredDirectoryNames(db *sql.DB, path string) ([]string, error) {
+    row := db.QueryRow("SELECT json_extract(names, '$') FROM dirs WHERE path = ?", path)
+    var names_as_str string
+    err := row.Scan(&names_as_str) 
+
+    if errors.Is(err, sql.ErrNoRows) {
+        return nil, nil
+    } else if err != nil {
+        return nil, fmt.Errorf("failed to extract existing names for %q; %w",  path, err)
+    }
+
+    output := []string{}
+    err = json.Unmarshal([]byte(names_as_str), &output)
+    if err != nil {
+        return nil, fmt.Errorf("failed to parse existing names for %q; %w",  path, err)
+    }
+
+    return output, nil
+}
+

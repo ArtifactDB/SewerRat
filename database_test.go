@@ -1946,3 +1946,47 @@ func TestIsDirectoryRegistered(t *testing.T) {
         }
     })
 }
+
+func TestFetchRegisteredDirectoryNames(t *testing.T) {
+    tmp, err := os.MkdirTemp("", "")
+    if err != nil {
+        t.Fatalf(err.Error())
+    }
+    defer os.RemoveAll(tmp)
+
+    dbpath := filepath.Join(tmp, "db.sqlite3")
+    dbconn, err := initializeDatabase(dbpath)
+    if err != nil {
+        t.Fatalf(err.Error())
+    }
+    defer dbconn.Close()
+
+    tokr, err := newUnicodeTokenizer(false)
+    if err != nil {
+        t.Fatalf(err.Error())
+    }
+
+    to_add := filepath.Join(tmp, "liella")
+    err = mockDirectory(to_add)
+    if err != nil {
+        t.Fatalf(err.Error())
+    }
+
+    comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "aaron", tokr)
+    if err != nil {
+        t.Fatalf(err.Error())
+    }
+    if len(comments) > 0 {
+        t.Fatalf("unexpected comments from the directory addition %v", comments)
+    }
+
+    out, err := fetchRegisteredDirectoryNames(dbconn, to_add)
+    if len(out) != 2 || out[0] != "metadata.json" || out[1] != "other.json" {
+        t.Fatalf("unexpected names for the registered directory")
+    }
+
+    out, err = fetchRegisteredDirectoryNames(dbconn, filepath.Join(tmp, "margarete"))
+    if len(out) != 0 {
+        t.Fatalf("unexpected names for a non-registered directory")
+    }
+}

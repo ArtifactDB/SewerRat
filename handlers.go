@@ -215,7 +215,16 @@ func newRegisterFinishHandler(db *sql.DB, verifier *verificationRegistry, tokeni
                 return
             }
         } else {
-            allowed = []string{ "metadata.json" }
+            existing, err := fetchRegisteredDirectoryNames(db, output.Path)
+            if err != nil {
+                dumpHttpErrorResponse(w, err)
+                return
+            }
+            if existing == nil {
+                allowed = []string{ "metadata.json" }
+            } else {
+                allowed = existing
+            }
         }
 
         code_info, err := checkVerificationCode(regpath, verifier, timeout)
