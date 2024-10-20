@@ -1304,4 +1304,70 @@ func TestListRegisteredDirectoriesHandler(t *testing.T) {
             t.Fatalf("unexpected listing results %q", r)
         }
     })
+
+    t.Run("filtered by contains_path", func (t *testing.T) {
+        inside := filepath.Join(tmp, "to_add_akari", "stuff")
+        encoded := url.QueryEscape(inside)
+        req, err := http.NewRequest("GET", "/registered?contains_path=" + encoded, nil)
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        rr := httptest.NewRecorder()
+        handler.ServeHTTP(rr, req)
+        if rr.Code != http.StatusOK {
+            t.Fatalf("should have succeeded (got %d)", rr.Code)
+        }
+
+        type lrdResult struct {
+            Path string
+            User string
+            Time int64
+            Names []string
+        }
+
+        r := []lrdResult{}
+        dec := json.NewDecoder(rr.Body)
+        err = dec.Decode(&r)
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        if len(r) != 1 || r[0].User != "akari" {
+            t.Fatalf("unexpected listing results %q", r)
+        }
+    })
+
+    t.Run("filtered by has_prefix", func (t *testing.T) {
+        encoded := url.QueryEscape(tmp)
+        req, err := http.NewRequest("GET", "/registered?has_prefix=" + encoded, nil)
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        rr := httptest.NewRecorder()
+        handler.ServeHTTP(rr, req)
+        if rr.Code != http.StatusOK {
+            t.Fatalf("should have succeeded (got %d)", rr.Code)
+        }
+
+        type lrdResult struct {
+            Path string
+            User string
+            Time int64
+            Names []string
+        }
+
+        r := []lrdResult{}
+        dec := json.NewDecoder(rr.Body)
+        err = dec.Decode(&r)
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        if len(r) != 3 {
+            t.Fatalf("unexpected listing results %q", r)
+        }
+    })
+
 }

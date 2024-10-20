@@ -398,7 +398,11 @@ On success, this returns an array of objects containing:
 - `time`, the Unix time of the registration.
 - `names`, the base names of the metadata files to be indexed in this directory.
 
-This can be filtered on user by passing the `user=` query parameter in the request.
+This can be filtered by passing additional query parameters:
+
+- `user=`, which filters on the `user`.
+- `contains_path=`, which filters for `path` that contain (i.e., are parents of) the specified path.
+- `path_prefix=`, which filters for `path` that start with the specified prefix.
 
 On error, the response may either be `text/plain` content containing the error message directly,
 or `application/json` content encoding a JSON object with the `reason` for the error.

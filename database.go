@@ -756,6 +756,8 @@ func retrievePath(db * sql.DB, path string, include_metadata bool) (*queryResult
 
 type listRegisteredDirectoriesQuery struct {
     User *string `json:"user"`
+    ContainsPath *string `json:"contains_path"`
+    PathPrefix *string `json:"path_prefix"`
 }
 
 type listRegisteredDirectoriesResult struct {
@@ -773,6 +775,24 @@ func listRegisteredDirectories(db * sql.DB, query *listRegisteredDirectoriesQuer
     if query.User != nil {
         filters = append(filters, "user == ?")
         parameters = append(parameters, *(query.User))
+    }
+
+    if query.ContainsPath != nil {
+        collected, err := stripPaths(*(query.ContainsPath))
+        if err != nil {
+            return nil, err
+        }
+        query_clause := "?"
+        for i := 1; i < len(collected); i++ {
+            query_clause += ", ?"
+        }
+        filters = append(filters, "path IN (" + query_clause + ")")
+        parameters = append(parameters, collected...)
+    }
+
+    if query.PathPrefix != nil {
+        filters = append(filters, "path LIKE ?")
+        parameters = append(parameters, *(query.PathPrefix) + "%")
     }
 
     if len(filters) > 0 {
@@ -800,18 +820,17 @@ func listRegisteredDirectories(db * sql.DB, query *listRegisteredDirectoriesQuer
     return output, nil
 }
 
-func isDirectoryRegistered(db * sql.DB, path string) (bool, error) {
+func stripPaths(path string) ([]interface{}, error) {
     collected := []interface{}{}
     for {
         info, err := os.Lstat(path) // Lstat() is deliberate as we need to distinguish symlinks, see below.
+        if errors.Is(err, os.ErrNotExist) {
+            return nil, newHttpError(http.StatusNotFound, errors.New("path at does not exist"))
+        } else if err != nil {
+            return nil, fmt.Errorf("inaccessible path at %q; %v", path, err)
+        }
 
-        if err != nil {
-            if errors.Is(err, os.ErrNotExist) {
-                return false, newHttpError(http.StatusNotFound, errors.New("path does not exist"))
-            } else {
-                return false, fmt.Errorf("inaccessible path; %v", err)
-            }
-        } else if info.Mode() & fs.ModeSymlink != 0 {
+        if info.Mode() & fs.ModeSymlink != 0 {
             // Symlinks to directories within a registered directory are not
             // followed during registration or updates. This allows us to quit
             // the loop and search on the current 'collected'; if any of these
@@ -820,8 +839,10 @@ func isDirectoryRegistered(db * sql.DB, path string) (bool, error) {
             // fine as the symlink would have been inside the registered
             // directory of subsequent additions to 'collected'.
             break
-        } else if !info.IsDir() {
-            return false, newHttpError(http.StatusBadRequest, errors.New("path should refer to a directory"))
+        }
+
+        if !info.IsDir() {
+            return nil, newHttpError(http.StatusBadRequest, errors.New("path should refer to a directory"))
         }
 
         // Incidentally, note that there's no need to defend against '..', as
@@ -835,6 +856,15 @@ func isDirectoryRegistered(db * sql.DB, path string) (bool, error) {
         path = newpath
     }
 
+    return collected, nil
+}
+
+func isDirectoryRegistered(db * sql.DB, path string) (bool, error) {
+    collected, err := stripPaths(path)
+    if err != nil {
+        return false, err
+    }
+
     if len(collected) == 0 {
         return false, nil
     }
@@ -846,7 +876,7 @@ func isDirectoryRegistered(db * sql.DB, path string) (bool, error) {
     q := fmt.Sprintf("SELECT COUNT(1) FROM dirs WHERE path IN (%s)", query)
     row := db.QueryRow(q, collected...)
     var num int
-    err := row.Scan(&num)
+    err = row.Scan(&num)
 
     if err != nil {
         return false, err

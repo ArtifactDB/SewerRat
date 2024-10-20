@@ -1769,6 +1769,57 @@ func TestListRegisteredDirectories(t *testing.T) {
             t.Fatal("should have found no matching paths")
         }
     })
+
+    t.Run("filtered on contains_path", func(t *testing.T) {
+        query := listRegisteredDirectoriesQuery{}
+
+        desired := filepath.Join(tmp, "bar")
+        query.ContainsPath = &desired
+
+        out, err := listRegisteredDirectories(dbconn, &query)
+        if err != nil {
+            t.Fatal(err)
+        }
+        if len(out) != 1 {
+            t.Fatal("should have found one matching path")
+        }
+        if out[0].Path != desired {
+            t.Fatalf("unexpected entry %v", out[0])
+        }
+
+        desired = filepath.Join(filepath.Dir(tmp))
+        query.ContainsPath = &desired
+        out, err = listRegisteredDirectories(dbconn, &query)
+        if err != nil {
+            t.Fatal(err)
+        }
+        if len(out) != 0 {
+            t.Fatal("should have found no matching paths")
+        }
+    })
+
+    t.Run("filtered on has_prefix", func(t *testing.T) {
+        query := listRegisteredDirectoriesQuery{}
+        query.PathPrefix = &tmp
+
+        out, err := listRegisteredDirectories(dbconn, &query)
+        if err != nil {
+            t.Fatal(err)
+        }
+        if len(out) != 2 {
+            t.Fatal("should have found two matching paths")
+        }
+
+        absent := tmp + "_asdasd"
+        query.PathPrefix = &absent
+        out, err = listRegisteredDirectories(dbconn, &query)
+        if err != nil {
+            t.Fatal(err)
+        }
+        if len(out) != 0 {
+            t.Fatal("should have found no matching paths")
+        }
+    })
 }
 
 func TestIsDirectoryRegistered(t *testing.T) {

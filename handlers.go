@@ -436,17 +436,20 @@ func newQueryHandler(db *sql.DB, tokenizer *unicodeTokenizer, wild_tokenizer *un
 
 /**********************************************************************/
 
+func sanitizePath(path string) (string, error) {
+    path, err := url.QueryUnescape(path)
+    if err != nil {
+        return "", fmt.Errorf("path is not properly URL-encoded; %w", err)
+    }
+    return filepath.Clean(path), nil
+}
+
 func getRetrievePath(params url.Values) (string, error) {
     if !params.Has("path") {
         return "", errors.New("expected a 'path' query parameter")
     }
-
-    path, err := url.QueryUnescape(params.Get("path"))
-    if err != nil {
-        return "", fmt.Errorf("path is not properly URL-encoded; %w", err)
-    }
-
-    return filepath.Clean(path), nil
+    path, err := sanitizePath(params.Get("path"))
+    return path, err
 }
 
 func newRetrieveMetadataHandler(db *sql.DB) func(http.ResponseWriter, *http.Request) {
@@ -621,6 +624,22 @@ func newListRegisteredDirectoriesHandler(db *sql.DB) func(http.ResponseWriter, *
         if params.Has("user") {
             user := params.Get("user")
             query.User = &user
+        }
+        if params.Has("contains_path") {
+            path, err := sanitizePath(params.Get("contains_path"))
+            if err != nil {
+                dumpHttpErrorResponse(w, newHttpError(http.StatusBadRequest, err))
+                return
+            }
+            query.ContainsPath = &path
+        }
+        if params.Has("path_prefix") {
+            path, err := sanitizePath(params.Get("path_prefix"))
+            if err != nil {
+                dumpHttpErrorResponse(w, newHttpError(http.StatusBadRequest, err))
+                return
+            }
+            query.PathPrefix = &path
         }
 
         output, err := listRegisteredDirectories(db, &query)
