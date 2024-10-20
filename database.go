@@ -825,7 +825,7 @@ func stripPaths(path string) ([]interface{}, error) {
     for {
         info, err := os.Lstat(path) // Lstat() is deliberate as we need to distinguish symlinks, see below.
         if errors.Is(err, os.ErrNotExist) {
-            return nil, newHttpError(http.StatusNotFound, errors.New("path at does not exist"))
+            return nil, newHttpError(http.StatusNotFound, fmt.Errorf("path at %q does not exist", path))
         } else if err != nil {
             return nil, fmt.Errorf("inaccessible path at %q; %v", path, err)
         }
