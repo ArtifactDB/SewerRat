@@ -168,17 +168,14 @@ func TestListMetadata(t *testing.T) {
     })
 
     t.Run("walk failure", func(t *testing.T) {
-        found, fails, err := listMetadata("missing", []string{ "A.json", "B.json" })
-        if err != nil {
-            t.Fatal(err)
+        _, _, err := listMetadata("missing", []string{ "A.json", "B.json" })
+        if err == nil || !strings.Contains(err.Error(), "does not exist") {
+            t.Fatalf("unexpected lack of failure; %v", err)
         }
 
-        if len(fails) != 1 || !strings.Contains(fails[0], "failed to walk") {
-            t.Fatalf("expected a walking failure %v", fails)
-        }
-
-        if len(found) != 0 {
-            t.Fatal("unexpected file")
+        _, _, err = listMetadata(filepath.Join(dir, "A.json"), []string{ "A.json", "B.json" })
+        if err == nil || !strings.Contains(err.Error(), "not a directory") {
+            t.Fatalf("unexpected lack of failure; %v", err)
         }
     })
 }

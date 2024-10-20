@@ -344,8 +344,6 @@ curl -L ${SEWER_RAT_URL}/retrieve/file -G --data-urlencode "path=${path}"
 
 On success, the contents of the target file are returned with a content type guessed from its name.
 If `path` is a symbolic link to a file, the contents of the target file will be returned by this endpoint.
-However, if a registered directory contains a symbolic link to a directory, the contents of the target directory cannot be retrieved if `path` needs to traverse that symbolic link.
-This is consistent with the registration policy whereby symbolic links to directories are not recursively traversed during indexing.
 
 On error, the exact response may either be `text/plain` content containing the error message directly,
 or `application/json` content encoding a JSON object with the `reason` for the error.

@@ -10,7 +10,6 @@ import (
     "encoding/json"
     "path/filepath"
     "io/fs"
-    "net/http"
     "database/sql"
     "strconv"
     "context"
@@ -778,7 +777,7 @@ func listRegisteredDirectories(db * sql.DB, query *listRegisteredDirectoriesQuer
     }
 
     if query.ContainsPath != nil {
-        collected, err := stripPaths(*(query.ContainsPath))
+        collected, err := getParentPaths(*(query.ContainsPath))
         if err != nil {
             return nil, err
         }
@@ -820,35 +819,12 @@ func listRegisteredDirectories(db * sql.DB, query *listRegisteredDirectoriesQuer
     return output, nil
 }
 
-func stripPaths(path string) ([]interface{}, error) {
+func getParentPaths(path string) ([]interface{}, error) {
     collected := []interface{}{}
     for {
-        info, err := os.Lstat(path) // Lstat() is deliberate as we need to distinguish symlinks, see below.
-        if errors.Is(err, os.ErrNotExist) {
-            return nil, newHttpError(http.StatusNotFound, fmt.Errorf("path at %q does not exist", path))
-        } else if err != nil {
-            return nil, fmt.Errorf("inaccessible path at %q; %v", path, err)
-        }
-
-        if info.Mode() & fs.ModeSymlink != 0 {
-            // Symlinks to directories within a registered directory are not
-            // followed during registration or updates. This allows us to quit
-            // the loop and search on the current 'collected'; if any of these
-            // are registered, all is fine as the symlink occurs in the
-            // parents. Had we kept on taking the dirnames, all would NOT be
-            // fine as the symlink would have been inside the registered
-            // directory of subsequent additions to 'collected'.
-            break
-        }
-
-        if !info.IsDir() {
-            return nil, newHttpError(http.StatusBadRequest, errors.New("path should refer to a directory"))
-        }
-
-        // Incidentally, note that there's no need to defend against '..', as
+        // Note that there's no need to defend against '..', as
         // it is assumed that all paths are Cleaned before this point.
         collected = append(collected, path)
-
         newpath := filepath.Dir(path)
         if newpath == path {
             break
@@ -860,7 +836,7 @@ func stripPaths(path string) ([]interface{}, error) {
 }
 
 func isDirectoryRegistered(db * sql.DB, path string) (bool, error) {
-    collected, err := stripPaths(path)
+    collected, err := getParentPaths(path)
     if err != nil {
         return false, err
     }

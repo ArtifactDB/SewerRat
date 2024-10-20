@@ -1882,67 +1882,13 @@ func TestIsDirectoryRegistered(t *testing.T) {
         }
     })
 
-    t.Run("failure", func(t *testing.T) {
-        // Directory is absent.
-        _, err := isDirectoryRegistered(dbconn, to_add + "_missing")
-        if err == nil || !strings.Contains(err.Error(), "not exist") {
-            t.Fatal(err)
-        }
-
-        // Directory is present but not registered.
+    t.Run("absent", func(t *testing.T) {
         found, err := isDirectoryRegistered(dbconn, tmp)
         if err != nil {
             t.Fatal(err)
         }
         if found {
             t.Fatal("should not have found a matching path")
-        }
-
-        // Referring to a file.
-        _, err = isDirectoryRegistered(dbconn, filepath.Join(to_add, "metadata.json"))
-        if err == nil || !strings.Contains(err.Error(), "refer to a directory") {
-            t.Fatal(err)
-        }
-    })
-
-    // Link within the registration directory should be ignored, but link to a
-    // parent of the registration directory should be fine.
-    slink := filepath.Join(to_add, "stuff2")
-    err = os.Symlink(filepath.Join(to_add, "stuff"), slink)
-    if err != nil {
-        t.Fatal(err)
-    }
-
-    linkparent := filepath.Join(tmp, "redirect")
-    err = os.Symlink(to_add, linkparent)
-    if err != nil {
-        t.Fatal(err)
-    }
-
-    to_add2 := filepath.Join(linkparent, "stuff")
-    comments, err = addNewDirectory(dbconn, to_add2, []string{ "metadata.json", "other.json" }, "myself", tokr)
-    if err != nil {
-        t.Fatal(err)
-    }
-    if len(comments) > 0 {
-        t.Fatalf("unexpected comments from the directory addition %v", comments)
-    }
-
-    t.Run("symlink checks", func(t *testing.T) {
-        found, err := isDirectoryRegistered(dbconn, slink)
-        if err != nil {
-            t.Fatal(err)
-        }
-        if found {
-            t.Fatal("should not have found a matching path")
-        }
-
-        found, err = isDirectoryRegistered(dbconn, to_add2)
-        if err != nil {
-            t.Fatal(err)
-        }
-        if !found {
-            t.Fatal("should have found a matching path")
         }
     })
 }

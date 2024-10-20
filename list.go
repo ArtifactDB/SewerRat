@@ -7,12 +7,34 @@ import (
     "path/filepath"
     "strings"
     "errors"
+    "net/http"
 )
 
-func listFiles(dir string, recursive bool) ([]string, error) {
-    to_report := []string{}
+func verifyDirectory(dir string) error {
+    info, err := os.Stat(dir)
+    if errors.Is(err, os.ErrNotExist) {
+        return newHttpError(http.StatusNotFound, fmt.Errorf("path %q does not exist", dir))
+    }
 
-    err := filepath.WalkDir(dir, func(path string, info fs.DirEntry, err error) error {
+    if err != nil {
+        return fmt.Errorf("failed to check %q; %w", dir, err)
+    }
+
+    if !info.IsDir() {
+        return newHttpError(http.StatusBadRequest, fmt.Errorf("%q is not a directory", dir))
+    }
+
+    return nil
+}
+
+func listFiles(dir string, recursive bool) ([]string, error) {
+    err := verifyDirectory(dir)
+    if err != nil {
+        return nil, err
+    }
+
+    to_report := []string{}
+    err = filepath.WalkDir(dir, func(path string, info fs.DirEntry, err error) error {
         if err != nil {
             return err
         }
@@ -46,6 +68,11 @@ func listFiles(dir string, recursive bool) ([]string, error) {
 }
 
 func listMetadata(dir string, base_names []string) (map[string]fs.FileInfo, []string, error) {
+    err := verifyDirectory(dir)
+    if err != nil {
+        return nil, nil, err
+    }
+
     curcontents := map[string]fs.FileInfo{}
     curfailures := []string{}
     curnames := map[string]bool{}
@@ -54,7 +81,7 @@ func listMetadata(dir string, base_names []string) (map[string]fs.FileInfo, []st
     }
 
     // Just skip any directories that we can't access, no need to check the error.
-    err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+    err = filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
         if err != nil {
             curfailures = append(curfailures, fmt.Sprintf("failed to walk %q; %v", path, err))
             return nil
