@@ -6,6 +6,7 @@ import (
     "fmt"
     "encoding/json"
     "os"
+    "bytes"
 )
 
 type loadedMetadata struct {
@@ -27,7 +28,9 @@ func loadMetadata(f string, info fs.FileInfo) *loadedMetadata {
     }
 
     var vals interface{}
-    err = json.Unmarshal(raw, &vals)
+    dec := json.NewDecoder(bytes.NewReader(raw))
+    dec.UseNumber() // preserve numbers as strings for tokenization.
+    err = dec.Decode(&vals)
     if err != nil {
         output.Failure = fmt.Errorf("failed to parse %q; %w", f, err)
         return output
