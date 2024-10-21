@@ -1254,6 +1254,42 @@ func TestQueryTokens(t *testing.T) {
         }
     })
 
+    t.Run("search on numbers", func(t *testing.T) {
+        res, err := queryTokens(dbconn, &searchClause{ Type: "text", Text: "5", Field: "bar.cost" }, nil, 0)
+        if err != nil {
+            t.Fatalf(err.Error())
+        }
+        if !equalPathArrays(extractSortedPaths(res), []string{ "metadata.json" }, to_add) {
+            t.Fatalf("search results are not as expected %v", res)
+        }
+
+        res, err = queryTokens(dbconn, &searchClause{ Type: "text", Text: "10495" }, nil, 0)
+        if err != nil {
+            t.Fatalf(err.Error())
+        }
+        if !equalPathArrays(extractSortedPaths(res), []string{ "stuff/metadata.json" }, to_add) {
+            t.Fatalf("search results are not as expected %v", res)
+        }
+    })
+
+    t.Run("search on booleans", func(t *testing.T) {
+        res, err := queryTokens(dbconn, &searchClause{ Type: "text", Text: "false" }, nil, 0)
+        if err != nil {
+            t.Fatalf(err.Error())
+        }
+        if !equalPathArrays(extractSortedPaths(res), []string{ "whee/other.json" }, to_add) {
+            t.Fatalf("search results are not as expected %v", res)
+        }
+
+        res, err = queryTokens(dbconn, &searchClause{ Type: "text", Text: "true", Field: "category.iyashikei" }, nil, 0)
+        if err != nil {
+            t.Fatalf(err.Error())
+        }
+        if !equalPathArrays(extractSortedPaths(res), []string{ "whee/other.json" }, to_add) {
+            t.Fatalf("search results are not as expected %v", res)
+        }
+    })
+
     t.Run("not (simple)", func(t *testing.T) {
         res, err := queryTokens(
             dbconn, 

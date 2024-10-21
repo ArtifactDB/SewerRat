@@ -5,6 +5,7 @@ import (
     "os"
     "path/filepath"
     "time"
+    "encoding/json"
     "strings"
 )
 
@@ -45,8 +46,8 @@ func TestLoadMetadata(t *testing.T) {
             t.Fatal("unexpected parsed object")
         }
 
-        target, ok := found.(float64)
-        if !ok || target != 1 {
+        target, ok := found.(json.Number)
+        if !ok || target != "1" {
             t.Fatal("unexpected parsed object")
         }
     })
