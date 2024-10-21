@@ -74,6 +74,12 @@ It will identify all metadata files with the specified `base` names (i.e., `A.js
 SewerRat will skip any problematic files that cannot be indexed due to, e.g., invalid JSON, insufficient permissions.
 The causes of any failures are reported in the `comments` array in the HTTP response.
 
+On success, the metadata files in the specified directory will be incorporated into the SQLite index.
+We can then [search on the contents of these files](#querying-the-index) or [fetch the contents of any file](#fetching-file-contents) in the registered directory.
+
+### Indexing in detail
+
+As mentioned above, SewerRat will recurse through the specified directory to find metadata files with the listed `base` names.
 Subdirectories with names starting with `.` are skipped during the recursive walk, so any metadata files therein will be ignored.
 This is generally a sensible choice as these directories usually do not contain any interesting (scientific) information. 
 If any such subdirectory is relevant, a user can force SewerRat to include it in the index by passing its path directly as `path`.
@@ -86,8 +92,21 @@ All file information (e.g., modification time, owner) is taken from the link tar
 SewerRat effectively treats the symbolic link as a proxy for the target file.
 If the directory contains symbolic links to other directories, these will not be recursively traversed.
 
-On success, the metadata files in the specified directory will be incorporated into the SQLite index.
-We can then [search on the contents of these files](#querying-the-index) or [fetch the contents of any file](#fetching-file-contents) in the registered directory.
+Each identified metadata document is parsed as JSON and converted into tokens.
+For strings, we use an adaptation of the [FTS5 Unicode61 tokenizer](https://www.sqlite.org/fts5.html#unicode61_tokenizer) to break each string into tokens,
+i.e., strings are split into tokens at any character that is not a Unicode letter/number or a dash.
+For numbers and booleans, the string representation of the value is tokenized.
+All tokens are stored in the index, associated with the JSON object properties in which it was found,
+e.g., the value `"Chris"` is associated with the properties `"b.c"` in the document below.
+
+```json
+{
+    "a": "Aaron",
+    "b": {
+        "c": "Chris"
+    }
+}
+```
 
 ### Automatic updates
 
@@ -176,10 +195,8 @@ The nature of the search depends on the value of `type`:
 - For `"text"`, SewerRat searches on the text (i.e., any string property) in the metadata file.
   The search clause should contain the following additional properties:
   - `text`, the search string.
-    We use an adaptation of the [FTS5 Unicode61 tokenizer](https://www.sqlite.org/fts5.html#unicode61_tokenizer) to process all strings in the metadata files, 
-    i.e., strings are split into tokens at any character that is not a Unicode letter/number or a dash.
-    The same process is applied to the string in `text`.
-    All tokens in `text` must match to a token in the metadata file in order for that file to be considered a match.
+    The tokenization process described [above](#indexing-in-detail) is applied to this string to create tokens.
+    All tokens in `text` must be present in the metadata file in order for that file to be considered a match.
   - (optional) `field`, the name of the metadata property to be matched.
     Matches to tokens are only considered within the named property.
     Properties of nested objects can be specified via `.`-delimited names, e.g., `authors.first`.
