@@ -251,6 +251,36 @@ func tokenizeMetadata(parsed interface{}, path string, pid int64, field string, 
             failures = append(failures, tokfails...)
         }
 
+    case json.Number: 
+        // Just treat this as a string for simplicity. This should be fine for integers,
+        // but it does result in somewhat unnecessary tokenization for floating-point
+        // numbers. There's no real way around it, though, as the queries are always
+        // tokenized, so you wouldn't be able to find an exact match anyway.
+        tokens, err := tokenizer.Tokenize(string(v))
+        if err != nil {
+            return []string{ fmt.Sprintf("failed to tokenize %q in %q; %v", v, path, err) }
+        }
+
+        for _, t := range tokens {
+            _, err := prepped.Token.Exec(t)
+            if err != nil {
+                failures = append(failures, fmt.Sprintf("failed to insert token %q from %q; %v", t, path, err))
+                continue
+            }
+
+            _, err = prepped.Field.Exec(field)
+            if err != nil {
+                failures = append(failures, fmt.Sprintf("failed to insert field %q from %q; %v", field, path, err))
+                continue
+            }
+
+            _, err = prepped.Link.Exec(pid, field, t)
+            if err != nil {
+                failures = append(failures, fmt.Sprintf("failed to insert link for field %q to token %q from %q; %v", field, t, path, err))
+                continue
+            }
+        }
+
     case string:
         tokens, err := tokenizer.Tokenize(v)
         if err != nil {
@@ -275,6 +305,32 @@ func tokenizeMetadata(parsed interface{}, path string, pid int64, field string, 
                 failures = append(failures, fmt.Sprintf("failed to insert link for field %q to token %q from %q; %v", field, t, path, err))
                 continue
             }
+        }
+
+    case bool:
+        var t string
+        if v {
+            t = "true"
+        } else {
+            t = "false"
+        }
+
+        _, err := prepped.Token.Exec(t)
+        if err != nil {
+            failures = append(failures, fmt.Sprintf("failed to insert token %q from %q; %v", t, path, err))
+            break
+        }
+
+        _, err = prepped.Field.Exec(field)
+        if err != nil {
+            failures = append(failures, fmt.Sprintf("failed to insert field %q from %q; %v", field, path, err))
+            break
+        }
+
+        _, err = prepped.Link.Exec(pid, field, t)
+        if err != nil {
+            failures = append(failures, fmt.Sprintf("failed to insert link for field %q to token %q from %q; %v", field, t, path, err))
+            break
         }
     }
 

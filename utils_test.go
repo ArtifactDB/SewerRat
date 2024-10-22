@@ -55,7 +55,7 @@ func mockDirectory(path string) error {
         return fmt.Errorf("failed to create the mock directory; %w", err)
     }
 
-    err = os.WriteFile(filepath.Join(path, "metadata.json"), []byte(`{ "foo": "Aaron had a little lamb", "bar": { "breed": [ "merino", "border leicester" ], "type": "lamb", "number": 1 } }`), 0600)
+    err = os.WriteFile(filepath.Join(path, "metadata.json"), []byte(`{ "foo": "Aaron had a little lamb", "bar": { "breed": [ "merino", "border leicester" ], "type": "lamb", "cost": 1.5 } }`), 0600)
     if err != nil {
         return fmt.Errorf("failed to mock a metadata file; %w", err)
     }
@@ -82,7 +82,7 @@ func mockDirectory(path string) error {
         return fmt.Errorf("failed to mock a subdirectory; %w", err)
     }
 
-    err = os.WriteFile(filepath.Join(sub2, "other.json"), []byte(`{ "favorites": [ "Yuru Camp", "Non non biyori" ] }`), 0600)
+    err = os.WriteFile(filepath.Join(sub2, "other.json"), []byte(`{ "favorites": [ "Yuru Camp", "Non non biyori" ], "category": { "iyashikei": true, "nsfw": false } }`), 0600)
     if err != nil {
         return fmt.Errorf("failed to mock a metadata file; %w", err)
     }
