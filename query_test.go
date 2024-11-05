@@ -254,9 +254,9 @@ func TestSanitizeQuery(t *testing.T) {
             }
         }
 
-        {
+        t.Run("wildcards", func(t *testing.T) {
             // Wildcards are respected.
-            query := &searchClause { Type: "text", Text: " Harvest%", Partial: true }
+            query := &searchClause { Type: "text", Text: " Harvest*", Partial: true }
             san, err := sanitizeQuery(query, deftok, wildtok)
             if err != nil {
                 t.Fatalf(err.Error())
@@ -264,7 +264,16 @@ func TestSanitizeQuery(t *testing.T) {
             if san == nil || san.Type != "text" || san.Text != "harvest%" || !san.Partial {
                 t.Fatalf("unexpected result from sanitization %v", san)
             }
-        }
+
+            query = &searchClause { Type: "text", Text: "mo?n ", Partial: true }
+            san, err = sanitizeQuery(query, deftok, wildtok)
+            if err != nil {
+                t.Fatalf(err.Error())
+            }
+            if san == nil || san.Type != "text" || san.Text != "mo_n" || !san.Partial {
+                t.Fatalf("unexpected result from sanitization %v", san)
+            }
+        })
 
         {
             // Fields are respected.

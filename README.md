@@ -202,8 +202,8 @@ The nature of the search depends on the value of `type`:
     Properties of nested objects can be specified via `.`-delimited names, e.g., `authors.first`.
     If `field` is not specified, matches are not restricted to any single property within a file.
   - (optional) `partial`, a boolean indicating whether to perform a partial match.
-    If `true`, any SQL wildcards (`%` and `_`) in `text` will not be discarded during tokenization.
-    Wildcard-containing tokens are then used for pattern matching to metadata-derived tokens.
+    If `true`, wildcards will be preserved by tokenization and used for pattern matching to metadata-derived tokens.
+    Supported wildcards are `*`, for any number of any characters; and `?`, for a match to any single character.
     Defaults to `false`.
 - For `"user"`, SewerRat searches on the user names of the file owners.
   The search clause should contain the `user` property, a string which contains the user name.
@@ -267,7 +267,12 @@ publication.author.first_name: Aaron
 Note that this scoping-by-field does not extend to the `AND`, `OR` and `NOT` keywords,
 e.g., `title:foo OR bar` will not limit the search for `bar` to the `title` field.
 
-If a `%` wildcard is present in a search term, its local search clause is set to perform a partial search.
+If a `*` or `?` wildcard is present in a search term, a partial text search will be performed.
+This only applies to the search clause immediately containing the term, e.g., `foo* bar` will undergo a partial search but `whee stuff` will not.
+
+```
+(foo* bar) AND (whee stuff)
+```
 
 The human-friendly mode can be enabled by setting the `translate=true` query parameter in the request to the `/query` endpoint.
 The structure of the request body is unchanged except that any `text` field is assumed to contain a search string and will be translated into the relevant search clause.

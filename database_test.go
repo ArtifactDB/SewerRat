@@ -1252,6 +1252,14 @@ func TestQueryTokens(t *testing.T) {
         if !equalPathArrays(extractSortedPaths(res), []string{ "metadata.json", "stuff/metadata.json", "stuff/other.json" }, to_add) {
             t.Fatalf("search results are not as expected %v", res)
         }
+
+        res, err = queryTokens(dbconn, &searchClause{ Type: "text", Text: "l_mb", Partial: true }, nil, 0)
+        if err != nil {
+            t.Fatalf(err.Error())
+        }
+        if !equalPathArrays(extractSortedPaths(res), []string{ "metadata.json", "stuff/other.json" }, to_add) {
+            t.Fatalf("search results are not as expected %v", res)
+        }
     })
 
     t.Run("search on numbers", func(t *testing.T) {
