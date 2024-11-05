@@ -48,7 +48,7 @@ func TestTranslateTextQuerySimple(t *testing.T) {
     if err != nil {
         t.Fatal(err)
     }
-    if out.Type != "text" || out.Text != "foo*" || !out.Partial {
+    if out.Type != "text" || out.Text != "foo*" || !out.IsPattern {
         t.Fatal("unexpected text query")
     }
 
@@ -57,9 +57,9 @@ func TestTranslateTextQuerySimple(t *testing.T) {
         t.Fatal(err)
     }
     if out.Type != "and" || 
-        out.Children[0].Text != "foo*" || !out.Children[0].Partial ||
-        out.Children[1].Text != "?bar" || !out.Children[1].Partial ||
-        out.Children[2].Text != "whee" || out.Children[2].Partial {
+        out.Children[0].Text != "foo*" || !out.Children[0].IsPattern ||
+        out.Children[1].Text != "?bar" || !out.Children[1].IsPattern ||
+        out.Children[2].Text != "whee" || out.Children[2].IsPattern {
         t.Fatal("unexpected text query")
     }
 

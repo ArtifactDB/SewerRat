@@ -1245,7 +1245,7 @@ func TestQueryTokens(t *testing.T) {
     })
 
     t.Run("partial test", func(t *testing.T) {
-        res, err := queryTokens(dbconn, &searchClause{ Type: "text", Text: "%ar%", Partial: true }, nil, 0)
+        res, err := queryTokens(dbconn, &searchClause{ Type: "text", Text: "%ar%", IsPattern: true }, nil, 0)
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -1253,7 +1253,7 @@ func TestQueryTokens(t *testing.T) {
             t.Fatalf("search results are not as expected %v", res)
         }
 
-        res, err = queryTokens(dbconn, &searchClause{ Type: "text", Text: "l_mb", Partial: true }, nil, 0)
+        res, err = queryTokens(dbconn, &searchClause{ Type: "text", Text: "l_mb", IsPattern: true }, nil, 0)
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -1345,7 +1345,7 @@ func TestQueryTokens(t *testing.T) {
             dbconn, 
             &searchClause{ 
                 Type: "not", 
-                Child: &searchClause{ Type: "text", Text: "%ar%", Partial: true },
+                Child: &searchClause{ Type: "text", Text: "%ar%", IsPattern: true },
             }, 
             nil, 
             0,
@@ -1472,8 +1472,8 @@ func TestQueryTokens(t *testing.T) {
             &searchClause{ 
                 Type: "or", 
                 Children: []*searchClause{ 
-                    &searchClause{ Type: "text", Text: "aar%", Partial: true },
-                    &searchClause{ Type: "text", Text: "ak%", Partial: true },
+                    &searchClause{ Type: "text", Text: "aar%", IsPattern: true },
+                    &searchClause{ Type: "text", Text: "ak%", IsPattern: true },
                 },
             }, 
             nil, 

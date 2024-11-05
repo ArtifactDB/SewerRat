@@ -201,9 +201,9 @@ The nature of the search depends on the value of `type`:
     Matches to tokens are only considered within the named property.
     Properties of nested objects can be specified via `.`-delimited names, e.g., `authors.first`.
     If `field` is not specified, matches are not restricted to any single property within a file.
-  - (optional) `partial`, a boolean indicating whether to perform a partial match.
+  - (optional) `is_pattern`, a boolean indicating whether `text` is a wildcard-containing pattern.
+    Currently supported wildcards are `*`, for any number of any characters; and `?`, for a match to any single character.
     If `true`, wildcards will be preserved by tokenization and used for pattern matching to metadata-derived tokens.
-    Supported wildcards are `*`, for any number of any characters; and `?`, for a match to any single character.
     Defaults to `false`.
 - For `"user"`, SewerRat searches on the user names of the file owners.
   The search clause should contain the `user` property, a string which contains the user name.
@@ -267,8 +267,8 @@ publication.author.first_name: Aaron
 Note that this scoping-by-field does not extend to the `AND`, `OR` and `NOT` keywords,
 e.g., `title:foo OR bar` will not limit the search for `bar` to the `title` field.
 
-If a `*` or `?` wildcard is present in a search term, a partial text search will be performed.
-This only applies to the search clause immediately containing the term, e.g., `foo* bar` will undergo a partial search but `whee stuff` will not.
+If a `*` or `?` wildcard is present in a search term, pattern matching will be performed to the metadata-derived tokens.
+This only applies to the search clause immediately containing the term, e.g., `foo*` and `bar` will be used for pattern matching but `whee` and `stuff` will not.
 
 ```
 (foo* bar) AND (whee stuff)

@@ -30,10 +30,12 @@ type searchClause struct {
 
     // Only relevant for text.
     // - Before sanitization: Text may consist of multiple tokens, effectively combined with an AND statement.
-    // - After sanitization: Text will consist of only one token (possibly with wildcards if Partial = true, otherwise there will be no wildcards).
+    //   Each term may have conventional (non-SQLite) wildcards, i.e., ?, *.
+    // - After sanitization: Text will consist of only one token.
+    //   The token may contain SQLite wildcards if IsPattern = true, otherwise there will be no wildcards.
     Text string `json:"text"`
     Field string `json:"field"`
-    Partial bool `json:"partial"`
+    IsPattern bool `json:"is_pattern"`
 
     // Only relevant for type = and/or.
     // - Before sanitization: any child may be an AND (for type = and) or OR (for type = or) clause, and there may be any number of children.
@@ -145,7 +147,7 @@ func sanitizeQuery(original *searchClause, deftok, wildtok *unicodeTokenizer) (*
     if original.Type == "text" {
         var tokens []string
         var err error
-        if original.Partial {
+        if original.IsPattern {
             tokens, err = wildtok.Tokenize(original.Text)
         } else {
             tokens, err = deftok.Tokenize(original.Text)
@@ -159,7 +161,7 @@ func sanitizeQuery(original *searchClause, deftok, wildtok *unicodeTokenizer) (*
 
         replacements := []*searchClause{}
         for _, tok := range tokens {
-            replacements = append(replacements, &searchClause{ Type: "text", Partial: original.Partial, Field: original.Field, Text: tok })
+            replacements = append(replacements, &searchClause{ Type: "text", IsPattern: original.IsPattern, Field: original.Field, Text: tok })
         }
         if len(replacements) == 1 {
             return replacements[0], nil
@@ -208,7 +210,7 @@ func assembleFilter(query *searchClause) (string, []interface{}) {
         }
 
         filter += " tokens.token"
-        if query.Partial {
+        if query.IsPattern {
             filter += " LIKE"
         } else {
             filter += " ="
@@ -279,7 +281,7 @@ func assembleFilter(query *searchClause) (string, []interface{}) {
 
         for _, tchild := range text {
             current := "tokens.token"
-            if tchild.Partial {
+            if tchild.IsPattern {
                 current += " LIKE"
             } else {
                 current += " ="
