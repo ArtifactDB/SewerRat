@@ -217,9 +217,8 @@ The nature of the search depends on the value of `type`:
     Defaults to `false`.
   - (optional) `is_suffix`, a boolean indicating whether to search for absolute paths that end with `path`. 
     Defaults to `false`.
-  - (optional) `escape`, a string containing a single escape character for SQLite pattern matching.
-    If provided, `path` is used verbatim as a SQLite pattern to be matched to the absolute path.
-    Any existing wildcards in `path` (or escapes thereof) are respected.
+  - (optional) `is_pattern`, a boolean indicating whether `path` is a wildcard-containing pattern, see the equivalent field for `text`.
+    Defaults to `false`.
 - For `"time"`, SewerRat searches on the latest modification time of each file.
   The search clause should contain the following additional properties:
   - `time`, an integer containing the Unix time.

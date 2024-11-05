@@ -322,37 +322,27 @@ func TestSanitizeQuery(t *testing.T) {
             }
         }
 
-        // Path works with wildcard tokens.
-        {
-            query := &searchClause { Type: "path", Path: "foo%bar" }
+        t.Run("escaped wildcards", func(t *testing.T) {
+            query := &searchClause { Type: "path", Path: "foo%ba_r" }
             san, err := sanitizeQuery(query, deftok, wildtok)
             if err != nil {
                 t.Fatalf(err.Error())
             }
-            if san == nil || san.Type != "path" || san.Path != "%foo\\%bar%" || san.Escape != "\\" {
+            if san == nil || san.Type != "path" || san.Path != "%foo\\%ba\\_r%" || san.Escape != "\\" {
                 t.Fatalf("unexpected result from sanitization %v", san)
             }
-        }
+        })
 
-        // If Escape is supplied, we run verbatim.
-        {
-            query := &searchClause { Type: "path", Path: "%foo%bar", Escape: "~" }
+        t.Run("translate wildcards", func(t *testing.T) {
+            query := &searchClause { Type: "path", Path: "/f*oo_b?r", IsPattern: true }
             san, err := sanitizeQuery(query, deftok, wildtok)
             if err != nil {
                 t.Fatalf(err.Error())
             }
-            if san == nil || san.Type != "path" || san.Path != "%foo%bar" || san.Escape != "~" {
+            if san == nil || san.Type != "path" || san.Path != "%/f%oo\\_b_r%" || san.Escape != "\\" {
                 t.Fatalf("unexpected result from sanitization %v", san)
             }
-        }
-
-        {
-            query := &searchClause { Type: "path", Path: "foo%bar", Escape: "abcd" }
-            _, err := sanitizeQuery(query, deftok, wildtok)
-            if err == nil || !strings.Contains(err.Error(), "single character") {
-                t.Fatal("expected sanitization failure")
-            }
-        }
+        })
     })
 
     t.Run("other", func(t *testing.T) {

@@ -9,13 +9,14 @@ type searchClause struct {
     Type string `json:"type"`
 
     // Only relevant for type = path.
-    // - Before sanitization: if Escape is empty, Path is assumed to contain a substring of the path, to be extended at the front/back depending on IsPrefix and IsSuffix.
-    //   If Escape is not empty, Path is assumed to be a wildcard-containing pattern.
-    // - After sanitization: Path is a wildcard-containing pattern.
+    // - Before sanitization: if IsPattern = false, Path is assumed to contain a substring of the path, to be extended at the front/back depending on IsPrefix and IsSuffix.
+    //   If IsPattern = true, Path is assumed to be a pattern with the non-SQLite wildcards.
+    //   Escape is obviously empty.
+    // - After sanitization: Path is a SQLite-wildcard-containing pattern.
     //   Escape may or may not be an empty string, depending on whether Path needed escaping of wildcard characters.
-    //   IsPrefix and IsSuffix are no longer used.
+    //   IsPrefix, IsPattern and IsSuffix are no longer used.
     Path string `json:"path"`
-    Escape string `json:"escape"`
+    Escape string `json:"-"`
     IsPrefix bool `json:"is_prefix"`
     IsSuffix bool `json:"is_suffix"`
 
@@ -174,24 +175,26 @@ func sanitizeQuery(original *searchClause, deftok, wildtok *unicodeTokenizer) (*
     }
 
     if original.Type == "path" {
-        if original.Escape != "" {
-            if len(original.Escape) != 1 {
-                return nil, fmt.Errorf("'escape' must be a single character (got %s)", original.Escape)
-            }
-            return &searchClause { Type: "path", Path: original.Path, Escape: original.Escape }, nil
-        } else {
-            pattern, escape, err := escapeWildcards(original.Path)
-            if err != nil {
-                return nil, fmt.Errorf("failed to escape wildcards for path %q; %w", original.Path, err)
-            }
-            if !original.IsPrefix {
-                pattern = "%" + pattern
-            }
-            if !original.IsSuffix {
-                pattern += "%"
-            }
-            return &searchClause { Type: "path", Path: pattern, Escape: escape }, nil
+        pattern, escape, err := escapeWildcards(original.Path)
+        if err != nil {
+            return nil, fmt.Errorf("failed to escape wildcards for path %q; %w", original.Path, err)
         }
+
+        if original.IsPattern {
+            rep := strings.NewReplacer(
+                "?", "_",
+                "*", "%",
+            )
+            pattern = rep.Replace(pattern)
+        }
+        if !original.IsPrefix && !strings.HasPrefix(pattern, "%") {
+            pattern = "%" + pattern
+        }
+        if !original.IsSuffix && !strings.HasSuffix(pattern, "%") {
+            pattern += "%"
+        }
+
+        return &searchClause { Type: "path", Path: pattern, Escape: escape }, nil
     }
 
     return nil, fmt.Errorf("unknown search type %q", original.Type)
