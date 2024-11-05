@@ -74,7 +74,7 @@ func TestUnicodeTokenizer(t *testing.T) {
         }
 
         {
-            out, err := tok.Tokenize(" Aar%\thad a little\n l_mb ")
+            out, err := tok.Tokenize(" Aar*\thad a little\n l?mb ")
             if err != nil {
                 t.Fatalf(err.Error())
             }

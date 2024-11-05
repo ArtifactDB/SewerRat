@@ -194,7 +194,7 @@ func translateTextClause(status *translationStatus, at int) error {
     converted := []*searchClause{}
     for _, x := range status.Words {
         word := string(x)
-        converted = append(converted, &searchClause{ Type: "text", Text: word, Field: field, Partial: strings.Index(word, "%") >= 0 })
+        converted = append(converted, &searchClause{ Type: "text", Text: word, Field: field, IsPattern: strings.ContainsAny(word, "*?") })
     }
 
     var new_component *searchClause

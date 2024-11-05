@@ -800,6 +800,27 @@ func TestQueryHandler(t *testing.T) {
         }
     })
 
+    t.Run("wildcards", func (t *testing.T) {
+        req, err := http.NewRequest("POST", "/query?translate=true", strings.NewReader(`{ "type": "text", "text": "l?mb OR chick*" }`))
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        rr := httptest.NewRecorder()
+        handler.ServeHTTP(rr, req)
+        if rr.Code != http.StatusOK {
+            t.Fatalf("should have succeeded")
+        }
+
+        all_paths, scroll := validateSearchResults(rr.Body)
+        if scroll != "" {
+            t.Fatalf("unexpected scroll %v", scroll)
+        }
+        if !equalPathArrays(all_paths, []string{ "metadata.json", "stuff/other.json" }, to_add) {
+            t.Fatalf("unexpected paths %v", all_paths)
+        }
+    })
+
     t.Run("scroll", func (t *testing.T) {
         dummy_query := `{ "type": "text", "text": "   " }`
 

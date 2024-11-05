@@ -44,21 +44,22 @@ func TestTranslateTextQuerySimple(t *testing.T) {
     }
 
     // Recognizes partial hits.
-    out, err = translateTextQuery("foo%")
+    out, err = translateTextQuery("foo*")
     if err != nil {
         t.Fatal(err)
     }
-    if out.Type != "text" || out.Text != "foo%" || !out.Partial {
+    if out.Type != "text" || out.Text != "foo*" || !out.IsPattern {
         t.Fatal("unexpected text query")
     }
 
-    out, err = translateTextQuery("foo% bar")
+    out, err = translateTextQuery("foo* ?bar whee")
     if err != nil {
         t.Fatal(err)
     }
     if out.Type != "and" || 
-        out.Children[0].Text != "foo%" || !out.Children[0].Partial ||
-        out.Children[1].Text != "bar" || out.Children[1].Partial {
+        out.Children[0].Text != "foo*" || !out.Children[0].IsPattern ||
+        out.Children[1].Text != "?bar" || !out.Children[1].IsPattern ||
+        out.Children[2].Text != "whee" || out.Children[2].IsPattern {
         t.Fatal("unexpected text query")
     }
 

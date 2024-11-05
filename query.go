@@ -9,13 +9,14 @@ type searchClause struct {
     Type string `json:"type"`
 
     // Only relevant for type = path.
-    // - Before sanitization: if Escape is empty, Path is assumed to contain a substring of the path, to be extended at the front/back depending on IsPrefix and IsSuffix.
-    //   If Escape is not empty, Path is assumed to be a wildcard-containing pattern.
-    // - After sanitization: Path is a wildcard-containing pattern.
+    // - Before sanitization: if IsPattern = false, Path is assumed to contain a substring of the path, to be extended at the front/back depending on IsPrefix and IsSuffix.
+    //   If IsPattern = true, Path is assumed to be a pattern with the non-SQLite wildcards.
+    //   Escape is obviously empty.
+    // - After sanitization: Path is a SQLite-wildcard-containing pattern.
     //   Escape may or may not be an empty string, depending on whether Path needed escaping of wildcard characters.
-    //   IsPrefix and IsSuffix are no longer used.
+    //   IsPrefix, IsPattern and IsSuffix are no longer used.
     Path string `json:"path"`
-    Escape string `json:"escape"`
+    Escape string `json:"-"`
     IsPrefix bool `json:"is_prefix"`
     IsSuffix bool `json:"is_suffix"`
 
@@ -30,10 +31,12 @@ type searchClause struct {
 
     // Only relevant for text.
     // - Before sanitization: Text may consist of multiple tokens, effectively combined with an AND statement.
-    // - After sanitization: Text will consist of only one token (possibly with wildcards if Partial = true, otherwise there will be no wildcards).
+    //   Each term may have conventional (non-SQLite) wildcards, i.e., ?, *.
+    // - After sanitization: Text will consist of only one token.
+    //   The token may contain SQLite wildcards if IsPattern = true, otherwise there will be no wildcards.
     Text string `json:"text"`
     Field string `json:"field"`
-    Partial bool `json:"partial"`
+    IsPattern bool `json:"is_pattern"`
 
     // Only relevant for type = and/or.
     // - Before sanitization: any child may be an AND (for type = and) or OR (for type = or) clause, and there may be any number of children.
@@ -145,7 +148,7 @@ func sanitizeQuery(original *searchClause, deftok, wildtok *unicodeTokenizer) (*
     if original.Type == "text" {
         var tokens []string
         var err error
-        if original.Partial {
+        if original.IsPattern {
             tokens, err = wildtok.Tokenize(original.Text)
         } else {
             tokens, err = deftok.Tokenize(original.Text)
@@ -159,7 +162,7 @@ func sanitizeQuery(original *searchClause, deftok, wildtok *unicodeTokenizer) (*
 
         replacements := []*searchClause{}
         for _, tok := range tokens {
-            replacements = append(replacements, &searchClause{ Type: "text", Partial: original.Partial, Field: original.Field, Text: tok })
+            replacements = append(replacements, &searchClause{ Type: "text", IsPattern: original.IsPattern, Field: original.Field, Text: tok })
         }
         if len(replacements) == 1 {
             return replacements[0], nil
@@ -172,24 +175,26 @@ func sanitizeQuery(original *searchClause, deftok, wildtok *unicodeTokenizer) (*
     }
 
     if original.Type == "path" {
-        if original.Escape != "" {
-            if len(original.Escape) != 1 {
-                return nil, fmt.Errorf("'escape' must be a single character (got %s)", original.Escape)
-            }
-            return &searchClause { Type: "path", Path: original.Path, Escape: original.Escape }, nil
-        } else {
-            pattern, escape, err := escapeWildcards(original.Path)
-            if err != nil {
-                return nil, fmt.Errorf("failed to escape wildcards for path %q; %w", original.Path, err)
-            }
-            if !original.IsPrefix {
-                pattern = "%" + pattern
-            }
-            if !original.IsSuffix {
-                pattern += "%"
-            }
-            return &searchClause { Type: "path", Path: pattern, Escape: escape }, nil
+        pattern, escape, err := escapeWildcards(original.Path)
+        if err != nil {
+            return nil, fmt.Errorf("failed to escape wildcards for path %q; %w", original.Path, err)
         }
+
+        if original.IsPattern {
+            rep := strings.NewReplacer(
+                "?", "_",
+                "*", "%",
+            )
+            pattern = rep.Replace(pattern)
+        }
+        if !original.IsPrefix && !strings.HasPrefix(pattern, "%") {
+            pattern = "%" + pattern
+        }
+        if !original.IsSuffix && !strings.HasSuffix(pattern, "%") {
+            pattern += "%"
+        }
+
+        return &searchClause { Type: "path", Path: pattern, Escape: escape }, nil
     }
 
     return nil, fmt.Errorf("unknown search type %q", original.Type)
@@ -208,7 +213,7 @@ func assembleFilter(query *searchClause) (string, []interface{}) {
         }
 
         filter += " tokens.token"
-        if query.Partial {
+        if query.IsPattern {
             filter += " LIKE"
         } else {
             filter += " ="
@@ -279,7 +284,7 @@ func assembleFilter(query *searchClause) (string, []interface{}) {
 
         for _, tchild := range text {
             current := "tokens.token"
-            if tchild.Partial {
+            if tchild.IsPattern {
                 current += " LIKE"
             } else {
                 current += " ="
