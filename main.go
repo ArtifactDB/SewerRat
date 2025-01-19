@@ -6,6 +6,8 @@ import (
     "time"
     "net/http"
     "strconv"
+    "fmt"
+    "os"
 )
 
 func main() {
@@ -24,23 +26,27 @@ func main() {
 
     db, err := initializeDatabase(dbpath)
     if err != nil {
-        log.Fatalf("failed to initialize SQLite file at %q; %v", dbpath, err)
+        fmt.Printf("failed to initialize SQLite file at %q; %v\n", dbpath, err)
+        os.Exit(1)
     }
     defer db.Close()
 
     ro_db, err := initializeReadOnlyDatabase(dbpath)
     if err != nil {
-        log.Fatalf("failed to create read-only connections to %q; %v", dbpath, err)
+        fmt.Printf("failed to create read-only connections to %q; %v\n", dbpath, err)
+        os.Exit(1)
     }
     defer ro_db.Close()
 
     tokenizer, err := newUnicodeTokenizer(false)
     if err != nil {
-        log.Fatalf("failed to create the default tokenizer; %v", err)
+        fmt.Printf("failed to create the default tokenizer; %v\n", err)
+        os.Exit(1)
     }
     wild_tokenizer, err := newUnicodeTokenizer(true)
     if err != nil {
-        log.Fatalf("failed to create the wildcard tokenizer; %v", err)
+        fmt.Printf("failed to create the wildcard tokenizer; %v\n", err)
+        os.Exit(1)
     }
 
     const num_verification_threads = 64
@@ -75,7 +81,10 @@ func main() {
         go func() {
             for {
                 <-ticker.C
-                db.Exec("PRAGMA wal_checkpoint(PASSIVE)")
+                _, err := db.Exec("PRAGMA wal_checkpoint(PASSIVE)")
+                if err != nil {
+                    log.Printf("[ERROR] failed to perform WAL checkpoint; %v\n", err)
+                }
             }
         }()
     }
@@ -102,10 +111,10 @@ func main() {
                 <-ticker.C
                 fails, err := updateDirectories(db, tokenizer)
                 if err != nil {
-                    log.Println(err)
+                    log.Printf("[ERROR] failed to update directories; %v\n", err.Error())
                 } else {
                     for _, f := range fails {
-                        log.Println(f)
+                        log.Printf("update failure: %s\n", f)
                     }
                 }
             }
@@ -122,7 +131,7 @@ func main() {
                 <-ticker.C
                 err := backupDatabase(db, dbpath + ".backup")
                 if err != nil {
-                    log.Println(err)
+                    log.Printf("[ERROR] failed to back up database; %v\n", err)
                 }
             }
         }()
