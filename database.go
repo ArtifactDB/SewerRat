@@ -412,10 +412,7 @@ func compareToExistingPaths(tx *sql.Tx, did int64, all_paths map[string]fs.FileI
 func addDirectoryContents(tx *sql.Tx, path string, did int64, base_names []string, tokenizer* unicodeTokenizer) ([]string, error) {
     all_failures := []string{}
 
-    dir_contents, dir_failures, err := listMetadata(path, base_names)
-    if err != nil {
-        return nil, err
-    }
+    dir_contents, dir_failures := listMetadata(path, base_names)
     all_failures = append(all_failures, dir_failures...)
 
     new_paths, update_paths, purge_paths, err := compareToExistingPaths(tx, did, dir_contents)

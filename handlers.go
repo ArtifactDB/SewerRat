@@ -596,11 +596,18 @@ func newListFilesHandler(db *sql.DB) func(http.ResponseWriter, *http.Request) {
             return
         }
 
-        listing, err := listFiles(path, recursive)
+        err = verifyDirectory(path)
         if err != nil {
-            dumpHttpErrorResponse(w, fmt.Errorf("failed to obtain listing; %w", err))
+            dumpHttpErrorResponse(w, err)
             return
         }
+
+        listing, err := listFiles(path, recursive)
+        if err != nil {
+            dumpHttpErrorResponse(w, fmt.Errorf("failed to obtain a directory listing; %w", err))
+            return
+        }
+
         dumpJsonResponse(w, http.StatusOK, listing)
     }
 }

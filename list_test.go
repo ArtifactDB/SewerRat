@@ -122,11 +122,7 @@ func TestListMetadata(t *testing.T) {
     }
 
     t.Run("simple", func(t *testing.T) {
-        found, fails, err := listMetadata(dir, []string{ "A.json" })
-        if err != nil {
-            t.Fatal(err)
-        }
-
+        found, fails := listMetadata(dir, []string{ "A.json" })
         if len(fails) > 0 {
             t.Fatal("unexpected failures")
         }
@@ -145,11 +141,7 @@ func TestListMetadata(t *testing.T) {
     })
 
     t.Run("multiple", func(t *testing.T) {
-        found, fails, err := listMetadata(dir, []string{ "A.json", "B.json" })
-        if err != nil {
-            t.Fatal(err)
-        }
-
+        found, fails := listMetadata(dir, []string{ "A.json", "B.json" })
         if len(fails) > 0 {
             t.Fatal("unexpected failures")
         }
@@ -167,15 +159,16 @@ func TestListMetadata(t *testing.T) {
         }
     })
 
-    t.Run("walk failure", func(t *testing.T) {
-        _, _, err := listMetadata("missing", []string{ "A.json", "B.json" })
-        if err == nil || !strings.Contains(err.Error(), "does not exist") {
-            t.Fatalf("unexpected lack of failure; %v", err)
+    t.Run("invalid directories", func(t *testing.T) {
+        _, fails := listMetadata("missing", []string{ "A.json", "B.json" })
+        if len(fails) != 1 || !strings.Contains(fails[0], "no such file") {
+            t.Fatalf("should report a failure instead of an error when directory is missing")
         }
 
-        _, _, err = listMetadata(filepath.Join(dir, "A.json"), []string{ "A.json", "B.json" })
-        if err == nil || !strings.Contains(err.Error(), "not a directory") {
-            t.Fatalf("unexpected lack of failure; %v", err)
+        // Providing a file instead of a directory.
+        _, fails = listMetadata(filepath.Join(dir, "A.json"), []string{ "A.json", "B.json" })
+        if len(fails) != 1 || !strings.Contains(fails[0], "not a directory") {
+            t.Fatalf("should report a failure instead of an error when supplied path is not a directory")
         }
     })
 }
@@ -211,11 +204,7 @@ func TestListMetadataSymlink(t *testing.T) {
     }
 
     t.Run("symlink", func(t *testing.T) {
-        found, fails, err := listMetadata(dir, []string{ "foo.json", "B.json" })
-        if err != nil {
-            t.Fatal(err)
-        }
-
+        found, fails := listMetadata(dir, []string{ "foo.json", "B.json" })
         if len(fails) > 0 {
             t.Fatal("unexpected failures")
         }
@@ -261,10 +250,7 @@ func TestListMetadataDot(t *testing.T) {
     }
 
     t.Run("dot", func(t *testing.T) {
-        found, fails, err := listMetadata(dir, []string{ "A.json" })
-        if err != nil {
-            t.Fatal(err)
-        }
+        found, fails := listMetadata(dir, []string{ "A.json" })
         if len(fails) > 0 {
             t.Fatal("unexpected failures")
         }
@@ -306,10 +292,7 @@ func TestListMetadataIgnored(t *testing.T) {
     }
 
     t.Run("control", func(t *testing.T) {
-        found, fails, err := listMetadata(dir, []string{ "A.json" })
-        if err != nil {
-            t.Fatal(err)
-        }
+        found, fails := listMetadata(dir, []string{ "A.json" })
         if len(fails) > 0 {
             t.Fatal("unexpected failures")
         }
@@ -324,10 +307,7 @@ func TestListMetadataIgnored(t *testing.T) {
     }
 
     t.Run("ignored", func(t *testing.T) {
-        found, fails, err := listMetadata(dir, []string{ "A.json" })
-        if err != nil {
-            t.Fatal(err)
-        }
+        found, fails := listMetadata(dir, []string{ "A.json" })
         if len(fails) > 0 {
             t.Fatal("unexpected failures")
         }

@@ -10,13 +10,8 @@ import (
 )
 
 func listFiles(dir string, recursive bool) ([]string, error) {
-    err := verifyDirectory(dir)
-    if err != nil {
-        return nil, err
-    }
-
     to_report := []string{}
-    err = filepath.WalkDir(dir, func(path string, info fs.DirEntry, err error) error {
+    err := filepath.WalkDir(dir, func(path string, info fs.DirEntry, err error) error {
         if err != nil {
             return err
         }
@@ -41,20 +36,15 @@ func listFiles(dir string, recursive bool) ([]string, error) {
             return nil
         }
     })
-
-    if err != nil {
-        return nil, fmt.Errorf("failed to obtain a directory listing; %w", err)
-    }
-
-    return to_report, nil
+    return to_report, err
 }
 
-func listMetadata(dir string, base_names []string) (map[string]fs.FileInfo, []string, error) {
-    err := verifyDirectory(dir)
-    if err != nil {
-        return nil, nil, err
-    }
-
+/* This function can NEVER fail. All errors are simply reported as failures and
+ * the associated paths are ignored. Even if the supplied directory path
+ * doesn't exist or is invalid, we simply return an empty list of metadata
+ * files, and report the failure.
+ */
+func listMetadata(dir string, base_names []string) (map[string]fs.FileInfo, []string) {
     curcontents := map[string]fs.FileInfo{}
     curfailures := []string{}
     curnames := map[string]bool{}
@@ -62,7 +52,18 @@ func listMetadata(dir string, base_names []string) (map[string]fs.FileInfo, []st
         curnames[n] = true
     }
 
-    // Just skip any directories that we can't access, no need to check the error.
+    // Don't list anything if it's not even a directory.
+    info, err := os.Stat(dir)
+    if err != nil {
+        curfailures = append(curfailures, fmt.Sprintf("failed to inspect %q; %v", dir, err))
+        return curcontents, curfailures
+    }
+    if !info.IsDir() {
+        curfailures = append(curfailures, fmt.Sprintf("%q is not a directory", dir))
+        return curcontents, curfailures
+    }
+
+    // Just skip any subdirectories that we can't access, no need to check the error.
     err = filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
         if err != nil {
             curfailures = append(curfailures, fmt.Sprintf("failed to walk %q; %v", path, err))
@@ -112,5 +113,8 @@ func listMetadata(dir string, base_names []string) (map[string]fs.FileInfo, []st
         return nil
     })
 
-    return curcontents, curfailures, err
+    if err != nil {
+        curfailures = append(curfailures, fmt.Sprintf("failed to walk %q; %v", dir, err))
+    }
+    return curcontents, curfailures
 }
