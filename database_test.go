@@ -827,6 +827,55 @@ func TestUpdateDirectories(t *testing.T) {
         }
     })
 
+    t.Run("deleted directory", func(t *testing.T) {
+        dbconn, err := initializeDatabase(dbpath)
+        if err != nil {
+            t.Fatalf(err.Error())
+        }
+        defer dbconn.Close()
+        defer os.Remove(dbpath)
+
+        to_add := filepath.Join(tmp, "to_add")
+        err = mockDirectory(to_add)
+        if err != nil {
+            t.Fatalf(err.Error())
+        }
+        defer os.RemoveAll(to_add)
+
+        {
+            comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr)
+            if err != nil {
+                t.Fatalf(err.Error())
+            }
+            if len(comments) > 0 {
+                t.Fatalf("unexpected comments from the directory addition %v", comments)
+            }
+        }
+
+        // Deleting the entire directory altogether.
+        err = os.RemoveAll(to_add)
+        if err != nil {
+            t.Fatalf(err.Error())
+        }
+
+        comments, err := updateDirectories(dbconn, tokr)
+        if err != nil {
+            t.Fatalf(err.Error())
+        }
+        if len(comments) == 0 {
+            t.Fatalf("unexpected lack of comments from updating")
+        }
+
+        // Check that every path has been flushed.
+        all_paths, err := listPaths(dbconn, tmp)
+        if err != nil {
+            t.Fatalf(err.Error())
+        }
+        if len(all_paths) != 0 {
+            t.Fatalf("found unexpected paths")
+        }
+    })
+
     t.Run("new", func(t *testing.T) {
         dbconn, err := initializeDatabase(dbpath)
         if err != nil {
