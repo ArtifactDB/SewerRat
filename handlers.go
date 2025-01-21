@@ -31,7 +31,7 @@ func dumpJsonResponse(w http.ResponseWriter, status int, v interface{}) {
     }
 
     w.Header().Set("Content-Type", "application/json")
-    w.Header().Set("Access-Control-Allow-Origin", "*")
+    w.Header().Set("Access-Control-Allow-Origin", "*") // setting this for CORS.
     w.WriteHeader(status)
     _, err = w.Write(contents)
     if err != nil {
@@ -322,28 +322,8 @@ func newDeregisterFinishHandler(db *sql.DB, verifier *verificationRegistry, time
 
 /**********************************************************************/
 
-func configureCors(w http.ResponseWriter, r *http.Request) bool {
-    if r.Method == "OPTIONS" {
-        w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
-        w.Header().Set("Access-Control-Allow-Origin", "*")
-        w.Header().Set("Access-Control-Allow-Headers", "*")
-        w.WriteHeader(http.StatusNoContent)
-        return true
-    } else {
-        return false
-    }
-}
-
 func newQueryHandler(db *sql.DB, tokenizer *unicodeTokenizer, wild_tokenizer *unicodeTokenizer, endpoint string) func(http.ResponseWriter, *http.Request) {
     return func(w http.ResponseWriter, r *http.Request) {
-        if configureCors(w, r) {
-            return
-        }
-        if r.Method != "POST" {
-            w.WriteHeader(http.StatusMethodNotAllowed)
-            return
-        }
-
         params := r.URL.Query()
         var scroll *scrollPosition
         limit := 100
@@ -451,14 +431,6 @@ func getRetrievePath(params url.Values) (string, error) {
 
 func newRetrieveMetadataHandler(db *sql.DB) func(http.ResponseWriter, *http.Request) {
     return func(w http.ResponseWriter, r *http.Request) {
-        if configureCors(w, r) {
-            return
-        }
-        if r.Method != "GET" {
-            w.WriteHeader(http.StatusMethodNotAllowed)
-            return
-        }
-
         params := r.URL.Query()
         path, err := getRetrievePath(params)
         if err != nil {
@@ -491,14 +463,6 @@ func newRetrieveMetadataHandler(db *sql.DB) func(http.ResponseWriter, *http.Requ
 
 func newRetrieveFileHandler(db *sql.DB) func(http.ResponseWriter, *http.Request) {
     return func(w http.ResponseWriter, r *http.Request) {
-        if configureCors(w, r) {
-            return
-        }
-        if r.Method != "GET" && r.Method != "HEAD" {
-            w.WriteHeader(http.StatusMethodNotAllowed)
-            return
-        }
-
         params := r.URL.Query()
         path, err := getRetrievePath(params)
         if err != nil {
@@ -537,6 +501,9 @@ func newRetrieveFileHandler(db *sql.DB) func(http.ResponseWriter, *http.Request)
             return
         }
 
+        // Setting this for CORS.
+        w.Header().Set("Access-Control-Allow-Origin", "*")
+
         if (r.Method == "HEAD") {
             w.Header().Set("Content-Length", strconv.FormatInt(info.Size(), 10))
             w.Header().Set("Last-Modified", info.ModTime().UTC().Format(http.TimeFormat))
@@ -570,14 +537,6 @@ func newRetrieveFileHandler(db *sql.DB) func(http.ResponseWriter, *http.Request)
 
 func newListFilesHandler(db *sql.DB) func(http.ResponseWriter, *http.Request) {
     return func(w http.ResponseWriter, r *http.Request) {
-        if configureCors(w, r) {
-            return
-        }
-        if r.Method != "GET" {
-            w.WriteHeader(http.StatusMethodNotAllowed)
-            return
-        }
-
         params := r.URL.Query()
         recursive := params.Get("recursive") == "true"
         path, err := getRetrievePath(params)
@@ -614,14 +573,6 @@ func newListFilesHandler(db *sql.DB) func(http.ResponseWriter, *http.Request) {
 
 func newListRegisteredDirectoriesHandler(db *sql.DB) func(http.ResponseWriter, *http.Request) {
     return func(w http.ResponseWriter, r *http.Request) {
-        if configureCors(w, r) {
-            return
-        }
-        if r.Method != "GET" {
-            w.WriteHeader(http.StatusMethodNotAllowed)
-            return
-        }
-
         query := listRegisteredDirectoriesQuery{}
 
         params := r.URL.Query()
@@ -660,13 +611,15 @@ func newListRegisteredDirectoriesHandler(db *sql.DB) func(http.ResponseWriter, *
 
 func newDefaultHandler() func(http.ResponseWriter, *http.Request) {
     return func(w http.ResponseWriter, r *http.Request) {
-        if configureCors(w, r) {
-            return
-        }
-        if r.Method != "GET" {
-            w.WriteHeader(http.StatusMethodNotAllowed)
-            return
-        }
         dumpJsonResponse(w, http.StatusOK, map[string]string{ "name": "SewerRat API", "url": "https://github.com/ArtifactDB/SewerRat" })
+    }
+}
+
+func newOptionsHandler() func(http.ResponseWriter, *http.Request) {
+    return func(w http.ResponseWriter, r *http.Request) {
+        w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
+        w.Header().Set("Access-Control-Allow-Origin", "*")
+        w.Header().Set("Access-Control-Allow-Headers", "*")
+        w.WriteHeader(http.StatusNoContent)
     }
 }

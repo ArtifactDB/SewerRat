@@ -65,13 +65,15 @@ func main() {
     http.HandleFunc("POST " + prefix + "/deregister/start", newDeregisterStartHandler(db, verifier))
     http.HandleFunc("POST " + prefix + "/deregister/finish", newDeregisterFinishHandler(db, verifier, timeout))
 
-    http.HandleFunc(prefix + "/registered", newListRegisteredDirectoriesHandler(ro_db))
-    http.HandleFunc(prefix + "/query", newQueryHandler(ro_db, tokenizer, wild_tokenizer, "/query"))
-    http.HandleFunc(prefix + "/retrieve/metadata", newRetrieveMetadataHandler(ro_db))
-    http.HandleFunc(prefix + "/retrieve/file", newRetrieveFileHandler(ro_db))
-    http.HandleFunc(prefix + "/list", newListFilesHandler(ro_db))
+    http.HandleFunc("GET " + prefix + "/registered", newListRegisteredDirectoriesHandler(ro_db))
+    http.HandleFunc("POST " + prefix + "/query", newQueryHandler(ro_db, tokenizer, wild_tokenizer, "/query"))
+    http.HandleFunc("GET " + prefix + "/retrieve/metadata", newRetrieveMetadataHandler(ro_db))
+    http.HandleFunc("GET " + prefix + "/retrieve/file", newRetrieveFileHandler(ro_db))
+    http.HandleFunc("HEAD " + prefix + "/retrieve/file", newRetrieveFileHandler(ro_db))
+    http.HandleFunc("GET " + prefix + "/list", newListFilesHandler(ro_db))
 
-    http.HandleFunc(prefix + "/", newDefaultHandler())
+    http.HandleFunc("GET " + prefix + "/", newDefaultHandler())
+    http.HandleFunc("OPTIONS " + prefix + "/", newOptionsHandler())
 
     // Adding an hourly job that does a full checkpoint.
     {
