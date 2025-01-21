@@ -62,7 +62,7 @@ func main() {
     // Setting up the endpoints.
     http.HandleFunc("POST " + prefix + "/register/start", newRegisterStartHandler(verifier))
     http.HandleFunc("POST " + prefix + "/register/finish", newRegisterFinishHandler(db, verifier, tokenizer, timeout))
-    http.HandleFunc("POST " + prefix + "/deregister/start", newDeregisterStartHandler(ro_db, verifier))
+    http.HandleFunc("POST " + prefix + "/deregister/start", newDeregisterStartHandler(db, verifier))
     http.HandleFunc("POST " + prefix + "/deregister/finish", newDeregisterFinishHandler(db, verifier, timeout))
 
     http.HandleFunc(prefix + "/registered", newListRegisteredDirectoriesHandler(ro_db))
