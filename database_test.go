@@ -2029,3 +2029,60 @@ func TestFetchRegisteredDirectoryNames(t *testing.T) {
         t.Fatalf("unexpected names for a non-registered directory")
     }
 }
+
+func TestInitializeReadOnlyDatabase(t *testing.T) {
+    tmp, err := os.MkdirTemp("", "")
+    if err != nil {
+        t.Fatal(err)
+    }
+    defer os.RemoveAll(tmp)
+
+    dbpath := filepath.Join(tmp, "db.sqlite3")
+    dbconn, err := initializeDatabase(dbpath)
+    if err != nil {
+        t.Fatal(err)
+    }
+    defer dbconn.Close()
+
+    tokr, err := newUnicodeTokenizer(false)
+    if err != nil {
+        t.Fatal(err)
+    }
+
+    // Mocking up some contents.
+    to_add := filepath.Join(tmp, "to_add")
+    err = mockDirectory(to_add)
+    if err != nil {
+        t.Fatal(err)
+    }
+
+    // Checking that we can't write through a read-only connection.
+    ro_dbconn, err := initializeReadOnlyDatabase(dbpath)
+    if err != nil {
+        t.Fatal(err)
+    }
+    defer ro_dbconn.Close()
+
+    _, err = addNewDirectory(ro_dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr)
+    if err == nil || strings.Index(err.Error(), "read-only") >= 0 {
+        t.Error("expected a failure to modify the database through read-only connection")
+    }
+
+    // Adding it as a negative control.
+    comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr)
+    if err != nil {
+        t.Fatal(err)
+    }
+    if len(comments) > 0 {
+        t.Fatalf("unexpected comments from the directory addition %v", comments)
+    }
+
+    // Checking that we can still read from this.
+    found, err := isDirectoryRegistered(dbconn, to_add)
+    if err != nil {
+        t.Fatal(err)
+    }
+    if !found {
+        t.Error("failed to find the newly added directory through a read-only connection")
+    }
+}

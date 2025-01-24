@@ -167,10 +167,16 @@ CREATE INDEX index_links ON links(tid, fid);
 }
 
 func initializeReadOnlyDatabase(path string) (*sql.DB, error) {
-    ro_db, err := sql.Open("sqlite", path + "?_pragma=query_only(1)")
+    ro_db, err := sql.Open("sqlite", path)
     if err != nil {
-        return nil, fmt.Errorf("failed to open read-only SQLite handle; %w", err)
+        return nil, fmt.Errorf("failed to open SQLite handle; %w", err)
     }
+
+    _, err = ro_db.Exec("PRAGMA query_only=1")
+    if err != nil {
+        return nil, fmt.Errorf("failed to set SQLite handle as read-only; %w", err)
+    }
+
     return ro_db, nil
 }
 
