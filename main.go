@@ -49,8 +49,7 @@ func main() {
         os.Exit(1)
     }
 
-    const num_verification_threads = 64
-    verifier := newVerificationRegistry(num_verification_threads)
+    verifier := newVerificationRegistry(time.Duration(*lifetime0) * time.Minute)
 
     prefix := *prefix0
     if prefix != "" {
@@ -87,19 +86,6 @@ func main() {
                 if err != nil {
                     log.Printf("[ERROR] failed to perform WAL checkpoint; %v\n", err)
                 }
-            }
-        }()
-    }
-
-    // Adding a hour job that purges various old verification sessions.
-    {
-        lifetime := time.Duration(*lifetime0) * time.Minute
-        ticker := time.NewTicker(lifetime)
-        defer ticker.Stop()
-        go func() {
-            for {
-                <-ticker.C
-                verifier.Flush(lifetime)
             }
         }()
     }

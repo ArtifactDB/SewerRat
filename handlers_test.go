@@ -67,7 +67,7 @@ func TestValidatePath(t *testing.T) {
 }
 
 func TestCheckVerificationCode(t *testing.T) {
-    v := newVerificationRegistry(3)
+    v := newVerificationRegistry(time.Minute)
 
     t.Run("success", func(t * testing.T) {
         target, err := os.MkdirTemp("", "")
@@ -190,7 +190,7 @@ func TestRegisterHandlers(t *testing.T) {
     }
     defer dbconn.Close()
 
-    verifier := newVerificationRegistry(5)
+    verifier := newVerificationRegistry(time.Minute)
 
     to_add := filepath.Join(tmp, "to_add")
     err = mockDirectory(to_add)
@@ -452,7 +452,7 @@ func TestDeregisterHandlers(t *testing.T) {
     }
     defer dbconn.Close()
 
-    verifier := newVerificationRegistry(5)
+    verifier := newVerificationRegistry(time.Minute)
 
     tokr, err := newUnicodeTokenizer(false)
     if err != nil {

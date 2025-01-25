@@ -17,21 +17,16 @@ type verificationSession struct {
     Created time.Time
 }
 
-// We use a multi-pool approach to improve parallelism across requests.
-// The idea is that each path's length (modulo the number of pools) is
-// used to determine the pool in which its verification codes are stored.
-// This should distribute requests fairly evenly among multiple locks.
 type verificationRegistry struct {
-    NumPools int
-    Locks []sync.Mutex
-    Sessions []map[string]verificationSession
+    Lock sync.Mutex
+    Sessions map[string]verificationSession
+    Lifespan time.Duration
 }
 
-func newVerificationRegistry(num_pools int) *verificationRegistry {
-    return &verificationRegistry {
-        NumPools: num_pools,
-        Locks: make([]sync.Mutex, num_pools),
-        Sessions: make([]map[string]verificationSession, num_pools),
+func newVerificationRegistry(lifespan time.Duration) *verificationRegistry {
+    return &verificationRegistry { 
+        Sessions: map[string]verificationSession{},
+        Lifespan: lifespan,
     }
 }
 
@@ -65,56 +60,33 @@ func (vr *verificationRegistry) Provision(path string) (string, error) {
         return "", errors.New("exhausted attempts")
     }
 
-    i := len(path) % vr.NumPools
-    vr.Locks[i].Lock()
-    defer vr.Locks[i].Unlock()
-
-    if vr.Sessions[i] == nil {
-        vr.Sessions[i] = map[string]verificationSession{}
+    vr.Lock.Lock()
+    defer vr.Lock.Unlock()
+    vr.Sessions[path] = verificationSession{ 
+        Code: candidate,
+        Created: time.Now(),
     }
-    vr.Sessions[i][path] = verificationSession{ Code: candidate, Created: time.Now() }
+
+    // Automatically deleting it after some time has expired.
+    go func() {
+        time.Sleep(vr.Lifespan)
+        vr.Lock.Lock()
+        defer vr.Lock.Unlock()
+        delete(vr.Sessions, path)
+    }()
 
     return candidate, nil
 }
 
 func (vr *verificationRegistry) Pop(path string) (string, bool) {
-    i := len(path) % vr.NumPools
-    vr.Locks[i].Lock()
-    defer vr.Locks[i].Unlock()
+    vr.Lock.Lock()
+    defer vr.Lock.Unlock()
 
-    if vr.Sessions[i] == nil {
-        return "", false
-    }
-
-    found, ok := vr.Sessions[i][path]
+    found, ok := vr.Sessions[path]
     if !ok {
         return "", false
     }
 
-    delete(vr.Sessions[i], path)
+    delete(vr.Sessions, path)
     return found.Code, true
-}
-
-func (vr *verificationRegistry) Flush(lifespan time.Duration) {
-    threshold := time.Now().Add(-lifespan)
-    var wg sync.WaitGroup
-    wg.Add(vr.NumPools)
-
-    for i := 0; i < vr.NumPools; i++ {
-        go func(i int) {
-            defer wg.Done()
-            vr.Locks[i].Lock()
-            defer vr.Locks[i].Unlock()
-            if vr.Sessions[i] != nil {
-                for k, v := range vr.Sessions[i] {
-                    if threshold.After(v.Created) {
-                        delete(vr.Sessions[i], k)
-                    }
-                }
-            }
-        }(i)
-    }
-
-    wg.Wait()
-    return
 }
