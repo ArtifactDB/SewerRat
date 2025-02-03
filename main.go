@@ -19,6 +19,7 @@ func main() {
     prefix0 := flag.String("prefix", "", "Prefix to add to each endpoint, after removing any leading or trailing slashes (default \"\")")
     lifetime0 := flag.Int("session", 10, "Maximum lifetime of a (de)registration session from start to finish, in minutes")
     checkpoint0 := flag.Int("checkpoint", 60, "Frequency of checkpoints to synchronise the WAL journal with the SQLite file, in minutes")
+    concurrency0 := flag.Int("concurrency", 10, "Number of concurrent reads from the filesystem.")
     flag.Parse()
 
     dbpath := *dbpath0
@@ -60,7 +61,7 @@ func main() {
 
     // Setting up the endpoints.
     http.HandleFunc("POST " + prefix + "/register/start", newRegisterStartHandler(verifier))
-    http.HandleFunc("POST " + prefix + "/register/finish", newRegisterFinishHandler(db, verifier, tokenizer, timeout))
+    http.HandleFunc("POST " + prefix + "/register/finish", newRegisterFinishHandler(db, verifier, tokenizer, *concurrency0, timeout))
     http.HandleFunc("POST " + prefix + "/deregister/start", newDeregisterStartHandler(db, verifier))
     http.HandleFunc("POST " + prefix + "/deregister/finish", newDeregisterFinishHandler(db, verifier, timeout))
 
@@ -97,7 +98,7 @@ func main() {
         go func() {
             for {
                 <-ticker.C
-                fails, err := updateDirectories(db, tokenizer)
+                fails, err := updateDirectories(db, tokenizer, *concurrency0)
                 if err != nil {
                     log.Printf("[ERROR] failed to update directories; %v\n", err.Error())
                 } else {

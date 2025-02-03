@@ -271,9 +271,12 @@ func TestRegisterHandlers(t *testing.T) {
         return output["code"]
     }
 
+    concurrency := 1
+    duration := time.Duration(1)
+
     t.Run("register finish without verification", func(t *testing.T) {
         quickRegisterStart()
-        handler := http.HandlerFunc(newRegisterFinishHandler(dbconn, verifier, tokr, 1))
+        handler := http.HandlerFunc(newRegisterFinishHandler(dbconn, verifier, tokr, concurrency, duration))
         req := createJsonRequest("POST", "/register/finish", map[string]interface{}{ "path": to_add }, t)
         rr := httptest.NewRecorder()
         handler.ServeHTTP(rr, req)
@@ -289,7 +292,7 @@ func TestRegisterHandlers(t *testing.T) {
             t.Fatal(err)
         }
 
-        handler := http.HandlerFunc(newRegisterFinishHandler(dbconn, verifier, tokr, 1))
+        handler := http.HandlerFunc(newRegisterFinishHandler(dbconn, verifier, tokr, concurrency, duration))
         req := createJsonRequest("POST", "/register/finish", map[string]interface{}{ "path": to_add }, t)
         rr := httptest.NewRecorder()
         handler.ServeHTTP(rr, req)
@@ -321,7 +324,7 @@ func TestRegisterHandlers(t *testing.T) {
 
     t.Run("register finish with empty names", func(t *testing.T) {
         quickRegisterStart()
-        handler := http.HandlerFunc(newRegisterFinishHandler(dbconn, verifier, tokr, 1))
+        handler := http.HandlerFunc(newRegisterFinishHandler(dbconn, verifier, tokr, concurrency, duration))
         req := createJsonRequest("POST", "/register/finish", map[string]interface{}{ "path": to_add, "base": []string{ "", "metadata.json" } }, t)
         rr := httptest.NewRecorder()
         handler.ServeHTTP(rr, req)
@@ -337,7 +340,7 @@ func TestRegisterHandlers(t *testing.T) {
             t.Fatal(err)
         }
 
-        handler := http.HandlerFunc(newRegisterFinishHandler(dbconn, verifier, tokr, 1))
+        handler := http.HandlerFunc(newRegisterFinishHandler(dbconn, verifier, tokr, concurrency, duration))
         req := createJsonRequest("POST", "/register/finish", map[string]interface{}{ "path": to_add, "base": []string{ "metadata.json", "other.json" } }, t)
         rr := httptest.NewRecorder()
         handler.ServeHTTP(rr, req)
@@ -375,7 +378,7 @@ func TestRegisterHandlers(t *testing.T) {
                 t.Fatal(err)
             }
 
-            handler := http.HandlerFunc(newRegisterFinishHandler(dbconn, verifier, tokr, 1))
+            handler := http.HandlerFunc(newRegisterFinishHandler(dbconn, verifier, tokr, concurrency, duration))
             rr := httptest.NewRecorder()
             req := createJsonRequest("POST", "/register/finish", map[string]interface{}{ "path": to_add, "base": []string{ "alpha.json", "bravo.json" } }, t)
             handler.ServeHTTP(rr, req)
@@ -392,7 +395,7 @@ func TestRegisterHandlers(t *testing.T) {
                 t.Fatal(err)
             }
 
-            handler := http.HandlerFunc(newRegisterFinishHandler(dbconn, verifier, tokr, 1))
+            handler := http.HandlerFunc(newRegisterFinishHandler(dbconn, verifier, tokr, concurrency, duration))
             rr := httptest.NewRecorder()
             req := createJsonRequest("POST", "/register/finish", map[string]interface{}{ "path": to_add }, t)
             handler.ServeHTTP(rr, req)
@@ -418,7 +421,7 @@ func TestRegisterHandlers(t *testing.T) {
                 t.Fatal(err)
             }
 
-            handler := http.HandlerFunc(newRegisterFinishHandler(dbconn, verifier, tokr, 1))
+            handler := http.HandlerFunc(newRegisterFinishHandler(dbconn, verifier, tokr, concurrency, duration))
             rr := httptest.NewRecorder()
             req := createJsonRequest("POST", "/register/finish", map[string]interface{}{ "path": to_add, "base": []string{ "metadata.json" } }, t)
             handler.ServeHTTP(rr, req)
@@ -459,13 +462,15 @@ func TestDeregisterHandlers(t *testing.T) {
         t.Fatalf(err.Error())
     }
 
+    concurrency := 1
+
     to_add := filepath.Join(tmp, "to_add")
     err = mockDirectory(to_add)
     if err != nil {
         t.Fatalf(err.Error())
     }
 
-    comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr)
+    comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr, concurrency)
     if err != nil {
         t.Fatal(err)
     }
@@ -569,7 +574,7 @@ func TestDeregisterHandlers(t *testing.T) {
     })
 
     // Readding the directory, and then removing it from the file system.
-    comments, err = addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr)
+    comments, err = addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr, concurrency)
     if err != nil {
         t.Fatal(err)
     }
@@ -625,6 +630,8 @@ func TestQueryHandler(t *testing.T) {
         t.Fatalf(err.Error())
     }
 
+    concurrency := 1
+
     wtokr, err := newUnicodeTokenizer(true)
     if err != nil {
         t.Fatalf(err.Error())
@@ -636,7 +643,7 @@ func TestQueryHandler(t *testing.T) {
         t.Fatalf(err.Error())
     }
 
-    comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr)
+    comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr, concurrency)
     if err != nil {
         t.Fatal(err)
     }
@@ -884,13 +891,15 @@ func TestRetrieveMetadataHandler(t *testing.T) {
         t.Fatalf(err.Error())
     }
 
+    concurrency := 1
+
     to_add := filepath.Join(tmp, "to_add")
     err = mockDirectory(to_add)
     if err != nil {
         t.Fatalf(err.Error())
     }
 
-    comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr)
+    comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr, concurrency)
     if err != nil {
         t.Fatal(err)
     }
@@ -1031,6 +1040,8 @@ func TestRetrieveFileHandler(t *testing.T) {
         t.Fatalf(err.Error())
     }
 
+    concurrency := 1
+
     to_add := filepath.Join(tmp, "to_add")
     err = mockDirectory(to_add)
     if err != nil {
@@ -1038,7 +1049,7 @@ func TestRetrieveFileHandler(t *testing.T) {
     }
 
     // Here, nothing is actually indexed! So we can't get confused with the metadata retrievals.
-    comments, err := addNewDirectory(dbconn, to_add, []string{}, "myself", tokr)
+    comments, err := addNewDirectory(dbconn, to_add, []string{}, "myself", tokr, concurrency)
     if err != nil {
         t.Fatal(err)
     }
@@ -1162,13 +1173,15 @@ func TestListFilesHandler(t *testing.T) {
         t.Fatalf(err.Error())
     }
 
+    concurrency := 1
+
     to_add := filepath.Join(tmp, "to_add")
     err = mockDirectory(to_add)
     if err != nil {
         t.Fatalf(err.Error())
     }
 
-    comments, err := addNewDirectory(dbconn, to_add, []string{}, "myself", tokr)
+    comments, err := addNewDirectory(dbconn, to_add, []string{}, "myself", tokr, concurrency)
     if err != nil {
         t.Fatal(err)
     }
@@ -1312,6 +1325,8 @@ func TestListRegisteredDirectoriesHandler(t *testing.T) {
         t.Fatalf(err.Error())
     }
 
+    concurrency := 1
+
     for _, name := range []string{ "akari", "ai", "alice" } {
         to_add := filepath.Join(tmp, "to_add_" + name)
         err = mockDirectory(to_add)
@@ -1319,7 +1334,7 @@ func TestListRegisteredDirectoriesHandler(t *testing.T) {
             t.Fatalf(err.Error())
         }
 
-        comments, err := addNewDirectory(dbconn, to_add, []string{"metadata.json"}, name, tokr)
+        comments, err := addNewDirectory(dbconn, to_add, []string{"metadata.json"}, name, tokr, concurrency)
         if err != nil {
             t.Fatal(err)
         }

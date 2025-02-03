@@ -160,7 +160,7 @@ func newRegisterStartHandler(verifier *verificationRegistry) func(http.ResponseW
     }
 }
 
-func newRegisterFinishHandler(db *sql.DB, verifier *verificationRegistry, tokenizer *unicodeTokenizer, timeout time.Duration) func(http.ResponseWriter, *http.Request) {
+func newRegisterFinishHandler(db *sql.DB, verifier *verificationRegistry, tokenizer *unicodeTokenizer, concurrency int, timeout time.Duration) func(http.ResponseWriter, *http.Request) {
     return func(w http.ResponseWriter, r *http.Request) {
         if r.Body == nil {
             dumpErrorResponse(w, http.StatusBadRequest, "expected a non-empty request body")
@@ -226,7 +226,7 @@ func newRegisterFinishHandler(db *sql.DB, verifier *verificationRegistry, tokeni
             return
         }
 
-        failures, err := addNewDirectory(db, regpath, allowed, username, tokenizer)
+        failures, err := addNewDirectory(db, regpath, allowed, username, tokenizer, concurrency)
         if err != nil {
             dumpHttpErrorResponse(w, fmt.Errorf("failed to index directory; %w", err))
             return
