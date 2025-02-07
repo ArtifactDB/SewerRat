@@ -439,6 +439,42 @@ func TestRegisterHandlers(t *testing.T) {
             }
         }
     })
+
+    t.Run("register finish without blocking", func(t *testing.T) {
+        code := quickRegisterStart()
+        err := os.WriteFile(filepath.Join(to_add, code), []byte(""), 0644)
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        handler := http.HandlerFunc(newRegisterFinishHandler(dbconn, verifier, tokr, concurrency, duration))
+        req := createJsonRequest("POST", "/register/finish", map[string]interface{}{ "path": to_add, "base": []string{ "charlie.json" }, "block": false }, t)
+        rr := httptest.NewRecorder()
+        handler.ServeHTTP(rr, req)
+        if rr.Code != http.StatusAccepted {
+            t.Fatal("should have accepted the non-blocking registration")
+        }
+
+        // Check if it's been indexed.
+        okay := false
+        for i := 0; i < 10; i++ {
+            time.Sleep(time.Millisecond * 100)
+            present, err := listDirs(dbconn)
+            if err != nil {
+                t.Fatal(err)
+            }
+            names, found := present[to_add]
+            if found {
+                if len(names) == 1 && names[0] == "charlie.json" {
+                    okay = true
+                    break
+                }
+            }
+        }
+        if !okay {
+            t.Fatal("non-blocking registration failed")
+        }
+    })
 }
 
 func TestDeregisterHandlers(t *testing.T) {
@@ -511,9 +547,9 @@ func TestDeregisterHandlers(t *testing.T) {
         }
     })
 
-    quickDeregisterStart := func() string {
+    quickDeregisterStart := func(path string) string {
         handler := http.HandlerFunc(newDeregisterStartHandler(dbconn, verifier))
-        req := createJsonRequest("POST", "/deregister/start", map[string]interface{}{ "path": to_add }, t)
+        req := createJsonRequest("POST", "/deregister/start", map[string]interface{}{ "path": path }, t)
         rr := httptest.NewRecorder()
         handler.ServeHTTP(rr, req)
         if rr.Code != http.StatusAccepted {
@@ -524,7 +560,7 @@ func TestDeregisterHandlers(t *testing.T) {
     }
 
     t.Run("deregister fail", func(t *testing.T) {
-        quickDeregisterStart()
+        quickDeregisterStart(to_add)
         handler := http.HandlerFunc(newDeregisterFinishHandler(dbconn, verifier, 1))
 
         // First attempt fails, because we didn't add the registration code.
@@ -541,7 +577,7 @@ func TestDeregisterHandlers(t *testing.T) {
     })
 
     t.Run("deregister ok", func(t *testing.T) {
-        code := quickDeregisterStart()
+        code := quickDeregisterStart(to_add)
         err := os.WriteFile(filepath.Join(to_add, code), []byte(""), 0644)
         if err != nil {
             t.Fatal(err)
@@ -570,6 +606,47 @@ func TestDeregisterHandlers(t *testing.T) {
         }
         if len(all_paths) != 0 {
             t.Fatalf("unexpected paths in the database %v", all_paths)
+        }
+    })
+
+    t.Run("deregister finish without blocking", func(t *testing.T) {
+        comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr, concurrency)
+        if err != nil {
+            t.Fatal(err)
+        }
+        if len(comments) != 0 {
+            t.Fatal("no comments should be present")
+        }
+
+        code := quickDeregisterStart(to_add)
+        err = os.WriteFile(filepath.Join(to_add, code), []byte(""), 0644)
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        handler := http.HandlerFunc(newDeregisterFinishHandler(dbconn, verifier, 1))
+        req := createJsonRequest("POST", "/deregister/finish", map[string]interface{}{ "path": to_add, "block": false }, t)
+        rr := httptest.NewRecorder()
+        handler.ServeHTTP(rr, req)
+        if rr.Code != http.StatusAccepted {
+            t.Fatal("should have accepted the non-blocking deregistration")
+        }
+
+        // Check if it's been removed from the index.
+        okay := false
+        for i := 0; i < 10; i++ {
+            time.Sleep(time.Millisecond * 100)
+            present, err := listDirs(dbconn)
+            if err != nil {
+                t.Fatal(err)
+            }
+            if _, found := present[to_add]; !found {
+                okay = true
+                break
+            }
+        }
+        if !okay {
+            t.Fatal("non-blocking deregistration failed")
         }
     })
 
@@ -607,6 +684,33 @@ func TestDeregisterHandlers(t *testing.T) {
         }
         if len(all_paths) != 0 {
             t.Fatalf("unexpected paths in the database %v", all_paths)
+        }
+    })
+
+    t.Run("deregister immediate without blocking", func(t *testing.T) {
+        handler := http.HandlerFunc(newDeregisterStartHandler(dbconn, verifier))
+        req := createJsonRequest("POST", "/deregister/start", map[string]interface{}{ "path": to_add, "block": false }, t)
+        rr := httptest.NewRecorder()
+        handler.ServeHTTP(rr, req)
+        if rr.Code != http.StatusAccepted {
+            t.Fatalf("should have succeeded")
+        }
+
+        // Check if it's been removed from the index.
+        okay := false
+        for i := 0; i < 10; i++ {
+            time.Sleep(time.Millisecond * 100)
+            present, err := listDirs(dbconn)
+            if err != nil {
+                t.Fatal(err)
+            }
+            if _, found := present[to_add]; !found {
+                okay = true
+                break
+            }
+        }
+        if !okay {
+            t.Fatal("non-blocking deregistration failed")
         }
     })
 }

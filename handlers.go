@@ -166,10 +166,12 @@ func newRegisterFinishHandler(db *sql.DB, verifier *verificationRegistry, tokeni
             dumpErrorResponse(w, http.StatusBadRequest, "expected a non-empty request body")
             return
         }
+
         dec := json.NewDecoder(r.Body)
         output := struct { 
             Path string `json:"path"`
             Base []string `json:"base"`
+            Block *bool `json:"block"`
         }{}
         err := dec.Decode(&output)
         if err != nil {
@@ -226,14 +228,25 @@ func newRegisterFinishHandler(db *sql.DB, verifier *verificationRegistry, tokeni
             return
         }
 
-        failures, err := addNewDirectory(db, regpath, allowed, username, tokenizer, concurrency)
-        if err != nil {
-            dumpHttpErrorResponse(w, fmt.Errorf("failed to index directory; %w", err))
+        if output.Block == nil || *(output.Block) {
+            failures, err := addNewDirectory(db, regpath, allowed, username, tokenizer, concurrency)
+            if err != nil {
+                dumpHttpErrorResponse(w, fmt.Errorf("failed to index directory; %w", err))
+                return
+            } else {
+                dumpJsonResponse(w, http.StatusOK, map[string]interface{}{ "status": "SUCCESS", "comments": failures })
+                return
+            }
+        } else {
+            go func() {
+                _, err := addNewDirectory(db, regpath, allowed, username, tokenizer, concurrency)
+                if err != nil {
+                    log.Printf("failed to add directory %q; %v", regpath, err)
+                }
+            }()
+            dumpJsonResponse(w, http.StatusAccepted, map[string]interface{}{ "status": "PENDING" })
             return
         }
-
-        dumpJsonResponse(w, http.StatusOK, map[string]interface{}{ "status": "SUCCESS", "comments": failures })
-        return
     }
 }
 
@@ -245,8 +258,12 @@ func newDeregisterStartHandler(db *sql.DB, verifier *verificationRegistry) func(
             dumpErrorResponse(w, http.StatusBadRequest, "expected a non-empty request body")
             return
         }
+
         dec := json.NewDecoder(r.Body)
-        output := struct { Path string `json:"path"` }{}
+        output := struct { 
+            Path string `json:"path"` 
+            Block *bool `json:"block"`
+        }{}
         err := dec.Decode(&output)
         if err != nil {
             dumpHttpErrorResponse(w, newHttpError(http.StatusBadRequest, fmt.Errorf("failed to decode body; %w", err)))
@@ -262,12 +279,23 @@ func newDeregisterStartHandler(db *sql.DB, verifier *verificationRegistry) func(
         // No need to check for a valid directory, as we want to be able to deregister missing/symlinked directories.
         // If the directory doesn't exist, then we don't need to attempt to create a verification code.
         if _, err := os.Stat(regpath); errors.Is(err, os.ErrNotExist) {
-            err := deleteDirectory(db, regpath)
-            if err != nil {
-                dumpHttpErrorResponse(w, fmt.Errorf("failed to deregister %q; %w", regpath, err))
-                return
+            if output.Block == nil || *(output.Block) {
+                err := deleteDirectory(db, regpath)
+                if err != nil {
+                    dumpHttpErrorResponse(w, fmt.Errorf("failed to deregister %q; %w", regpath, err))
+                    return
+                } else {
+                    dumpJsonResponse(w, http.StatusOK, map[string]string{ "status": "SUCCESS" })
+                    return
+                }
             } else {
-                dumpJsonResponse(w, http.StatusOK, map[string]string{ "status": "SUCCESS" })
+                go func() {
+                    err := deleteDirectory(db, regpath)
+                    if err != nil {
+                        log.Printf("failed to delete directory %q; %v", regpath, err)
+                    }
+                }()
+                dumpJsonResponse(w, http.StatusAccepted, map[string]string{ "status": "PENDING" })
                 return
             }
         }
@@ -289,8 +317,12 @@ func newDeregisterFinishHandler(db *sql.DB, verifier *verificationRegistry, time
             dumpErrorResponse(w, http.StatusBadRequest, "expected a non-empty request body")
             return
         }
+
         dec := json.NewDecoder(r.Body)
-        output := struct { Path string `json:"path"` }{}
+        output := struct {
+            Path string `json:"path"`
+            Block *bool `json:"block"`
+        }{}
         err := dec.Decode(&output)
         if err != nil {
             dumpErrorResponse(w, http.StatusBadRequest, fmt.Sprintf("failed to decode body; %v", err))
@@ -309,14 +341,25 @@ func newDeregisterFinishHandler(db *sql.DB, verifier *verificationRegistry, time
             return
         }
 
-        err = deleteDirectory(db, regpath)
-        if err != nil {
-            dumpHttpErrorResponse(w, fmt.Errorf("failed to deregister %q; %w", regpath, err))
+        if output.Block == nil || *(output.Block) {
+            err := deleteDirectory(db, regpath)
+            if err != nil {
+                dumpHttpErrorResponse(w, fmt.Errorf("failed to deregister %q; %w", regpath, err))
+                return
+            } else {
+                dumpJsonResponse(w, http.StatusOK, map[string]string{ "status": "SUCCESS" })
+                return
+            }
+        } else {
+            go func() {
+                err := deleteDirectory(db, regpath)
+                if err != nil {
+                    log.Printf("failed to delete directory %q; %v", regpath, err)
+                }
+            }()
+            dumpJsonResponse(w, http.StatusAccepted, map[string]string{ "status": "PENDING" })
             return
         }
-
-        dumpJsonResponse(w, http.StatusOK, map[string]string{ "status": "SUCCESS" })
-        return
     }
 }
 

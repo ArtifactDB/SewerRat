@@ -77,6 +77,10 @@ The causes of any failures are reported in the `comments` array in the HTTP resp
 On success, the metadata files in the specified directory will be incorporated into the SQLite index.
 We can then [search on the contents of these files](#querying-the-index) or [fetch the contents of any file](#fetching-file-contents) in the registered directory.
 
+By default, the `/register/finish` endpoint will block until the registration is complete.
+Users can set `"block": false` in the request body to perform the registration asynchronously, in which case the endpoint will return immediately with a `status` of `PENDING` and no comments on indexing failures.
+The [`/registered`](#identifying-registered-directories) endpoint can be interrogated to check if the directory was successfully registered.
+
 ### Indexing in detail
 
 As mentioned above, SewerRat will recurse through the specified directory to find metadata files with the listed `base` names.
@@ -123,9 +127,14 @@ Currently, this can only be resolved by deleting all affected symbolic links, re
 
 ### Deregistering
 
-To remove files from the index, we use the same procedure as above but replacing the `/register/*` endpoints with `/deregister/*`.
+To remove files from the index, we use the same procedure but replacing the `/register/*` endpoints with `/deregister/*`.
 The only potential difference is when the caller requests deregistration of a directory that does not exist.
 In this case, `/deregister/start` may return a `SUCCESS` status instead of `PENDING`, after which `/deregister/finish` does not need to be called.
+
+By default, the `/deregister/finish` endpoint will block until the deregistration is complete.
+Users can set `"block": false` in the request body to perform the deregistration asynchronously, in which case the endpoint will return immediately with a `status` of `PENDING`. 
+The [`/registered`](#identifying-registered-directories) endpoint can be interrogated to check if the directory was successfully deregistered.
+The same option can be set in `/deregister/start` for asynchronous deregistration when the directory does not exist.
 
 ### Other comments
 
