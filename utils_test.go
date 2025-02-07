@@ -7,6 +7,7 @@ import (
     "database/sql"
     "encoding/json"
     "sort"
+    "errors"
 )
 
 func equalStringArrays(x []string, y []string) bool {
@@ -50,6 +51,13 @@ func equalPathArrays(x []string, y []string, dir string) bool {
 }
 
 func mockDirectory(path string) error {
+    if _, err := os.Stat(path); err == nil || !errors.Is(err, os.ErrNotExist) {
+        err := os.RemoveAll(path)
+        if err != nil {
+            return fmt.Errorf("failed to remove the mock directory; %w", err)
+        }
+    }
+
     err := os.MkdirAll(path, 0700)
     if err != nil {
         return fmt.Errorf("failed to create the mock directory; %w", err)
@@ -91,7 +99,7 @@ func mockDirectory(path string) error {
 }
 
 func listPaths(dbconn * sql.DB, scratch string) ([]string, error) {
-    rows, err := dbconn.Query("SELECT path FROM paths")
+    rows, err := dbconn.Query("SELECT path FROM paths WHERE path LIKE ?", scratch + "/%")
     if err != nil {
         return nil, err
     }
