@@ -127,9 +127,31 @@ Currently, this can only be resolved by deleting all affected symbolic links, re
 
 ### Deregistering
 
-To remove files from the index, we use the same procedure but replacing the `/register/*` endpoints with `/deregister/*`.
+To remove files from the index, we use a [initialization](#initialization) and [verification](#verification) procedure similar to that described for registration.
+The only difference is that we replace the `/register/*` endpoints with `/deregister/*`.
+
+```shell
+PWD=$(pwd)
+curl -X POST -L ${SEWER_RAT_URL}/deregister/start \
+    -H "Content-Type: application/json" \
+    -d '{ "path": "'${PWD}'/test" }' | jq
+## {
+##   "code": ".sewer_HCx4lnvIpkGt6HuWQtl0zhJE41epL1-kS7Jzv1pTw9k",
+##   "status": "PENDING"
+## }
+
+# .. Add the code file to the directory to be deregistered...
+
+curl -X POST -L ${SEWER_RAT_URL}/deregister/finish \
+    -H "Content-Type: application/json" \
+    -d '{ "path": "'${PWD}'/test", }' | jq
+## {
+##   "status": "SUCCESS"
+## }
+```
+
 The only potential difference is when the caller requests deregistration of a directory that does not exist.
-In this case, `/deregister/start` may return a `SUCCESS` status instead of `PENDING`, after which `/deregister/finish` does not need to be called.
+In this case, `/deregister/start` will directly return a `SUCCESS` status instead of `PENDING`, after which `/deregister/finish` does not need to be called.
 
 By default, the `/deregister/finish` endpoint will block until the deregistration is complete.
 Users can set `"block": false` in the request body to perform the deregistration asynchronously, in which case the endpoint will return immediately with a `status` of `PENDING`. 
