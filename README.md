@@ -98,10 +98,10 @@ If the directory contains symbolic links to other directories, these will not be
 
 Each identified metadata document is parsed as JSON and converted into tokens.
 For strings, we use an adaptation of the [FTS5 Unicode61 tokenizer](https://www.sqlite.org/fts5.html#unicode61_tokenizer) to break each string into tokens,
-i.e., strings are split into tokens at any character that is not a Unicode letter/number or a dash.
+where strings are split into tokens at any character that is not a Unicode letter/number or a dash.
 For numbers and booleans, the string representation of the value is tokenized.
-All tokens are stored in the index, associated with the JSON object properties in which it was found,
-e.g., the value `"Chris"` is associated with the properties `"b.c"` in the document below.
+Each token is stored in the index and is associated with the names of the properties of the (nested) JSON objects in which it was found,
+e.g., the values `"Aaron"` and `"Chris"` are associated with the names `"a"` and `"b.c"` in the document below.
 
 ```json
 {
@@ -253,7 +253,7 @@ The nature of the search depends on the value of `type`:
     Defaults to `false`.
   - (optional) `is_suffix`, a boolean indicating whether to search for absolute paths that end with `path`. 
     Defaults to `false`.
-  - (optional) `is_pattern`, a boolean indicating whether `path` is a wildcard-containing pattern, see the equivalent field for `text`.
+  - (optional) `is_pattern`, a boolean indicating whether `path` is a wildcard-containing pattern, see the equivalent option for `text`.
     Defaults to `false`.
 - For `"time"`, SewerRat searches on the latest modification time of each file.
   The search clause should contain the following additional properties:
@@ -282,14 +282,15 @@ The search string below will look for all metadata documents that match `foo` or
 
 The `AND`, `OR` and `NOT` (note the all-caps!) are automatically translated to the corresponding search clauses.
 This can be combined with parentheses to control precedence; otherwise, `AND` takes precedence over `OR`, and `NOT` takes precedence over both.
-Note that any sequence of adjacent text terms are implicitly `AND`'d together, so the two expressions below are equivalent:
+Note that any sequence of adjacent text query terms are implicitly `AND`'d together, so the two expressions below are equivalent:
 
 ```
 foo bar whee
 foo AND bar AND whee
 ```
 
-Users can prefix any sequence of text terms with the name of a metadata field, to only search for matches within that field of the metadata file.
+Users can prefix any sequence of text query terms with the name of a metadata property, i.e., a "property field".
+This instructs SewerRat to only search for matches within that property of the metadata file.
 For example:
 
 ```
@@ -297,14 +298,14 @@ For example:
 ```
 
 This also works for properties of JSON objects that are nested in other objects.
-Here, the name of the field is defined by concatenating all property names with an intervening period, e.g.:
+Here, the property field is defined by concatenating all property names with an intervening period, e.g.:
 
 ```
 publication.author.first_name: Aaron
 ```
 
 Note that this scoping-by-field does not extend to the `AND`, `OR` and `NOT` keywords,
-e.g., `title:foo OR bar` will not limit the search for `bar` to the `title` field.
+e.g., `title:foo OR bar` will not limit the search for `bar` to the `title` property.
 
 If a `*` or `?` wildcard is present in a search term, pattern matching will be performed to the metadata-derived tokens.
 This only applies to the search clause immediately containing the term, e.g., `foo*` and `bar` will be used for pattern matching but `whee` and `stuff` will not.
@@ -314,7 +315,7 @@ This only applies to the search clause immediately containing the term, e.g., `f
 ```
 
 The human-friendly mode can be enabled by setting the `translate=true` query parameter in the request to the `/query` endpoint.
-The structure of the request body is unchanged except that any `text` field is assumed to contain a search string and will be translated into the relevant search clause.
+The structure of the request body is unchanged except that any `text` property in the request is assumed to contain a search string and will be translated into the relevant search clause.
 
 ```shell
 curl -X POST -L ${SEWER_RAT_URL}/query?translate=true \
