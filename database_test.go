@@ -130,7 +130,7 @@ func TestAddNewDirectory(t *testing.T) {
         t.Fatalf(err.Error())
     }
 
-    concurrency := 2
+    add_options := &addDirectoryContentsOptions{ Concurrency: 2 }
 
     self, err := user.Current()
     if err != nil {
@@ -149,7 +149,7 @@ func TestAddNewDirectory(t *testing.T) {
         defer dbconn.Close()
         defer os.Remove(dbpath)
 
-        comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json" }, "myself", tokr, concurrency)
+        comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json" }, "myself", tokr, add_options)
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -270,7 +270,7 @@ func TestAddNewDirectory(t *testing.T) {
         defer os.Remove(dbpath)
 
         // Works with multiple JSON targets.
-        comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myslef", tokr, concurrency)
+        comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myslef", tokr, add_options)
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -314,7 +314,7 @@ func TestAddNewDirectory(t *testing.T) {
         defer os.Remove(dbpath)
 
         // Works with multiple JSON directories.
-        comments, err := addNewDirectory(dbconn, to_add, []string{ "other.json" }, "myself", tokr, concurrency)
+        comments, err := addNewDirectory(dbconn, to_add, []string{ "other.json" }, "myself", tokr, add_options)
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -322,7 +322,7 @@ func TestAddNewDirectory(t *testing.T) {
             t.Fatalf("unexpected comments from the directory addition %v", comments)
         }
 
-        comments, err = addNewDirectory(dbconn, to_add2, []string{ "metadata.json" }, "myself", tokr, concurrency)
+        comments, err = addNewDirectory(dbconn, to_add2, []string{ "metadata.json" }, "myself", tokr, add_options)
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -355,7 +355,7 @@ func TestAddNewDirectory(t *testing.T) {
         }
 
         // Recalling on an existing directory wipes out existing entries and replaces it.
-        comments, err = addNewDirectory(dbconn, to_add, []string{ "metadata.json" }, "myself", tokr, concurrency)
+        comments, err = addNewDirectory(dbconn, to_add, []string{ "metadata.json" }, "myself", tokr, add_options)
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -393,7 +393,7 @@ func TestAddNewDirectory(t *testing.T) {
         defer os.Remove(dbpath)
 
         // Reports the error correctly.
-        comments, err := addNewDirectory(dbconn, to_fail, []string{ "metadata.json", "other.json" }, "myself", tokr, concurrency)
+        comments, err := addNewDirectory(dbconn, to_fail, []string{ "metadata.json", "other.json" }, "myself", tokr, add_options)
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -432,7 +432,7 @@ func TestAddNewDirectory(t *testing.T) {
         defer dbconn.Close()
         defer os.Remove(dbpath)
 
-        comments, err := addNewDirectory(dbconn, symdir, []string{ "metadata.json", "other.json" }, "myself", tokr, concurrency)
+        comments, err := addNewDirectory(dbconn, symdir, []string{ "metadata.json", "other.json" }, "myself", tokr, add_options)
         if err != nil {
             t.Fatal(err)
         }
@@ -484,9 +484,9 @@ func TestDeleteDirectory(t *testing.T) {
         t.Fatalf(err.Error())
     }
 
-    concurrency := 2
+    add_options := &addDirectoryContentsOptions{ Concurrency: 2 }
 
-    comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr, concurrency)
+    comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr, add_options)
     if err != nil {
         t.Fatalf(err.Error())
     }
@@ -494,7 +494,7 @@ func TestDeleteDirectory(t *testing.T) {
         t.Fatalf("unexpected comments from the directory addition %v", comments)
     }
 
-    comments, err = addNewDirectory(dbconn, to_add2, []string{ "other.json" }, "myself", tokr, concurrency)
+    comments, err = addNewDirectory(dbconn, to_add2, []string{ "other.json" }, "myself", tokr, add_options)
     if err != nil {
         t.Fatalf(err.Error())
     }
@@ -586,7 +586,7 @@ func TestUpdateDirectories(t *testing.T) {
         t.Fatalf(err.Error())
     }
 
-    concurrency := 2
+    add_options := &addDirectoryContentsOptions{ Concurrency: 2 }
 
     getTime := func(dbconn *sql.DB, path string) int64 {
         var val int64
@@ -653,7 +653,7 @@ func TestUpdateDirectories(t *testing.T) {
 
         var oldtime1, oldtime2 int64
         {
-            comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr, concurrency)
+            comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr, add_options)
             if err != nil {
                 t.Fatalf(err.Error())
             }
@@ -684,7 +684,7 @@ func TestUpdateDirectories(t *testing.T) {
         }
 
         // Now actually running the update.
-        comments, err := updateDirectories(dbconn, tokr, concurrency)
+        comments, err := updateDirectories(dbconn, tokr, add_options)
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -766,7 +766,7 @@ func TestUpdateDirectories(t *testing.T) {
         defer os.RemoveAll(to_add)
 
         {
-            comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr, concurrency)
+            comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr, add_options)
             if err != nil {
                 t.Fatalf(err.Error())
             }
@@ -787,7 +787,7 @@ func TestUpdateDirectories(t *testing.T) {
         }
 
         // Now actually running the update.
-        comments, err := updateDirectories(dbconn, tokr, concurrency)
+        comments, err := updateDirectories(dbconn, tokr, add_options)
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -849,7 +849,7 @@ func TestUpdateDirectories(t *testing.T) {
         defer os.RemoveAll(to_add)
 
         {
-            comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr, concurrency)
+            comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr, add_options)
             if err != nil {
                 t.Fatalf(err.Error())
             }
@@ -864,7 +864,7 @@ func TestUpdateDirectories(t *testing.T) {
             t.Fatalf(err.Error())
         }
 
-        comments, err := updateDirectories(dbconn, tokr, concurrency)
+        comments, err := updateDirectories(dbconn, tokr, add_options)
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -898,7 +898,7 @@ func TestUpdateDirectories(t *testing.T) {
         defer os.RemoveAll(to_add)
 
         {
-            comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr, concurrency)
+            comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr, add_options)
             if err != nil {
                 t.Fatalf(err.Error())
             }
@@ -924,7 +924,7 @@ func TestUpdateDirectories(t *testing.T) {
         }
 
         // Now actually running the update.
-        comments, err := updateDirectories(dbconn, tokr, concurrency)
+        comments, err := updateDirectories(dbconn, tokr, add_options)
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -1004,7 +1004,7 @@ func TestUpdateDirectories(t *testing.T) {
         defer os.RemoveAll(to_add)
 
         {
-            comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr, concurrency)
+            comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr, add_options)
             if err != nil {
                 t.Fatalf(err.Error())
             }
@@ -1051,7 +1051,7 @@ func TestUpdateDirectories(t *testing.T) {
         }
 
         // Now actually running the update.
-        comments, err := updateDirectories(dbconn, tokr, concurrency)
+        comments, err := updateDirectories(dbconn, tokr, add_options)
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -1134,7 +1134,7 @@ func TestUpdateDirectories(t *testing.T) {
         }
         defer os.RemoveAll(to_add)
 
-        comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr, concurrency)
+        comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr, add_options)
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -1149,7 +1149,7 @@ func TestUpdateDirectories(t *testing.T) {
             t.Fatalf(err.Error())
         }
 
-        comments, err = updateDirectories(dbconn, tokr, concurrency)
+        comments, err = updateDirectories(dbconn, tokr, add_options)
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -1186,7 +1186,7 @@ func TestBackupDatabase(t *testing.T) {
         t.Fatalf(err.Error())
     }
 
-    concurrency := 2
+    add_options := &addDirectoryContentsOptions{ Concurrency: 2 }
 
     // Mocking up some contents.
     to_add := filepath.Join(tmp, "to_add")
@@ -1195,7 +1195,7 @@ func TestBackupDatabase(t *testing.T) {
         t.Fatalf(err.Error())
     }
 
-    comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr, concurrency)
+    comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr, add_options)
     if err != nil {
         t.Fatalf(err.Error())
     }
@@ -1257,7 +1257,7 @@ func TestQueryTokens(t *testing.T) {
         t.Fatalf(err.Error())
     }
 
-    concurrency := 2
+    add_options := &addDirectoryContentsOptions{ Concurrency: 2 }
 
     // Mocking up some contents.
     to_add := filepath.Join(tmp, "to_add")
@@ -1266,7 +1266,7 @@ func TestQueryTokens(t *testing.T) {
         t.Fatalf(err.Error())
     }
 
-    comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr, concurrency)
+    comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr, add_options)
     if err != nil {
         t.Fatalf(err.Error())
     }
@@ -1715,7 +1715,7 @@ func TestRetrievePath(t *testing.T) {
         t.Fatalf(err.Error())
     }
 
-    concurrency := 2
+    add_options := &addDirectoryContentsOptions{ Concurrency: 2 }
 
     // Mocking up some contents.
     to_add := filepath.Join(tmp, "to_add")
@@ -1724,7 +1724,7 @@ func TestRetrievePath(t *testing.T) {
         t.Fatalf(err.Error())
     }
 
-    comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr, concurrency)
+    comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr, add_options)
     if err != nil {
         t.Fatalf(err.Error())
     }
@@ -1800,7 +1800,7 @@ func TestListRegisteredDirectories(t *testing.T) {
         t.Fatalf(err.Error())
     }
 
-    concurrency := 2
+    add_options := &addDirectoryContentsOptions{ Concurrency: 2 }
 
     // Mocking up some contents.
     for _, name := range []string{ "foo", "bar" } {
@@ -1810,7 +1810,7 @@ func TestListRegisteredDirectories(t *testing.T) {
             t.Fatalf(err.Error())
         }
 
-        comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, name + "_user", tokr, concurrency)
+        comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, name + "_user", tokr, add_options)
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -1948,7 +1948,7 @@ func TestIsDirectoryRegistered(t *testing.T) {
         t.Fatalf(err.Error())
     }
 
-    concurrency := 2
+    add_options := &addDirectoryContentsOptions{ Concurrency: 2 }
 
     // Mocking up some contents.
     to_add := filepath.Join(tmp, "to_add")
@@ -1957,7 +1957,7 @@ func TestIsDirectoryRegistered(t *testing.T) {
         t.Fatalf(err.Error())
     }
 
-    comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr, concurrency)
+    comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr, add_options)
     if err != nil {
         t.Fatalf(err.Error())
     }
@@ -2021,7 +2021,7 @@ func TestFetchRegisteredDirectoryNames(t *testing.T) {
         t.Fatalf(err.Error())
     }
 
-    concurrency := 10
+    add_options := &addDirectoryContentsOptions{ Concurrency: 10 }
 
     to_add := filepath.Join(tmp, "liella")
     err = mockDirectory(to_add)
@@ -2029,7 +2029,7 @@ func TestFetchRegisteredDirectoryNames(t *testing.T) {
         t.Fatalf(err.Error())
     }
 
-    comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "aaron", tokr, concurrency)
+    comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "aaron", tokr, add_options)
     if err != nil {
         t.Fatalf(err.Error())
     }
@@ -2067,7 +2067,7 @@ func TestInitializeReadOnlyDatabase(t *testing.T) {
         t.Fatal(err)
     }
 
-    concurrency := 10
+    add_options := &addDirectoryContentsOptions{ Concurrency: 10 }
 
     // Mocking up some contents.
     to_add := filepath.Join(tmp, "to_add")
@@ -2083,13 +2083,13 @@ func TestInitializeReadOnlyDatabase(t *testing.T) {
     }
     defer ro_dbconn.Close()
 
-    _, err = addNewDirectory(ro_dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr, concurrency)
+    _, err = addNewDirectory(ro_dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr, add_options)
     if err == nil || strings.Index(err.Error(), "read-only") >= 0 {
         t.Error("expected a failure to modify the database through read-only connection")
     }
 
     // Adding it as a negative control.
-    comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr, concurrency)
+    comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr, add_options)
     if err != nil {
         t.Fatal(err)
     }
@@ -2105,4 +2105,175 @@ func TestInitializeReadOnlyDatabase(t *testing.T) {
     if !found {
         t.Error("failed to find the newly added directory through a read-only connection")
     }
+}
+
+func TestTokenizePathField(t *testing.T) {
+    tmp, err := os.MkdirTemp("", "")
+    if err != nil {
+        t.Fatalf(err.Error())
+    }
+    defer os.RemoveAll(tmp)
+
+    tokr, err := newUnicodeTokenizer(false)
+    if err != nil {
+        t.Fatalf(err.Error())
+    }
+
+    dbpath := filepath.Join(tmp, "db.sqlite3")
+
+    validateTokenPaths := func(dbconn *sql.DB, t *testing.T, tokens []string, field string, dirname string) {
+        expected_paths := []string{
+            dirname + "/metadata.json",
+            dirname + "/stuff/metadata.json",
+        }
+
+        for _, token := range tokens {
+            rows, err := dbconn.Query(`SELECT paths.path FROM links
+LEFT JOIN paths ON paths.pid = links.pid
+LEFT JOIN tokens ON tokens.tid = links.tid
+LEFT JOIN fields ON fields.fid = links.fid
+WHERE tokens.token = ? AND fields.field = ?`, 
+                token,
+                field,
+            )
+            if err != nil {
+                t.Fatal(err)
+            }
+
+            all_paths := []string{}
+            for rows.Next() {
+                var path string
+                err = rows.Scan(&path)
+                if err != nil {
+                    t.Fatal(err)
+                }
+                rel, err := filepath.Rel(tmp, path)
+                if err != nil {
+                    t.Fatal(err)
+                }
+                all_paths = append(all_paths, rel)
+            }
+
+            sort.Strings(all_paths)
+            if !equalStringArrays(all_paths, expected_paths) {
+                t.Errorf("expected path components to be correctly tokenized; %v", all_paths)
+            }
+        }
+    }
+
+    t.Run("add", func(t *testing.T) {
+        dbconn, err := initializeDatabase(dbpath)
+        if err != nil {
+            t.Fatalf(err.Error())
+        }
+        defer dbconn.Close()
+        defer os.Remove(dbpath)
+
+        dirname := "asdasd_qwerty"
+        to_add := filepath.Join(tmp, dirname)
+        err = mockDirectory(to_add)
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        // Checking that path is not tokenized by default.
+        cur_add_options := &addDirectoryContentsOptions{ Concurrency: 2 }
+        comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json" }, "myself", tokr, cur_add_options)
+        if err != nil {
+            t.Fatal(err)
+        }
+        if len(comments) > 0 {
+            t.Fatalf("unexpected comments from the directory addition %v", comments)
+        }
+
+        found, err := listPaths(dbconn, to_add)
+        if err != nil {
+            t.Fatal(err)
+        }
+        if len(found) != 2 {
+            t.Error("should have indexed exactly two documents")
+        }
+
+        res := dbconn.QueryRow(`SELECT COUNT(*) FROM links
+LEFT JOIN paths ON paths.pid = links.pid
+LEFT JOIN tokens ON tokens.tid = links.tid
+LEFT JOIN fields ON fields.fid = links.fid
+WHERE tokens.token = ?`, 
+            "asdasd" ,
+        )
+        count := 0
+        err = res.Scan(&count)
+        if err != nil {
+            t.Fatal(err)
+        }
+        if count > 0 {
+            t.Error("expected no search hits for tokenized path")
+        }
+
+        err = deleteDirectory(dbconn, to_add) 
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        // Trying again with path tokenization enabled.
+        cur_add_options.PathField = "__path__"
+        comments, err = addNewDirectory(dbconn, to_add, []string{ "metadata.json" }, "myself", tokr, cur_add_options)
+        if err != nil {
+            t.Fatal(err)
+        }
+        if len(comments) > 0 {
+            t.Fatalf("unexpected comments from the directory addition %v", comments)
+        }
+
+        validateTokenPaths(dbconn, t, []string{ "asdasd", "qwerty" }, "__path__", "asdasd_qwerty")
+    })
+
+    t.Run("update", func(t *testing.T) {
+        dbconn, err := initializeDatabase(dbpath)
+        if err != nil {
+            t.Fatalf(err.Error())
+        }
+        defer dbconn.Close()
+        defer os.Remove(dbpath)
+
+        dirname := filepath.Join("alpha", "bravo")
+        to_add := filepath.Join(tmp, dirname)
+        err = os.MkdirAll(to_add, 0755)
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        cur_add_options := &addDirectoryContentsOptions{ Concurrency: 2, PathField: "__blah__" }
+        comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json" }, "myself", tokr, cur_add_options)
+        if err != nil {
+            t.Fatal(err)
+        }
+        if len(comments) > 0 {
+            t.Fatalf("unexpected comments from the directory addition %v", comments)
+        }
+
+        found, err := listPaths(dbconn, to_add)
+        if err != nil {
+            t.Fatal(err)
+        }
+        if len(found) > 0 {
+            t.Error("should not have found anything in an empty directory")
+        }
+
+        // Updating with path tokenization enabled.
+        err = mockDirectory(to_add)
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        comments, err = updateDirectories(dbconn, tokr, cur_add_options)
+        if err != nil {
+            t.Fatal(err)
+        }
+        if len(comments) > 0 {
+            t.Fatalf("unexpected comments from the directory addition %v", comments)
+        }
+
+        validateTokenPaths(dbconn, t, []string{ "alpha", "bravo" }, "__blah__", "alpha/bravo")
+    })
 }

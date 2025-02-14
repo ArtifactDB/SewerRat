@@ -283,6 +283,25 @@ func newInsertStatements(tx *writeTransaction) (*insertStatements, error) {
 
 /**********************************************************************/
 
+func processToken(path string, pid int64, field, token string, prepped *insertStatements) error {
+    _, err := prepped.Token.Exec(token)
+    if err != nil {
+        return fmt.Errorf("failed to insert token %q from %q; %w", token, path, err)
+    }
+
+    _, err = prepped.Field.Exec(field)
+    if err != nil {
+        return fmt.Errorf("failed to insert field %q from %q; %w", field, path, err)
+    }
+
+    _, err = prepped.Link.Exec(pid, field, token)
+    if err != nil {
+        return fmt.Errorf("failed to insert link for field %q to token %q from %q; %w", field, token, path, err)
+    }
+
+    return nil
+}
+
 // Recurse through the metadata structure to disassemble the tokens.
 func tokenizeMetadata(parsed interface{}, path string, pid int64, field string, prepped *insertStatements, tokenizer *unicodeTokenizer) []string {
     failures := []string{}
@@ -341,21 +360,9 @@ func tokenizeMetadata(parsed interface{}, path string, pid int64, field string, 
         }
 
         for _, t := range tokens {
-            _, err := prepped.Token.Exec(t)
+            err = processToken(path, pid, field, t, prepped)
             if err != nil {
-                failures = append(failures, fmt.Sprintf("failed to insert token %q from %q; %v", t, path, err))
-                continue
-            }
-
-            _, err = prepped.Field.Exec(field)
-            if err != nil {
-                failures = append(failures, fmt.Sprintf("failed to insert field %q from %q; %v", field, path, err))
-                continue
-            }
-
-            _, err = prepped.Link.Exec(pid, field, t)
-            if err != nil {
-                failures = append(failures, fmt.Sprintf("failed to insert link for field %q to token %q from %q; %v", field, t, path, err))
+                failures = append(failures, err.Error())
                 continue
             }
         }
@@ -384,6 +391,24 @@ func tokenizeMetadata(parsed interface{}, path string, pid int64, field string, 
         if err != nil {
             failures = append(failures, fmt.Sprintf("failed to insert link for field %q to token %q from %q; %v", field, t, path, err))
             break
+        }
+    }
+
+    return failures
+}
+
+func tokenizePath(path string, pid int64, field string, prepped *insertStatements, tokenizer *unicodeTokenizer) []string {
+    tokens, err := tokenizer.Tokenize(path)
+    if err != nil {
+        return []string{ fmt.Sprintf("failed to tokenize path %q; %v", path, err) }
+    }
+
+    failures := []string{}
+    for _, t := range tokens {
+        err = processToken(path, pid, field, t, prepped)
+        if err != nil {
+            failures = append(failures, err.Error())
+            continue
         }
     }
 
@@ -462,7 +487,12 @@ func compareToExistingPaths(tx *writeTransaction, did int64, all_paths map[strin
     return new_paths, update_paths, purge_paths, nil
 }
 
-func addDirectoryContents(tx *writeTransaction, path string, did int64, base_names []string, tokenizer* unicodeTokenizer, concurrency int) ([]string, error) {
+type addDirectoryContentsOptions struct {
+    Concurrency int
+    PathField string
+}
+
+func addDirectoryContents(tx *writeTransaction, path string, did int64, base_names []string, tokenizer* unicodeTokenizer, options *addDirectoryContentsOptions) ([]string, error) {
     all_failures := []string{}
 
     dir_contents, dir_failures := listMetadata(path, base_names)
@@ -478,11 +508,11 @@ func addDirectoryContents(tx *writeTransaction, path string, did int64, base_nam
     update_assets := make([]*loadedMetadata, len(update_paths))
     {
         var wg sync.WaitGroup
-        wg.Add(concurrency)
+        wg.Add(options.Concurrency)
         ichannel := make(chan int)
         uchannel := make(chan int)
 
-        for t := 0; t < concurrency; t++ {
+        for t := 0; t < options.Concurrency; t++ {
             go func() {
                 defer wg.Done()
                 for i := range ichannel {
@@ -536,6 +566,11 @@ func addDirectoryContents(tx *writeTransaction, path string, did int64, base_nam
 
             tokfails := tokenizeMetadata(loaded.Parsed, loaded.Path, pid, "", token_stmts, tokenizer)
             all_failures = append(all_failures, tokfails...)
+
+            if options.PathField != "" {
+                tokfails = tokenizePath(loaded.Path, pid, options.PathField, token_stmts, tokenizer)
+                all_failures = append(all_failures, tokfails...)
+            }
         }
     }
 
@@ -586,6 +621,11 @@ func addDirectoryContents(tx *writeTransaction, path string, did int64, base_nam
 
             tokfails := tokenizeMetadata(loaded.Parsed, loaded.Path, pid, "", token_stmts, tokenizer)
             all_failures = append(all_failures, tokfails...)
+
+            if options.PathField != "" {
+                tokfails = tokenizePath(loaded.Path, pid, options.PathField, token_stmts, tokenizer)
+                all_failures = append(all_failures, tokfails...)
+            }
         }
     }
 
@@ -609,7 +649,7 @@ func addDirectoryContents(tx *writeTransaction, path string, did int64, base_nam
 
 /**********************************************************************/
 
-func addNewDirectory(db *sql.DB, path string, base_names []string, user string, tokenizer* unicodeTokenizer, concurrency int) ([]string, error) {
+func addNewDirectory(db *sql.DB, path string, base_names []string, user string, tokenizer* unicodeTokenizer, options *addDirectoryContentsOptions) ([]string, error) {
     b, err := json.Marshal(base_names)
     if err != nil {
         return nil, fmt.Errorf("failed to encode names as JSON; %w", err)
@@ -647,7 +687,10 @@ func addNewDirectory(db *sql.DB, path string, base_names []string, user string, 
         return nil, fmt.Errorf("failed to insert new directory; %w", err)
     }
 
-    failures, err := addDirectoryContents(atx, path, did, base_names, tokenizer, concurrency)
+    failures, err := addDirectoryContents(atx, path, did, base_names, tokenizer, options)
+    if err != nil {
+        return nil, err
+    }
 
     err = atx.Commit()
     if err != nil {
@@ -693,7 +736,7 @@ func listDirectories(tx *writeTransaction) ([]*registeredDirectory, error) {
     return all_dirs, nil
 }
 
-func updateDirectories(db *sql.DB, tokenizer *unicodeTokenizer, concurrency int) ([]string, error) {
+func updateDirectories(db *sql.DB, tokenizer *unicodeTokenizer, options *addDirectoryContentsOptions) ([]string, error) {
     atx, err := createWriteTransaction(db)
     if err != nil {
         return nil, fmt.Errorf("failed to prepare transaction for update; %w", err)
@@ -707,7 +750,7 @@ func updateDirectories(db *sql.DB, tokenizer *unicodeTokenizer, concurrency int)
 
     all_failures := []string{}
     for _, d := range all_dirs {
-        curfailures, err := addDirectoryContents(atx, d.Path, d.Id, d.Names, tokenizer, concurrency)
+        curfailures, err := addDirectoryContents(atx, d.Path, d.Id, d.Names, tokenizer, options)
         if err != nil {
             return nil, err
         }

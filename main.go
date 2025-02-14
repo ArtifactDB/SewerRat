@@ -19,7 +19,8 @@ func main() {
     prefix0 := flag.String("prefix", "", "Prefix to add to each endpoint, after removing any leading or trailing slashes (default \"\")")
     lifetime0 := flag.Int("session", 10, "Maximum lifetime of a (de)registration session from start to finish, in minutes")
     checkpoint0 := flag.Int("checkpoint", 60, "Frequency of checkpoints to synchronise the WAL journal with the SQLite file, in minutes")
-    concurrency0 := flag.Int("concurrency", 10, "Number of concurrent reads from the filesystem.")
+    concurrency0 := flag.Int("concurrency", 10, "Number of concurrent reads from the filesystem")
+    path_field0 := flag.String("addpath", "", "Name of the field under which to add tokenized path components for each metadata file (default \"\", in which case no path components are added)")
     flag.Parse()
 
     dbpath := *dbpath0
@@ -59,9 +60,14 @@ func main() {
 
     timeout := time.Duration(*timeout0) * time.Second
 
+    add_options := &addDirectoryContentsOptions{
+        Concurrency: *concurrency0,
+        PathField: *path_field0,
+    }
+
     // Setting up the endpoints.
     http.HandleFunc("POST " + prefix + "/register/start", newRegisterStartHandler(verifier))
-    http.HandleFunc("POST " + prefix + "/register/finish", newRegisterFinishHandler(db, verifier, tokenizer, *concurrency0, timeout))
+    http.HandleFunc("POST " + prefix + "/register/finish", newRegisterFinishHandler(db, verifier, tokenizer, add_options, timeout))
     http.HandleFunc("POST " + prefix + "/deregister/start", newDeregisterStartHandler(db, verifier))
     http.HandleFunc("POST " + prefix + "/deregister/finish", newDeregisterFinishHandler(db, verifier, timeout))
 
@@ -98,7 +104,7 @@ func main() {
         go func() {
             for {
                 <-ticker.C
-                fails, err := updateDirectories(db, tokenizer, *concurrency0)
+                fails, err := updateDirectories(db, tokenizer, add_options)
                 if err != nil {
                     log.Printf("[ERROR] failed to update directories; %v\n", err.Error())
                 } else {

@@ -112,6 +112,11 @@ e.g., the value `"Chris"` is associated with the properties `"b.c"` in the docum
 }
 ```
 
+Optionally, the absolute path of each metadata document can also be tokenized and included into the SewerRat index.
+This is useful when files or directories have meaningful names (e.g., based on database identifiers) that might be of interest in queries.
+Tokens generated from the path are associated with a mock JSON property name to distinguish them from the "real" metadata-derived tokens.
+Check out the [`-addpath`](#administration) option for more details.
+
 ### Automatic updates
 
 SewerRat will periodically update the index by inspecting all of its registered directories for new content.
@@ -261,6 +266,10 @@ The nature of the search depends on the value of `type`:
 - For `"not"`, SewerRat negates the filter.
   The search clause should contain the `child` property, which contains the search clause to be negated.
   A file is only considered to be a match if it does not match the clause in `child`.
+
+Note that there are two ways to search for a path - either with a `"path"` search, or a `"text"` search when [`-addpath`](#administration) is specified. 
+The former is more exact as it does not perform any tokenization, while the latter is more convenient when parsing a single source of user input, 
+e.g., from a [human-readable syntax](#human-readable-syntax-for-text-queries).
 
 ### Human-readable syntax for text queries
 
@@ -499,6 +508,9 @@ Additional arguments can be passed to `./SewerRat` to control its behavior (chec
 - `-prefix` adds an extra prefix to all endpoints, e.g., to disambiguate between versions.
   For example, a prefix of `api/v2` would change the list endpoint to `/api/v2/list`.
   This defaults to an empty string, i.e., no prefix.
+- `-addpath` instructs SewerRat to tokenize the absolute path to each file and add the tokens to the index.
+  It accepts an argument that defines the name of the mock property under which the path-derived tokens are added, e.g., `__path__`.
+  This defaults to an empty string, in which case path tokenization is not performed.
 
 🚨🚨🚨 **IMPORTANT!** 🚨🚨🚨
 It is assumed that SewerRat runs under a service account with no access to credentials or other sensitive information.

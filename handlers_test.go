@@ -274,9 +274,9 @@ func TestRegisterHandlers(t *testing.T) {
         t.Fatal(err)
     }
 
-    concurrency := 1
+    add_options := &addDirectoryContentsOptions{ Concurrency: 1 }
     duration := time.Duration(1)
-    finish_handler := http.HandlerFunc(newRegisterFinishHandler(dbconn, verifier, tokr, concurrency, duration))
+    finish_handler := http.HandlerFunc(newRegisterFinishHandler(dbconn, verifier, tokr, add_options, duration))
 
     t.Run("register finish fail no code", func(t *testing.T) {
         to_add := quickCreate()
@@ -507,14 +507,14 @@ func TestDeregisterHandlers(t *testing.T) {
     if err != nil {
         t.Fatal(err)
     }
-    concurrency := 1
+    add_options := &addDirectoryContentsOptions{ Concurrency: 1 }
 
     quickReadd := func() string {
         to_add, err := os.MkdirTemp("", "")
         if err != nil {
             t.Fatal(err)
         }
-        comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr, concurrency)
+        comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr, add_options)
         if err != nil {
             t.Fatal(err)
         }
@@ -648,8 +648,8 @@ func TestDeregisterHandlers(t *testing.T) {
             t.Fatal(err)
         }
 
-        concurrency := 1
-        comments, err := addNewDirectory(dbconn, to_add_and_remove, []string{ "metadata.json", "other.json" }, "myself", tokr, concurrency)
+        add_options := &addDirectoryContentsOptions{ Concurrency: 1 }
+        comments, err := addNewDirectory(dbconn, to_add_and_remove, []string{ "metadata.json", "other.json" }, "myself", tokr, add_options)
         if err != nil {
             t.Fatal(err)
         }
@@ -735,8 +735,6 @@ func TestQueryHandler(t *testing.T) {
         t.Fatalf(err.Error())
     }
 
-    concurrency := 1
-
     wtokr, err := newUnicodeTokenizer(true)
     if err != nil {
         t.Fatalf(err.Error())
@@ -748,7 +746,8 @@ func TestQueryHandler(t *testing.T) {
         t.Fatalf(err.Error())
     }
 
-    comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr, concurrency)
+    add_options := &addDirectoryContentsOptions{ Concurrency: 1 }
+    comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr, add_options)
     if err != nil {
         t.Fatal(err)
     }
@@ -996,15 +995,14 @@ func TestRetrieveMetadataHandler(t *testing.T) {
         t.Fatalf(err.Error())
     }
 
-    concurrency := 1
-
     to_add := filepath.Join(tmp, "to_add")
     err = mockDirectory(to_add)
     if err != nil {
         t.Fatalf(err.Error())
     }
 
-    comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr, concurrency)
+    add_options := &addDirectoryContentsOptions{ Concurrency: 1 }
+    comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr, add_options)
     if err != nil {
         t.Fatal(err)
     }
@@ -1145,8 +1143,6 @@ func TestRetrieveFileHandler(t *testing.T) {
         t.Fatalf(err.Error())
     }
 
-    concurrency := 1
-
     to_add := filepath.Join(tmp, "to_add")
     err = mockDirectory(to_add)
     if err != nil {
@@ -1154,7 +1150,8 @@ func TestRetrieveFileHandler(t *testing.T) {
     }
 
     // Here, nothing is actually indexed! So we can't get confused with the metadata retrievals.
-    comments, err := addNewDirectory(dbconn, to_add, []string{}, "myself", tokr, concurrency)
+    add_options := &addDirectoryContentsOptions{ Concurrency: 1 }
+    comments, err := addNewDirectory(dbconn, to_add, []string{}, "myself", tokr, add_options)
     if err != nil {
         t.Fatal(err)
     }
@@ -1278,15 +1275,14 @@ func TestListFilesHandler(t *testing.T) {
         t.Fatalf(err.Error())
     }
 
-    concurrency := 1
-
     to_add := filepath.Join(tmp, "to_add")
     err = mockDirectory(to_add)
     if err != nil {
         t.Fatalf(err.Error())
     }
 
-    comments, err := addNewDirectory(dbconn, to_add, []string{}, "myself", tokr, concurrency)
+    add_options := &addDirectoryContentsOptions{ Concurrency: 1 }
+    comments, err := addNewDirectory(dbconn, to_add, []string{}, "myself", tokr, add_options)
     if err != nil {
         t.Fatal(err)
     }
@@ -1430,7 +1426,7 @@ func TestListRegisteredDirectoriesHandler(t *testing.T) {
         t.Fatalf(err.Error())
     }
 
-    concurrency := 1
+    add_options := &addDirectoryContentsOptions{ Concurrency: 1 }
 
     for _, name := range []string{ "akari", "ai", "alice" } {
         to_add := filepath.Join(tmp, "to_add_" + name)
@@ -1439,7 +1435,7 @@ func TestListRegisteredDirectoriesHandler(t *testing.T) {
             t.Fatalf(err.Error())
         }
 
-        comments, err := addNewDirectory(dbconn, to_add, []string{"metadata.json"}, name, tokr, concurrency)
+        comments, err := addNewDirectory(dbconn, to_add, []string{"metadata.json"}, name, tokr, add_options)
         if err != nil {
             t.Fatal(err)
         }
