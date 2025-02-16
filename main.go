@@ -21,6 +21,7 @@ func main() {
     checkpoint0 := flag.Int("checkpoint", 60, "Frequency of checkpoints to synchronise the WAL journal with the SQLite file, in minutes")
     concurrency0 := flag.Int("concurrency", 10, "Number of concurrent reads from the filesystem")
     path_field0 := flag.String("addpath", "", "Name of the field under which to add tokenized path components for each metadata file (default \"\", in which case no path components are added)")
+    whitelist0 := flag.String("whitelist", "", "Whitelist of directories in which linked-to files are to be treated as real files (default \"\", in which case no directories are whitelisted)")
     flag.Parse()
 
     dbpath := *dbpath0
@@ -63,6 +64,15 @@ func main() {
     add_options := &addDirectoryContentsOptions{
         Concurrency: *concurrency0,
         PathField: *path_field0,
+        // LinkWhitelist doesn't have to be initialized if it's empty, as len(<nil slice>) == 0.
+    }
+
+    if *whitelist0 != "" {
+        whitelist, err := loadLinkWhitelist(*whitelist0)
+        if err != nil {
+            log.Fatal(err)
+        }
+        add_options.LinkWhitelist = whitelist
     }
 
     // Setting up the endpoints.
@@ -76,7 +86,7 @@ func main() {
     http.HandleFunc("GET " + prefix + "/retrieve/metadata", newRetrieveMetadataHandler(ro_db))
     http.HandleFunc("GET " + prefix + "/retrieve/file", newRetrieveFileHandler(ro_db))
     http.HandleFunc("HEAD " + prefix + "/retrieve/file", newRetrieveFileHandler(ro_db))
-    http.HandleFunc("GET " + prefix + "/list", newListFilesHandler(ro_db))
+    http.HandleFunc("GET " + prefix + "/list", newListFilesHandler(ro_db, add_options.LinkWhitelist))
 
     http.HandleFunc("GET " + prefix + "/", newDefaultHandler())
     http.HandleFunc("OPTIONS " + prefix + "/", newOptionsHandler())

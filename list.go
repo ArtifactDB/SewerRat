@@ -9,8 +9,20 @@ import (
     "errors"
 )
 
-func listFiles(dir string, recursive bool) ([]string, error) {
+func readSymlink(path string) (string, error) {
+    target, err := os.Readlink(path)
+    if err != nil {
+        return "", err
+    }
+    if (!filepath.IsAbs(target)) {
+        target = filepath.Clean(filepath.Join(filepath.Dir(path), target))
+    }
+    return target, nil
+}
+
+func listFiles(dir string, recursive bool, whitelist []string) ([]string, error) {
     to_report := []string{}
+
     err := filepath.WalkDir(dir, func(path string, info fs.DirEntry, err error) error {
         if err != nil {
             return err
@@ -28,14 +40,45 @@ func listFiles(dir string, recursive bool) ([]string, error) {
             return err
         }
 
-        if !recursive && is_dir {
+        if is_dir {
             to_report = append(to_report, rel + "/")
             return fs.SkipDir
-        } else {
-            to_report = append(to_report, rel)
-            return nil
         }
+
+        if len(whitelist) > 0 {
+            details, err := info.Info()
+            if err != nil {
+                return err
+            }
+
+            // If it's a symlink that refers to a subdirectory of a whitelisted
+            // directory, we treat it as a directory; otherwise we treat it as a file.
+            if details.Mode() & os.ModeSymlink != 0 {
+                target, err := readSymlink(path)
+                if err == nil && isLinkWhitelisted(target, whitelist) {
+                    target_details, err := os.Stat(target)
+                    if err == nil && target_details.IsDir() {
+                        if !recursive {
+                            to_report = append(to_report, rel + "/")
+                        } else {
+                            target_list, err := listFiles(target, recursive, whitelist)
+                            if err != nil {
+                                return err
+                            }
+                            for _, tpath := range target_list {
+                                to_report = append(to_report, filepath.Join(rel, tpath))
+                            }
+                        }
+                        return nil
+                    }
+                }
+            }
+        }
+
+        to_report = append(to_report, rel)
+        return nil
     })
+
     return to_report, err
 }
 
@@ -44,7 +87,7 @@ func listFiles(dir string, recursive bool) ([]string, error) {
  * doesn't exist or is invalid, we simply return an empty list of metadata
  * files, and report the failure.
  */
-func listMetadata(dir string, base_names []string) (map[string]fs.FileInfo, []string) {
+func listMetadata(dir string, base_names []string, whitelist []string) (map[string]fs.FileInfo, []string) {
     curcontents := map[string]fs.FileInfo{}
     curfailures := []string{}
     curnames := map[string]bool{}
@@ -84,32 +127,59 @@ func listMetadata(dir string, base_names []string) (map[string]fs.FileInfo, []st
             }
         }
 
-        if _, ok := curnames[filepath.Base(path)]; !ok {
-            return nil
-        }
-
-        var info fs.FileInfo
         if d.Type() & os.ModeSymlink == 0 {
-            info, err = d.Info()
-        } else {
-            // Resolve any symbolic links to files at this point. This is important
-            // as it ensures that we include the target file's modification time in
-            // our index, so that the index is updated when the target is changed
-            // (rather than when the link itself is changed).
-            info, err = os.Stat(path)
-
-            // We don't recurse into symlinked directories, though.
-            if err == nil && info.IsDir() {
+            if _, ok := curnames[filepath.Base(path)]; !ok {
                 return nil
             }
-        }
-
-        if err != nil {
-            curfailures = append(curfailures, fmt.Sprintf("failed to stat %q; %v", path, err))
+            info, err := d.Info()
+            if err != nil {
+                curfailures = append(curfailures, fmt.Sprintf("failed to stat %q; %v", path, err))
+            } else {
+                curcontents[path] = info
+            }
             return nil
         }
 
-        curcontents[path] = info
+        // Resolve any symbolic links to files at this point. This is important
+        // as it ensures that we include the target file's modification time in
+        // our index, so that the index is updated when the target is changed
+        // (rather than when the link itself is changed).
+        target_path, target_err := readSymlink(path)
+        if target_err != nil {
+            curfailures = append(curfailures, fmt.Sprintf("failed to read link target for %q; %v", path, target_err))
+            return nil
+        }
+
+        info, err := os.Stat(target_path)
+        if err != nil {
+            curfailures = append(curfailures, fmt.Sprintf("failed to stat %q; %v", target_path, err))
+            return nil
+        }
+
+        if !info.IsDir() {
+            if _, ok := curnames[filepath.Base(path)]; !ok {
+                return nil
+            }
+            curcontents[path] = info
+            return nil
+        }
+
+        // We only recurse into symlinked directories if they're whitelisted. 
+        if len(whitelist) == 0 {
+            return nil
+        }
+        if !isLinkWhitelisted(target_path, whitelist) {
+            return nil
+        }
+
+        target_list, target_fails := listMetadata(target_path, base_names, whitelist)
+        for k, v := range target_list {
+            rel, err := filepath.Rel(target_path, k)
+            if err == nil {
+                curcontents[filepath.Join(path, rel)] = v
+            }
+        }
+        curfailures = append(curfailures, target_fails...)
         return nil
     })
 

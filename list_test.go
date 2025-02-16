@@ -34,7 +34,7 @@ func TestListFiles(t *testing.T) {
 
     // Checking that we pull out all the files.
     t.Run("basic", func(t *testing.T) {
-        all, err := listFiles(dir, true)
+        all, err := listFiles(dir, true, nil)
         if (err != nil) {
             t.Fatal(err)
         }
@@ -47,7 +47,7 @@ func TestListFiles(t *testing.T) {
 
     // Checking that the directories are properly listed.
     t.Run("non-recursive", func(t *testing.T) {
-        all, err := listFiles(dir, false)
+        all, err := listFiles(dir, false, nil)
         if (err != nil) {
             t.Fatal(err)
         }
@@ -80,13 +80,39 @@ func TestListFiles(t *testing.T) {
     }
 
     t.Run("skip symbolic nested", func(t *testing.T) {
-        all, err := listFiles(more_symdir, true)
+        all, err := listFiles(more_symdir, true, nil)
         if err != nil {
             t.Fatal(err)
         }
-
         if !equalStringArrays(all, []string{ "A", "extra", "sub" }) {
-            t.Fatalf("should not list symbolic links %q", all)
+            t.Fatalf("should not recurse into symbolic links; %v", all)
+        }
+
+        all, err = listFiles(more_symdir, false, nil)
+        if err != nil {
+            t.Fatal(err)
+        }
+        if !equalStringArrays(all, []string{ "A", "extra", "sub" }) {
+            t.Fatalf("should not treat symbolic links as directories; %v", all)
+        }
+    })
+
+    // Unless they've been whitelisted.
+    t.Run("whitelisted symbolic", func(t *testing.T) {
+        all, err := listFiles(more_symdir, true, []string{ dir })
+        if err != nil {
+            t.Fatal(err)
+        }
+        if !equalStringArrays(all, []string{ "A", "extra", "sub/B" }) {
+            t.Fatalf("should recurse into whitelisted symbolic links; %v", all)
+        }
+
+        all, err = listFiles(more_symdir, false, []string{ dir })
+        if err != nil {
+            t.Fatal(err)
+        }
+        if !equalStringArrays(all, []string{ "A", "extra", "sub/" }) {
+            t.Fatalf("should list whitelisted symbolic links as directories; %v", all)
         }
     })
 }
@@ -122,7 +148,7 @@ func TestListMetadata(t *testing.T) {
     }
 
     t.Run("simple", func(t *testing.T) {
-        found, fails := listMetadata(dir, []string{ "A.json" })
+        found, fails := listMetadata(dir, []string{ "A.json" }, nil)
         if len(fails) > 0 {
             t.Fatal("unexpected failures")
         }
@@ -141,7 +167,7 @@ func TestListMetadata(t *testing.T) {
     })
 
     t.Run("multiple", func(t *testing.T) {
-        found, fails := listMetadata(dir, []string{ "A.json", "B.json" })
+        found, fails := listMetadata(dir, []string{ "A.json", "B.json" }, nil)
         if len(fails) > 0 {
             t.Fatal("unexpected failures")
         }
@@ -160,13 +186,13 @@ func TestListMetadata(t *testing.T) {
     })
 
     t.Run("invalid directories", func(t *testing.T) {
-        _, fails := listMetadata("missing", []string{ "A.json", "B.json" })
+        _, fails := listMetadata("missing", []string{ "A.json", "B.json" }, nil)
         if len(fails) != 1 || !strings.Contains(fails[0], "no such file") {
             t.Fatalf("should report a failure instead of an error when directory is missing")
         }
 
         // Providing a file instead of a directory.
-        _, fails = listMetadata(filepath.Join(dir, "A.json"), []string{ "A.json", "B.json" })
+        _, fails = listMetadata(filepath.Join(dir, "A.json"), []string{ "A.json", "B.json" }, nil)
         if len(fails) != 1 || !strings.Contains(fails[0], "not a directory") {
             t.Fatalf("should report a failure instead of an error when supplied path is not a directory")
         }
@@ -204,7 +230,7 @@ func TestListMetadataSymlink(t *testing.T) {
     }
 
     t.Run("symlink", func(t *testing.T) {
-        found, fails := listMetadata(dir, []string{ "foo.json", "B.json" })
+        found, fails := listMetadata(dir, []string{ "foo.json", "B.json" }, nil)
         if len(fails) > 0 {
             t.Fatal("unexpected failures")
         }
@@ -220,6 +246,32 @@ func TestListMetadataSymlink(t *testing.T) {
         }
         if info.Mode() & os.ModeSymlink != 0 { // uses information from the link.
             t.Fatal("expected file info from link target")
+        }
+
+        // Checking that the basename of the link is correctly verified.
+        found, fails = listMetadata(dir, []string{ "B.json" }, nil)
+        if len(fails) > 0 {
+            t.Fatal("unexpected failures")
+        }
+        if len(found) != 0 { // foo.json isn't considered anymore, and B.json can't be reached through the symlink.
+            t.Fatal("expected no files")
+        }
+    })
+
+    t.Run("whitelisted", func(t *testing.T) {
+        found, fails := listMetadata(dir, []string{ "foo.json", "B.json" }, []string{ hostdir })
+        if len(fails) > 0 {
+            t.Fatal("unexpected failures")
+        }
+
+        // B.json in the linked directory should not be detected.
+        if len(found) != 2 {
+            t.Fatalf("expected two files; %v", found)
+        }
+
+        _, ok := found[filepath.Join(dir, "symlinked/B.json")]
+        if !ok {
+            t.Fatal("missing file")
         }
     })
 }
@@ -250,7 +302,7 @@ func TestListMetadataDot(t *testing.T) {
     }
 
     t.Run("dot", func(t *testing.T) {
-        found, fails := listMetadata(dir, []string{ "A.json" })
+        found, fails := listMetadata(dir, []string{ "A.json" }, nil)
         if len(fails) > 0 {
             t.Fatal("unexpected failures")
         }
@@ -292,7 +344,7 @@ func TestListMetadataIgnored(t *testing.T) {
     }
 
     t.Run("control", func(t *testing.T) {
-        found, fails := listMetadata(dir, []string{ "A.json" })
+        found, fails := listMetadata(dir, []string{ "A.json" }, nil)
         if len(fails) > 0 {
             t.Fatal("unexpected failures")
         }
@@ -307,7 +359,7 @@ func TestListMetadataIgnored(t *testing.T) {
     }
 
     t.Run("ignored", func(t *testing.T) {
-        found, fails := listMetadata(dir, []string{ "A.json" })
+        found, fails := listMetadata(dir, []string{ "A.json" }, nil)
         if len(fails) > 0 {
             t.Fatal("unexpected failures")
         }
@@ -319,4 +371,55 @@ func TestListMetadataIgnored(t *testing.T) {
             t.Fatal("missing file")
         }
     })
+}
+
+func TestReadSymlink(t *testing.T) {
+    dir, err := os.MkdirTemp("", "")
+    if (err != nil) {
+        t.Fatal(err)
+    }
+
+    subdir := filepath.Join(dir, "sub")
+    err = os.Mkdir(subdir, 0755)
+    if err != nil {
+        t.Fatal(err)
+    }
+
+    path := filepath.Join(subdir, "A")
+    err = os.WriteFile(path, []byte("blah blah"), 0644)
+    if err != nil {
+        t.Fatal(err)
+    }
+
+    // Resolves symlink to its absolute path.
+    err = os.Symlink(filepath.Join("sub", "A"), filepath.Join(dir, "B"))
+    if err != nil {
+        t.Fatal(err)
+    }
+
+    out, err := readSymlink(filepath.Join(dir, "B"))
+    if err != nil {
+        t.Fatal(err)
+    }
+    if !filepath.IsAbs(out) {
+        t.Errorf("expected an absolute file path; %v", out)
+    }
+
+    contents, err := os.ReadFile(out)
+    if err != nil || string(contents) != "blah blah" {
+        t.Error("unexpected contents of the file")
+    }
+
+    // Does the right thing if the symlink is already absolute.
+    err = os.Symlink(filepath.Join(dir, "B"), filepath.Join(dir, "C"))
+    if err != nil {
+        t.Fatal(err)
+    }
+    out, err = readSymlink(filepath.Join(dir, "C"))
+    if err != nil {
+        t.Fatal(err)
+    }
+    if out != filepath.Join(dir, "B") {
+        t.Errorf("unexpected file path; %v", out)
+    }
 }

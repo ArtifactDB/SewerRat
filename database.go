@@ -490,12 +490,13 @@ func compareToExistingPaths(tx *writeTransaction, did int64, all_paths map[strin
 type addDirectoryContentsOptions struct {
     Concurrency int
     PathField string
+    LinkWhitelist []string
 }
 
 func addDirectoryContents(tx *writeTransaction, path string, did int64, base_names []string, tokenizer* unicodeTokenizer, options *addDirectoryContentsOptions) ([]string, error) {
     all_failures := []string{}
 
-    dir_contents, dir_failures := listMetadata(path, base_names)
+    dir_contents, dir_failures := listMetadata(path, base_names, options.LinkWhitelist)
     all_failures = append(all_failures, dir_failures...)
 
     new_paths, update_paths, purge_paths, err := compareToExistingPaths(tx, did, dir_contents)

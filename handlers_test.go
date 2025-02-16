@@ -1290,7 +1290,7 @@ func TestListFilesHandler(t *testing.T) {
         t.Fatal("no comments should be present")
     }
 
-    handler := http.HandlerFunc(newListFilesHandler(dbconn))
+    handler := http.HandlerFunc(newListFilesHandler(dbconn, []string{}))
 
     t.Run("non-recursive", func (t *testing.T) {
         req, err := http.NewRequest("GET", "/list?path=" + url.QueryEscape(to_add), nil)

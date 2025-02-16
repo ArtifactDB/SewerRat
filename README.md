@@ -94,7 +94,8 @@ Symbolic links in the specified directory are treated differently depending on t
 If the directory contains symbolic links to files, the contents of the target files can be indexed as long as the link has one of the `base` names.
 All file information (e.g., modification time, owner) is taken from the link target, not the link itself;
 SewerRat effectively treats the symbolic link as a proxy for the target file.
-If the directory contains symbolic links to other directories, these will not be recursively traversed.
+If the directory contains symbolic links to other directories, these will not be recursively traversed unless the link targets a whitelisted directory 
+(see the [`-whitelist`](#administration) option for details).
 
 Each identified metadata document is parsed as JSON and converted into tokens.
 For strings, we use an adaptation of the [FTS5 Unicode61 tokenizer](https://www.sqlite.org/fts5.html#unicode61_tokenizer) to break each string into tokens,
@@ -381,8 +382,8 @@ curl -L ${SEWER_RAT_URL}/list -G --data-urlencode "path=${path}" --data "recursi
 On success, the response contains a JSON-encoded array of strings, each of which is a relative path in the directory at `path`.
 The `recursive=` parameter specifies whether a recursive listing should be performed.
 If true, all paths refer to files; otherwise, the names of directories may be returned and will be suffixed with `/`.
-All symbolic links are reported as files in the response. 
-Symbolic links to directories will not be recursively traversed, even if `recursive=true`.
+Symbolic links are reported as files in the response, and symbolic links to directories will not be recursively traversed if `recursive=true`.
+An exception is made for symbolic links to whitelisted directories, see the [`-whitelist`](#administration) option for details.
 
 On error, the exact response may either be `text/plain` content containing the error message directly,
 or `application/json` content encoding a JSON object with the `reason` for the error.
@@ -512,6 +513,11 @@ Additional arguments can be passed to `./SewerRat` to control its behavior (chec
 - `-addpath` instructs SewerRat to tokenize the absolute path to each file and add the tokens to the index.
   It accepts an argument that defines the name of the mock property under which the path-derived tokens are added, e.g., `__path__`.
   This defaults to an empty string, in which case path tokenization is not performed.
+- `-whitelist` contains a path to a text file where each line contains an absolute path to a directory.
+  Any symbolic link that targets the whitelisted directory or any of its subdirectories is traversed recursively during file/metadata list operations.
+  This is useful for referencing archived files from directories in hot storage.
+  It is assumed that all whitelisted directories are well-behaved, i.e., no cyclic symlinks.
+  By default, no directories are whitelisted.
 
 🚨🚨🚨 **IMPORTANT!** 🚨🚨🚨
 It is assumed that SewerRat runs under a service account with no access to credentials or other sensitive information.
