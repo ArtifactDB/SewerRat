@@ -578,7 +578,7 @@ func newRetrieveFileHandler(db *sql.DB) func(http.ResponseWriter, *http.Request)
 
 /**********************************************************************/
 
-func newListFilesHandler(db *sql.DB, whitelist []string) func(http.ResponseWriter, *http.Request) {
+func newListFilesHandler(db *sql.DB, whitelist linkWhitelist) func(http.ResponseWriter, *http.Request) {
     return func(w http.ResponseWriter, r *http.Request) {
         params := r.URL.Query()
         recursive := params.Get("recursive") == "true"

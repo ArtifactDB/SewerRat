@@ -513,11 +513,19 @@ Additional arguments can be passed to `./SewerRat` to control its behavior (chec
 - `-addpath` instructs SewerRat to tokenize the absolute path to each file and add the tokens to the index.
   It accepts an argument that defines the name of the mock property under which the path-derived tokens are added, e.g., `__path__`.
   This defaults to an empty string, in which case path tokenization is not performed.
-- `-whitelist` contains a path to a text file where each line contains an absolute path to a directory.
-  Any symbolic link that targets the whitelisted directory or any of its subdirectories is traversed recursively during file/metadata list operations.
+- `-whitelist` contains a path to a text file where each line contains an absolute path to a "whitelisted" directory, optionally followed by a comma-separated list of users.
+  For example:
+
+  ```
+  /path/to/directory1
+  /path/to/directory2,userA,userB
+  ```
+
+  A symbolic link in a registered directory will be traversed recursively during file/metadata list operations if the link targets the whitelisted directory or its subdirectories.
   This is useful for referencing archived files from directories in hot storage.
-  It is assumed that all whitelisted directories are well-behaved, i.e., no cyclic symlinks.
-  By default, no directories are whitelisted.
+  If a user list is provided in the whitelist file, the link itself must also be owned by one of the specified users -
+  this aims to reduce the potential for abuse from excessive symlinks to large directories.
+  By default, the `-whitelist` option is an empty string, in which case no directories are whitelisted.
 
 🚨🚨🚨 **IMPORTANT!** 🚨🚨🚨
 It is assumed that SewerRat runs under a service account with no access to credentials or other sensitive information.

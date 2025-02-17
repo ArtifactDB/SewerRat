@@ -99,7 +99,7 @@ func TestListFiles(t *testing.T) {
 
     // Unless they've been whitelisted.
     t.Run("whitelisted symbolic", func(t *testing.T) {
-        all, err := listFiles(more_symdir, true, []string{ dir })
+        all, err := listFiles(more_symdir, true, linkWhitelist{ dir: nil })
         if err != nil {
             t.Fatal(err)
         }
@@ -107,7 +107,7 @@ func TestListFiles(t *testing.T) {
             t.Fatalf("should recurse into whitelisted symbolic links; %v", all)
         }
 
-        all, err = listFiles(more_symdir, false, []string{ dir })
+        all, err = listFiles(more_symdir, false, linkWhitelist{ dir: nil })
         if err != nil {
             t.Fatal(err)
         }
@@ -259,12 +259,12 @@ func TestListMetadataSymlink(t *testing.T) {
     })
 
     t.Run("whitelisted", func(t *testing.T) {
-        found, fails := listMetadata(dir, []string{ "foo.json", "B.json" }, []string{ hostdir })
+        found, fails := listMetadata(dir, []string{ "foo.json", "B.json" }, linkWhitelist{ hostdir: nil })
         if len(fails) > 0 {
             t.Fatal("unexpected failures")
         }
 
-        // B.json in the linked directory should not be detected.
+        // B.json in the linked directory should now be detected.
         if len(found) != 2 {
             t.Fatalf("expected two files; %v", found)
         }

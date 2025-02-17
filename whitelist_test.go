@@ -2,25 +2,84 @@ package main
 
 import (
     "testing"
+    "path/filepath"
     "os"
 )
 
 func TestIsLinkWhitelisted(t *testing.T) {
-    if !isLinkWhitelisted("/foo/bar", []string{ "/foo/" }) {
-        t.Error("expected link to be whitelisted")
+    tmp, err := os.MkdirTemp("", "")
+    if err != nil {
+        t.Fatal(err)
     }
 
-    if !isLinkWhitelisted("/foo", []string{ "/foo/" }) {
-        t.Error("expected link to be whitelisted")
-    }
+    t.Run("simple", func(t *testing.T) {
+        link_path := filepath.Join(tmp, "akari")
+        err := os.Symlink("/foo/bar", link_path)
+        if err != nil {
+            t.Fatal(err)
+        }
+        if !isLinkWhitelisted(link_path, "/foo/bar", linkWhitelist{ "/foo/": nil }) {
+            t.Error("expected link to be whitelisted")
+        }
 
-    if !isLinkWhitelisted("/foo/bar", []string{ "/bar/", "/foo/" }) {
-        t.Error("expected link to be whitelisted")
-    }
+        // Still works if there's multiple options.
+        err = os.Remove(link_path)
+        if err != nil {
+            t.Fatal(err)
+        }
+        err = os.Symlink("/foo/bar", link_path)
+        if err != nil {
+            t.Fatal(err)
+        }
+        if !isLinkWhitelisted(link_path, "/foo/bar", linkWhitelist{ "/bar": nil, "/foo": nil }) {
+            t.Error("expected link to be whitelisted")
+        }
 
-    if isLinkWhitelisted("/foo/bar", []string{ "/bar/" }) {
-        t.Error("expected link to not be whitelisted")
-    }
+        // Still works when the link destination is missing a trailing slash.
+        err = os.Remove(link_path)
+        if err != nil {
+            t.Fatal(err)
+        }
+        err = os.Symlink("/foo", link_path)
+        if err != nil {
+            t.Fatal(err)
+        }
+        if !isLinkWhitelisted(link_path, "/foo", linkWhitelist{ "/foo/": nil }) {
+            t.Error("expected link to be whitelisted")
+        }
+
+        // Rejects it if the link destination is outside of bounds.
+        if isLinkWhitelisted(link_path, "/foo", linkWhitelist{ "/bar/": nil }) {
+            t.Error("expected link to not be whitelisted")
+        }
+    })
+
+    t.Run("user-restricted", func(t *testing.T) {
+        lstat, err := os.Stat(tmp)
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        self, err := identifyUser(lstat)
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        link_path := filepath.Join(tmp, "alicia")
+        err = os.Symlink("/foo/bar", link_path)
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        if isLinkWhitelisted(link_path, "/foo/bar", linkWhitelist{ "/foo/": map[string]bool{}}) {
+            t.Error("expected link to not be whitelisted under the wrong user")
+        }
+
+        // Just as a control:
+        if !isLinkWhitelisted(link_path, "/foo/bar", linkWhitelist{ "/foo/": map[string]bool{ self: true }}) {
+            t.Error("expected link to be whitelisted")
+        }
+    })
 }
 
 func TestLoadLinkWhitelist(t *testing.T) {
@@ -29,7 +88,7 @@ func TestLoadLinkWhitelist(t *testing.T) {
         t.Fatal(err)
     }
 
-    message := "/alpha/\n/bravo/\n/charlie/delta/"
+    message := "/alpha/\n/bravo/,aika,alice\n/charlie/delta/,athena\n/echo/foxtrot/golf"
     if _, err := other.WriteString(message); err != nil {
         t.Fatal(err)
     }
@@ -43,7 +102,27 @@ func TestLoadLinkWhitelist(t *testing.T) {
         t.Fatal(err)
     }
 
-    if len(loaded) != 3 || loaded[0] != "/alpha/" || loaded[1] != "/bravo/" || loaded[2] != "/charlie/delta/" {
+    if len(loaded) != 4 {
         t.Error("unexpected content from the loaded whitelist file")
+    }
+
+    ahits, afound := loaded["/alpha/"]
+    if !afound || ahits != nil {
+        t.Error("unexpected content for alpha")
+    }
+
+    bhits, bfound := loaded["/bravo/"]
+    if !bfound || len(bhits) != 2 || !bhits["aika"] || !bhits["alice"] {
+        t.Error("unexpected content for bravo")
+    }
+
+    chits, cfound := loaded["/charlie/delta/"]
+    if !cfound || len(chits) != 1 || !chits["athena"] {
+        t.Error("unexpected content for charlie")
+    }
+
+    ehits, efound := loaded["/echo/foxtrot/golf"]
+    if !efound || ehits != nil {
+        t.Error("unexpected content for echo")
     }
 }

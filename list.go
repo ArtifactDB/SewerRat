@@ -20,7 +20,7 @@ func readSymlink(path string) (string, error) {
     return target, nil
 }
 
-func listFiles(dir string, recursive bool, whitelist []string) ([]string, error) {
+func listFiles(dir string, recursive bool, whitelist linkWhitelist) ([]string, error) {
     to_report := []string{}
 
     err := filepath.WalkDir(dir, func(path string, info fs.DirEntry, err error) error {
@@ -46,16 +46,11 @@ func listFiles(dir string, recursive bool, whitelist []string) ([]string, error)
         }
 
         if len(whitelist) > 0 {
-            details, err := info.Info()
-            if err != nil {
-                return err
-            }
-
             // If it's a symlink that refers to a subdirectory of a whitelisted
             // directory, we treat it as a directory; otherwise we treat it as a file.
-            if details.Mode() & os.ModeSymlink != 0 {
+            if info.Type() & os.ModeSymlink != 0 {
                 target, err := readSymlink(path)
-                if err == nil && isLinkWhitelisted(target, whitelist) {
+                if err == nil && isLinkWhitelisted(path, target, whitelist) {
                     target_details, err := os.Stat(target)
                     if err == nil && target_details.IsDir() {
                         if !recursive {
@@ -87,7 +82,7 @@ func listFiles(dir string, recursive bool, whitelist []string) ([]string, error)
  * doesn't exist or is invalid, we simply return an empty list of metadata
  * files, and report the failure.
  */
-func listMetadata(dir string, base_names []string, whitelist []string) (map[string]fs.FileInfo, []string) {
+func listMetadata(dir string, base_names []string, whitelist linkWhitelist) (map[string]fs.FileInfo, []string) {
     curcontents := map[string]fs.FileInfo{}
     curfailures := []string{}
     curnames := map[string]bool{}
@@ -168,7 +163,7 @@ func listMetadata(dir string, base_names []string, whitelist []string) (map[stri
         if len(whitelist) == 0 {
             return nil
         }
-        if !isLinkWhitelisted(target_path, whitelist) {
+        if !isLinkWhitelisted(path, target_path, whitelist) {
             return nil
         }
 

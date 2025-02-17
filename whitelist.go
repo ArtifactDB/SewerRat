@@ -3,31 +3,58 @@ package main
 import (
     "os"
     "fmt"
+    "strings"
     "bufio"
     "path/filepath"
 )
 
-func isLinkWhitelisted(path string, whitelist []string) bool {
-    for _, w := range whitelist {
-        rel, err := filepath.Rel(w, path)
+type linkWhitelist = map[string]map[string]bool
+
+func isLinkWhitelisted(link_path, target_path string, whitelist linkWhitelist) bool {
+    for dir, allowed_users := range whitelist {
+        rel, err := filepath.Rel(dir, target_path)
         if err == nil && filepath.IsLocal(rel) {
-            return true
+            // if it's nil, any user is allowed.
+            if allowed_users == nil {
+                return true
+            }
+
+            // Otherwise, we check if the link itself was created by the approved subset of users.
+            link_stat, err := os.Lstat(link_path)
+            if err == nil {
+                user, err := identifyUser(link_stat)
+                if err == nil {
+                    _, found := allowed_users[user]
+                    return found
+                }
+            }
+
+            return false
         }
     }
     return false
 }
 
-func loadLinkWhitelist(path string) ([]string, error) {
+func loadLinkWhitelist(path string) (linkWhitelist, error) {
     whandle, err := os.Open(path)
     if err != nil {
         return nil, fmt.Errorf("failed to open the whitelist file; %v", err)
     }
     defer whandle.Close()
 
-    output := []string{}
+    output := linkWhitelist{}
     scanner := bufio.NewScanner(whandle)
     for scanner.Scan() {
-        output = append(output, scanner.Text())
+        values := strings.Split(scanner.Text(), ",")
+        if len(values) == 1 {
+            output[values[0]] = nil
+        } else {
+            allowed_users := map[string]bool{}
+            for i := 1; i < len(values); i++ {
+                allowed_users[values[i]] = true
+            }
+            output[values[0]] = allowed_users
+        }
     }
 
     if err := scanner.Err(); err != nil {
