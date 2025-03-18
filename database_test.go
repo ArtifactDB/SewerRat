@@ -1927,6 +1927,84 @@ func TestListRegisteredDirectories(t *testing.T) {
             t.Fatal("should have found no matching paths")
         }
     })
+
+    t.Run("filtered on existence", func(t *testing.T) {
+        // Registering a directory that we delete immediately.
+        to_add := filepath.Join(tmp, "transient")
+        {
+            err = mockDirectory(to_add)
+            if err != nil {
+                t.Fatalf(err.Error())
+            }
+            comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr, add_options)
+            if err != nil {
+                t.Fatalf(err.Error())
+            }
+            defer deleteDirectory(dbconn, to_add) // resetting the DB for subsequent subtests.
+            if len(comments) > 0 {
+                t.Fatalf("unexpected comments from the directory addition %v", comments)
+            }
+            err = os.RemoveAll(to_add)
+            if err != nil {
+                t.Fatal(err)
+            }
+        }
+
+        exists := "true"
+        query := listRegisteredDirectoriesQuery{}
+        query.Exists = &exists
+        out, err := listRegisteredDirectories(dbconn, &query)
+        if err != nil {
+            t.Fatal(err)
+        }
+        if len(out) != 2 || filepath.Base(out[0].Path) == "transient" || filepath.Base(out[1].Path) == "transient" {
+            t.Errorf("should have found 4 matching paths; %v", out)
+        }
+
+        exists = "false"
+        query.Exists = &exists
+        out, err = listRegisteredDirectories(dbconn, &query)
+        if err != nil {
+            t.Fatal(err)
+        }
+        if len(out) != 1 || filepath.Base(out[0].Path) != "transient" {
+            t.Errorf("should have found 2 matching paths; %v", out)
+        }
+
+        // Repeating this query after adding a file there; this is not a
+        // directory and so the path is still considered absent.
+        err = os.WriteFile(to_add, []byte{}, 0644)
+        if err != nil {
+            t.Fatal(err)
+        }
+        out, err = listRegisteredDirectories(dbconn, &query)
+        if err != nil {
+            t.Fatal(err)
+        }
+        if len(out) != 1 || filepath.Base(out[0].Path) != "transient" {
+            t.Errorf("should have found 2 matching paths; %v", out)
+        }
+
+        // Checking that 'any' queries work as expected.
+        exists = "any"
+        query.Exists = &exists
+        out, err = listRegisteredDirectories(dbconn, &query)
+        if err != nil {
+            t.Fatal(err)
+        }
+        if len(out) != 3 {
+            t.Error("should have found 3 matching paths")
+        }
+
+        query.Exists = nil
+        out, err = listRegisteredDirectories(dbconn, &query)
+        if err != nil {
+            t.Fatal(err)
+        }
+        if len(out) != 3 {
+            t.Error("should have found 3 matching paths")
+        }
+    })
 }
 
 func TestIsDirectoryRegistered(t *testing.T) {

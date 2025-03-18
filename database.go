@@ -918,6 +918,7 @@ type listRegisteredDirectoriesQuery struct {
     User *string `json:"user"`
     ContainsPath *string `json:"contains_path"`
     PathPrefix *string `json:"path_prefix"`
+    Exists *string `json:"exists"`
 }
 
 type listRegisteredDirectoriesResult struct {
@@ -959,6 +960,14 @@ func listRegisteredDirectories(db * sql.DB, query *listRegisteredDirectoriesQuer
         q = q + " WHERE " + strings.Join(filters, " AND ")
     }
 
+    only_exists := false 
+    only_nonexists := false
+    if query.Exists != nil {
+        only_exists = (*(query.Exists) == "true")
+        only_nonexists = (*(query.Exists) == "false")
+    }
+    check_exists := only_exists || only_nonexists
+
     rows, err := db.Query(q, parameters...)
     if err != nil {
         return nil, fmt.Errorf("failed to list registered directories; %w", err)
@@ -968,12 +977,27 @@ func listRegisteredDirectories(db * sql.DB, query *listRegisteredDirectoriesQuer
     output := []listRegisteredDirectoriesResult{}
     for rows.Next() {
         current := listRegisteredDirectoriesResult{}
+
         var names string
         err := rows.Scan(&(current.Path), &(current.User), &(current.Time), &names)
         current.Names = []byte(names)
         if err != nil {
             return nil, fmt.Errorf("failed to traverse rows of the 'dir' table; %w", err)
         }
+
+        if check_exists {
+            info, err := os.Lstat(current.Path)
+            if err == nil && info.IsDir() {
+                if only_nonexists {
+                    continue
+                }
+            } else {
+                if only_exists {
+                    continue
+                }
+            }
+        }
+
         output = append(output, current)
     }
 

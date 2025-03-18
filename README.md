@@ -465,6 +465,8 @@ This can be filtered by passing additional query parameters:
 - `user=`, which filters on the `user`.
 - `contains_path=`, which filters for `path` that contain (i.e., are parents of) the specified path.
 - `path_prefix=`, which filters for `path` that start with the specified prefix.
+- `exists=`, which filters for `path` that are existing directories on the filesystem.
+  This can be `true` (directory must be present at the path), `false` (no directory exists at the path) or `any`.
 
 On error, the response may either be `text/plain` content containing the error message directly,
 or `application/json` content encoding a JSON object with the `reason` for the error.
