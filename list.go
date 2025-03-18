@@ -22,7 +22,6 @@ func readSymlink(path string) (string, error) {
 
 func listFiles(dir string, recursive bool, whitelist linkWhitelist) ([]string, error) {
     to_report := []string{}
-
     err := filepath.WalkDir(dir, func(path string, info fs.DirEntry, err error) error {
         if err != nil {
             return err
@@ -45,10 +44,10 @@ func listFiles(dir string, recursive bool, whitelist linkWhitelist) ([]string, e
             return fs.SkipDir
         }
 
-        if len(whitelist) > 0 {
-            // If it's a symlink that refers to a subdirectory of a whitelisted
-            // directory, we treat it as a directory; otherwise we treat it as a file.
-            if info.Type() & os.ModeSymlink != 0 {
+        // If it's a symlink that refers to a subdirectory of a whitelisted
+        // directory, we treat it as a directory; otherwise we treat it as a file.
+        if info.Type() & os.ModeSymlink != 0 {
+            if len(whitelist) > 0 {
                 target, err := readSymlink(path)
                 if err == nil && isLinkWhitelisted(path, target, whitelist) {
                     target_details, err := os.Stat(target)
@@ -67,6 +66,11 @@ func listFiles(dir string, recursive bool, whitelist linkWhitelist) ([]string, e
                         return nil
                     }
                 }
+            }
+
+            // Avoiding addition of '.' in the case that 'dir' itself is a symlink.
+            if rel == "." {
+                return nil
             }
         }
 
@@ -90,7 +94,7 @@ func listMetadata(dir string, base_names []string, whitelist linkWhitelist) (map
         curnames[n] = true
     }
 
-    // Don't list anything if it's not even a directory.
+    // Don't list anything if it's not even a directory - or a symbolic link to a directory, hence the use of Stat().
     info, err := os.Stat(dir)
     if err != nil {
         curfailures = append(curfailures, fmt.Sprintf("failed to inspect %q; %v", dir, err))
@@ -114,7 +118,7 @@ func listMetadata(dir string, base_names []string, whitelist linkWhitelist) (map
                 return fs.SkipDir
             }
 
-            _, err := os.Stat(filepath.Join(path, ".SewerRatignore"))
+            _, err := os.Lstat(filepath.Join(path, ".SewerRatignore"))
             if err != nil && errors.Is(err, fs.ErrNotExist) {
                 return nil
             } else {

@@ -115,6 +115,31 @@ func TestListFiles(t *testing.T) {
             t.Fatalf("should list whitelisted symbolic links as directories; %v", all)
         }
     })
+
+    t.Run("top-level symlink", func(t *testing.T) {
+        // If the directory itself is a symlink, we get sensible behavior...
+        staging, err := os.MkdirTemp("", "")
+        if err != nil {
+            t.Fatal(err)
+        }
+        host := filepath.Join(staging, "FOO")
+        err = os.Symlink(dir, host)
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        all, err := listFiles(host, false, nil)
+        if len(all) != 0 {
+            t.Errorf("unexpected results from listing via an un-whitelisted symlink (%q)", all)
+        }
+
+        // But if it is in the whitelist, it will be entered.
+        all, err = listFiles(more_symdir, false, linkWhitelist{ dir: nil })
+        sort.Strings(all)
+        if len(all) != 3 || all[0] != "A" || all[1] != "extra" || all[2] != "sub/" {
+            t.Errorf("unexpected results from listing via a whitelisted symlink (%q)", all)
+        }
+    })
 }
 
 func TestListMetadata(t *testing.T) {
@@ -188,13 +213,13 @@ func TestListMetadata(t *testing.T) {
     t.Run("invalid directories", func(t *testing.T) {
         _, fails := listMetadata("missing", []string{ "A.json", "B.json" }, nil)
         if len(fails) != 1 || !strings.Contains(fails[0], "no such file") {
-            t.Fatalf("should report a failure instead of an error when directory is missing")
+            t.Fatalf("should report a failure when directory is missing")
         }
 
         // Providing a file instead of a directory.
         _, fails = listMetadata(filepath.Join(dir, "A.json"), []string{ "A.json", "B.json" }, nil)
         if len(fails) != 1 || !strings.Contains(fails[0], "not a directory") {
-            t.Fatalf("should report a failure instead of an error when supplied path is not a directory")
+            t.Fatalf("should report a failure when supplied path is not a directory")
         }
     })
 }
@@ -270,6 +295,40 @@ func TestListMetadataSymlink(t *testing.T) {
         }
 
         _, ok := found[filepath.Join(dir, "symlinked/B.json")]
+        if !ok {
+            t.Fatal("missing file")
+        }
+    })
+
+    t.Run("top-level symlink", func(t *testing.T) {
+        // If the directory itself is a symlink, we get sensible behavior...
+        staging, err := os.MkdirTemp("", "")
+        if err != nil {
+            t.Fatal(err)
+        }
+        host := filepath.Join(staging, "FOO")
+        err = os.Symlink(dir, host)
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        found, fails := listMetadata(host, []string{ "A.json" }, nil)
+        if len(fails) > 0 {
+            t.Fatalf("unexpected failures; %v", fails)
+        }
+        if len(found) != 0 {
+            t.Errorf("unexpected results from listing via an un-whitelisted symlink (%q)", found)
+        }
+
+        // But if it is in the whitelist, it will be entered.
+        found, fails = listMetadata(host, []string{ "A.json" }, linkWhitelist{ dir: nil })
+        if len(fails) > 0 {
+            t.Fatalf("unexpected failures; %v", fails)
+        }
+        if len(found) != 1 {
+            t.Fatalf("expected a metadata file; %v", found)
+        }
+        _, ok := found[filepath.Join(host, "A.json")]
         if !ok {
             t.Fatal("missing file")
         }
