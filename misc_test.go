@@ -14,7 +14,7 @@ func TestIdentifyUser(t *testing.T) {
     tmp.Close()
     defer os.Remove(tmp.Name())
 
-    details, err := os.Stat(tmp.Name())
+    details, err := os.Lstat(tmp.Name())
     if err != nil {
         t.Fatalf("failed to inspect the temp file")
     }

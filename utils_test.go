@@ -51,7 +51,7 @@ func equalPathArrays(x []string, y []string, dir string) bool {
 }
 
 func mockDirectory(path string) error {
-    if _, err := os.Stat(path); err == nil || !errors.Is(err, os.ErrNotExist) {
+    if _, err := os.Lstat(path); err == nil || !errors.Is(err, os.ErrNotExist) {
         err := os.RemoveAll(path)
         if err != nil {
             return fmt.Errorf("failed to remove the mock directory; %w", err)

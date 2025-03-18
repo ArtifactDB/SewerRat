@@ -55,7 +55,7 @@ func TestIsLinkWhitelisted(t *testing.T) {
     })
 
     t.Run("user-restricted", func(t *testing.T) {
-        lstat, err := os.Stat(tmp)
+        lstat, err := os.Lstat(tmp)
         if err != nil {
             t.Fatal(err)
         }

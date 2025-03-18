@@ -25,6 +25,7 @@ func newHttpError(status int, reason error) *httpError {
 }
 
 func verifyDirectory(dir string) error {
+    // We're willing to accept symlinks to directories, hence the use of Stat().
     info, err := os.Stat(dir)
     if errors.Is(err, os.ErrNotExist) {
         return newHttpError(http.StatusNotFound, fmt.Errorf("path %q does not exist", dir))

@@ -130,7 +130,7 @@ func createWriteTransaction(db *sql.DB) (*writeTransaction, error) {
 
 func initializeDatabase(path string) (*sql.DB, error) {
     accessible := false
-    if _, err := os.Stat(path); err == nil {
+    if _, err := os.Lstat(path); err == nil {
         accessible = true
     }
 
@@ -770,7 +770,7 @@ func updateDirectories(db *sql.DB, tokenizer *unicodeTokenizer, options *addDire
 
 func backupDatabase(db *sql.DB, path string) error {
     var existing bool
-    _, err := os.Stat(path)
+    _, err := os.Lstat(path)
     if err == nil {
         existing = true
         err = os.Rename(path, path + ".backup")

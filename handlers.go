@@ -278,7 +278,7 @@ func newDeregisterStartHandler(db *sql.DB, verifier *verificationRegistry) func(
 
         // No need to check for a valid directory, as we want to be able to deregister missing/symlinked directories.
         // If the directory doesn't exist, then we don't need to attempt to create a verification code.
-        if _, err := os.Stat(regpath); errors.Is(err, os.ErrNotExist) {
+        if _, err := os.Lstat(regpath); errors.Is(err, os.ErrNotExist) {
             if output.Block == nil || *(output.Block) {
                 err := deleteDirectory(db, regpath)
                 if err != nil {
@@ -529,6 +529,7 @@ func newRetrieveFileHandler(db *sql.DB) func(http.ResponseWriter, *http.Request)
             return
         }
 
+        // We use Stat() to resolve any symlink to a file.
         info, err := os.Stat(path)
         if err != nil {
             if errors.Is(err, os.ErrNotExist) {

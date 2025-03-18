@@ -29,7 +29,7 @@ func TestInitializeDatabase(t *testing.T) {
         }
         defer dbconn.Close()
 
-        if _, err := os.Stat(dbpath); err != nil {
+        if _, err := os.Lstat(dbpath); err != nil {
             t.Fatalf("database file doesn't seem to exist; %v", err)
         }
 

@@ -22,7 +22,7 @@ func TestLoadMetadata(t *testing.T) {
             t.Fatalf("failed to create a mock file; %v", err)
         }
 
-        info, err := os.Stat(path)
+        info, err := os.Lstat(path)
         if err != nil {
             t.Fatal(err)
         }
@@ -67,7 +67,7 @@ func TestLoadMetadata(t *testing.T) {
             t.Fatalf("failed to create a mock file; %v", err)
         }
 
-        info, err := os.Stat(path)
+        info, err := os.Lstat(path)
         if err != nil {
             t.Fatal(err)
         }
@@ -85,6 +85,7 @@ func TestLoadMetadata(t *testing.T) {
             t.Fatalf("failed to create a symlink; %v", err)
         }
 
+        // Using Stat() as the FileInfo should refer to the target of the link.
         info, err := os.Stat(path)
         if err != nil {
             t.Fatal(err)
