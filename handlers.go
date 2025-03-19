@@ -658,6 +658,10 @@ func newListRegisteredDirectoriesHandler(db *sql.DB) func(http.ResponseWriter, *
             }
             query.PathPrefix = &path
         }
+        if params.Has("exists") {
+            exists := params.Get("exists")
+            query.Exists = &exists
+        }
 
         output, err := listRegisteredDirectories(db, &query)
         if err != nil {

@@ -1488,6 +1488,13 @@ func TestListRegisteredDirectoriesHandler(t *testing.T) {
 
     handler := http.HandlerFunc(newListRegisteredDirectoriesHandler(dbconn))
 
+    type lrdResult struct {
+        Path string
+        User string
+        Time int64
+        Names []string
+    }
+
     t.Run("basic", func (t *testing.T) {
         req, err := http.NewRequest("GET", "/registered", nil)
         if err != nil {
@@ -1498,13 +1505,6 @@ func TestListRegisteredDirectoriesHandler(t *testing.T) {
         handler.ServeHTTP(rr, req)
         if rr.Code != http.StatusOK {
             t.Fatalf("should have succeeded (got %d)", rr.Code)
-        }
-
-        type lrdResult struct {
-            Path string
-            User string
-            Time int64
-            Names []string
         }
 
         r := []lrdResult{}
@@ -1535,13 +1535,6 @@ func TestListRegisteredDirectoriesHandler(t *testing.T) {
             t.Fatalf("should have succeeded (got %d)", rr.Code)
         }
 
-        type lrdResult struct {
-            Path string
-            User string
-            Time int64
-            Names []string
-        }
-
         r := []lrdResult{}
         dec := json.NewDecoder(rr.Body)
         err = dec.Decode(&r)
@@ -1566,13 +1559,6 @@ func TestListRegisteredDirectoriesHandler(t *testing.T) {
         handler.ServeHTTP(rr, req)
         if rr.Code != http.StatusOK {
             t.Fatalf("should have succeeded (got %d)", rr.Code)
-        }
-
-        type lrdResult struct {
-            Path string
-            User string
-            Time int64
-            Names []string
         }
 
         r := []lrdResult{}
@@ -1600,13 +1586,6 @@ func TestListRegisteredDirectoriesHandler(t *testing.T) {
             t.Fatalf("should have succeeded (got %d)", rr.Code)
         }
 
-        type lrdResult struct {
-            Path string
-            User string
-            Time int64
-            Names []string
-        }
-
         r := []lrdResult{}
         dec := json.NewDecoder(rr.Body)
         err = dec.Decode(&r)
@@ -1619,4 +1598,28 @@ func TestListRegisteredDirectoriesHandler(t *testing.T) {
         }
     })
 
+    t.Run("filtered by exists", func (t *testing.T) {
+        req, err := http.NewRequest("GET", "/registered?exists=false", nil)
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        rr := httptest.NewRecorder()
+        handler.ServeHTTP(rr, req)
+        if rr.Code != http.StatusOK {
+            t.Fatalf("should have succeeded (got %d)", rr.Code)
+        }
+
+        r := []lrdResult{}
+        dec := json.NewDecoder(rr.Body)
+        err = dec.Decode(&r)
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        // All directories exist, so exists=false should not pick up anything.
+        if len(r) != 0 {
+            t.Fatalf("unexpected listing results %q", r)
+        }
+    })
 }
