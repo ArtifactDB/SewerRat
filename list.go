@@ -21,6 +21,9 @@ func readSymlink(path string) (string, error) {
 }
 
 func listFiles(dir string, recursive bool, whitelist linkWhitelist) ([]string, error) {
+    // It is assumed that 'dir' is a directory or a symlink to a directory;
+    // check with verifyDirectory() before calling this function.
+
     to_report := []string{}
     err := filepath.WalkDir(dir, func(path string, info fs.DirEntry, err error) error {
         if err != nil {

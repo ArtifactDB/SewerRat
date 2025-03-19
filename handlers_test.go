@@ -152,6 +152,48 @@ func TestCheckVerificationCode(t *testing.T) {
     })
 }
 
+func TestVerifyDirectory(t *testing.T) {
+    dir, err := os.MkdirTemp("", "")
+    if err != nil {
+        t.Fatal(err)
+    }
+    err = verifyDirectory(dir)
+    if err != nil {
+        t.Error(err)
+    }
+
+    // Fails if it doesn't exist.
+    err = verifyDirectory(filepath.Join(dir, "BAR"))
+    if err == nil || !strings.Contains(err.Error(), "does not exist") {
+        t.Error(err)
+    }
+
+    // Fails if it's not a directory.
+    err = os.WriteFile(filepath.Join(dir, "FOO"), []byte{}, 0644)
+    if err != nil {
+        t.Fatal(err)
+    }
+    err = verifyDirectory(filepath.Join(dir, "FOO"))
+    if err == nil || !strings.Contains(err.Error(), "not a directory") {
+        t.Error(err)
+    }
+
+    // Okay if it's a symlink.
+    staging, err := os.MkdirTemp("", "")
+    if err != nil {
+        t.Fatal(err)
+    }
+    new_path := filepath.Join(staging, "BAR")
+    err = os.Symlink(dir, new_path)
+    if err != nil {
+        t.Fatal(err)
+    }
+    err = verifyDirectory(new_path)
+    if err != nil {
+        t.Error(err)
+    }
+}
+
 func decodeStringyResponse(input io.Reader, t *testing.T) map[string]string {
     var output map[string]string
     dec := json.NewDecoder(input)
