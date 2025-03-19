@@ -83,20 +83,7 @@ The [`/registered`](#identifying-registered-directories) endpoint can be interro
 
 ### Indexing in detail
 
-As mentioned above, SewerRat will recurse through the specified directory to find metadata files with the listed `base` names.
-Subdirectories with names starting with `.` are skipped during the recursive walk, so any metadata files therein will be ignored.
-This is generally a sensible choice as these directories usually do not contain any interesting (scientific) information. 
-If any such subdirectory is relevant, a user can force SewerRat to include it in the index by passing its path directly as `path`.
-This is because leading dots are allowed in the components of the supplied `path`, just not in its subdirectories.
-Conversely, a user can force SewerRat to skip a particular subdirectory by placing a (possibly empty) `.SewerRatignore` file inside it.
-
-Symbolic links in the specified directory are treated differently depending on their target.
-If the directory contains symbolic links to files, the contents of the target files can be indexed as long as the link has one of the `base` names.
-All file information (e.g., modification time, owner) is taken from the link target, not the link itself;
-SewerRat effectively treats the symbolic link as a proxy for the target file.
-If the directory contains symbolic links to other directories, these will not be recursively traversed unless the link targets a whitelisted directory 
-(see the [`-whitelist`](#administration) option for details).
-
+As mentioned above, SewerRat will recurse through the registered directory to find metadata files with the listed `base` names.
 Each identified metadata document is parsed as JSON and converted into tokens.
 For strings, we use an adaptation of the [FTS5 Unicode61 tokenizer](https://www.sqlite.org/fts5.html#unicode61_tokenizer) to break each string into tokens,
 where strings are split into tokens at any character that is not a Unicode letter/number or a dash.
@@ -112,6 +99,24 @@ e.g., the values `"Aaron"` and `"Chris"` are associated with the names `"a"` and
     }
 }
 ```
+
+Subdirectories with names starting with `.` are skipped during the recursive walk, so any metadata files therein will be ignored.
+This is generally a sensible choice as these directories usually do not contain any interesting (scientific) information. 
+If any such subdirectory is relevant, a user can force SewerRat to include it in the index by passing its path directly as `path`.
+This is because leading dots are allowed in the components of the supplied `path`, just not in its subdirectories.
+Conversely, a user can force SewerRat to skip a particular subdirectory by placing a (possibly empty) `.SewerRatignore` file inside it.
+
+Symbolic links within the registered directory are treated differently depending on their target.
+If the symbolic link targets a file, the contents of the target file will be indexed as long as the link has one of the `base` names.
+All file information (e.g., modification time, owner) is taken from the link target, not the link itself;
+SewerRat effectively treats the symbolic link as a proxy for the target file.
+If the symbolic link targets another directory, it will not be recursively traversed unless the target directory is whitelisted
+(see the [`-whitelist`](#administration) option for details).
+
+For completeness, it is worth mentioning that symbolic links may also be present in the components of the `path` supplied to `/register/start`.
+If the `path` is itself a symbolic link to a directory, this will only be traversed if the link target is whitelisted.
+If any of its parent components are symbolic links, whitelisting of those link targets is not required.
+This is helpful when dealing with complex filesystem configurations where links are used to provide convenient aliases.
 
 Optionally, the absolute path of each metadata document can also be tokenized and included into the SewerRat index.
 This is useful when files or directories have meaningful names (e.g., based on database identifiers) that might be of interest in queries.
