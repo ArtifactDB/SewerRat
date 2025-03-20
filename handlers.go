@@ -650,7 +650,15 @@ func newListRegisteredDirectoriesHandler(db *sql.DB) func(http.ResponseWriter, *
             }
             query.ContainsPath = &path
         }
-        if params.Has("path_prefix") {
+        if params.Has("within_path") {
+            path, err := sanitizePath(params.Get("within_path"))
+            if err != nil {
+                dumpHttpErrorResponse(w, newHttpError(http.StatusBadRequest, err))
+                return
+            }
+            query.WithinPath = &path
+        }
+        if params.Has("path_prefix") { // for back-compatibility.
             path, err := sanitizePath(params.Get("path_prefix"))
             if err != nil {
                 dumpHttpErrorResponse(w, newHttpError(http.StatusBadRequest, err))

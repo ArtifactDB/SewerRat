@@ -917,6 +917,7 @@ func retrievePath(db * sql.DB, path string, include_metadata bool) (*queryResult
 type listRegisteredDirectoriesQuery struct {
     User *string `json:"user"`
     ContainsPath *string `json:"contains_path"`
+    WithinPath *string `json:"path_prefix"`
     PathPrefix *string `json:"path_prefix"`
     Exists *string `json:"exists"`
 }
@@ -951,7 +952,11 @@ func listRegisteredDirectories(db * sql.DB, query *listRegisteredDirectoriesQuer
         parameters = append(parameters, collected...)
     }
 
-    if query.PathPrefix != nil {
+    if query.WithinPath != nil {
+        filters = append(filters, "path LIKE ?")
+        parameters = append(parameters, *(query.WithinPath) + "%")
+    }
+    if query.PathPrefix != nil { // this is for back-compatibility only.
         filters = append(filters, "path LIKE ?")
         parameters = append(parameters, *(query.PathPrefix) + "%")
     }
@@ -995,6 +1000,13 @@ func listRegisteredDirectories(db * sql.DB, query *listRegisteredDirectoriesQuer
                 if only_exists {
                     continue
                 }
+            }
+        }
+
+        if query.WithinPath != nil {
+            rel, err := filepath.Rel(*(query.WithinPath), current.Path)
+            if err != nil || !filepath.IsLocal(rel) {
+                continue
             }
         }
 

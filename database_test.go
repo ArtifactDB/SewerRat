@@ -1928,6 +1928,70 @@ func TestListRegisteredDirectories(t *testing.T) {
         }
     })
 
+    t.Run("filtered on within_path", func(t *testing.T) {
+        // Basic checks to see what we pick up or don't.
+        {
+            query := listRegisteredDirectoriesQuery{}
+            query.WithinPath = &tmp
+
+            out, err := listRegisteredDirectories(dbconn, &query)
+            if err != nil {
+                t.Fatal(err)
+            }
+            if len(out) != 2 {
+                t.Fatal("should have found two matching paths")
+            }
+
+            absent := tmp + "_asdasd"
+            query.WithinPath = &absent
+            out, err = listRegisteredDirectories(dbconn, &query)
+            if err != nil {
+                t.Fatal(err)
+            }
+            if len(out) != 0 {
+                t.Fatal("should have found no matching paths")
+            }
+        }
+
+        // Adding a 'fo' directory, and checking that we don't pick up 'foo'.
+        {
+            to_add := filepath.Join(tmp, "fo")
+            err = mockDirectory(to_add)
+            if err != nil {
+                t.Fatalf(err.Error())
+            }
+            comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "fo_user", tokr, add_options)
+            if err != nil {
+                t.Fatalf(err.Error())
+            }
+            defer deleteDirectory(dbconn, to_add)
+            if len(comments) > 0 {
+                t.Fatalf("unexpected comments from the directory addition %v", comments)
+            }
+
+            query := listRegisteredDirectoriesQuery{}
+            query.WithinPath = &to_add
+            out, err := listRegisteredDirectories(dbconn, &query)
+            if err != nil {
+                t.Fatal(err)
+            }
+            if len(out) != 1 || filepath.Base(out[0].Path) != "fo" {
+                t.Fatal("should have found a single matching path")
+            }
+
+            // Checking foo as a control.
+            control := filepath.Join(tmp, "foo")
+            query.WithinPath = &control
+            out, err = listRegisteredDirectories(dbconn, &query)
+            if err != nil {
+                t.Fatal(err)
+            }
+            if len(out) != 1 || filepath.Base(out[0].Path) != "foo" {
+                t.Fatal("should have found a single matching path")
+            }
+        }
+    })
+
     t.Run("filtered on existence", func(t *testing.T) {
         // Registering a directory that we delete immediately.
         to_add := filepath.Join(tmp, "transient")

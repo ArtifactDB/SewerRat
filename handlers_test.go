@@ -1573,9 +1573,9 @@ func TestListRegisteredDirectoriesHandler(t *testing.T) {
         }
     })
 
-    t.Run("filtered by has_prefix", func (t *testing.T) {
-        encoded := url.QueryEscape(tmp)
-        req, err := http.NewRequest("GET", "/registered?has_prefix=" + encoded, nil)
+    t.Run("filtered by path_prefix", func (t *testing.T) {
+        encoded := url.QueryEscape(filepath.Join(tmp, "to_add_ai"))
+        req, err := http.NewRequest("GET", "/registered?path_prefix=" + encoded, nil)
         if err != nil {
             t.Fatal(err)
         }
@@ -1593,7 +1593,32 @@ func TestListRegisteredDirectoriesHandler(t *testing.T) {
             t.Fatal(err)
         }
 
-        if len(r) != 3 {
+        if len(r) != 1 || filepath.Base(r[0].Path) != "to_add_ai" {
+            t.Fatalf("unexpected listing results %q", r)
+        }
+    })
+
+    t.Run("filtered by within_path", func (t *testing.T) {
+        encoded := url.QueryEscape(filepath.Join(tmp, "to_add_ai"))
+        req, err := http.NewRequest("GET", "/registered?within_path=" + encoded, nil)
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        rr := httptest.NewRecorder()
+        handler.ServeHTTP(rr, req)
+        if rr.Code != http.StatusOK {
+            t.Fatalf("should have succeeded (got %d)", rr.Code)
+        }
+
+        r := []lrdResult{}
+        dec := json.NewDecoder(rr.Body)
+        err = dec.Decode(&r)
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        if len(r) != 1 || filepath.Base(r[0].Path) != "to_add_ai" {
             t.Fatalf("unexpected listing results %q", r)
         }
     })
