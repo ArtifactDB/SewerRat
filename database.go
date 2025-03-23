@@ -143,6 +143,13 @@ func initializeDatabase(path string) (*sql.DB, error) {
     // time; everyone else will have to block on the connection availability.
     db.SetMaxOpenConns(1)
 
+    // Write-ahead logging is persistent and doesn't need to be set on every connection,
+    // see https://www.sqlite.org/wal.html#persistence_of_wal_mode.
+    _, err = db.Exec("PRAGMA journal_mode = WAL")
+    if err != nil {
+        return nil, fmt.Errorf("failed to enable write-ahead logging; %w", err)
+    }
+
     if (!accessible) {
         err := func () error {
             atx, err := createWriteTransaction(db)
@@ -192,13 +199,6 @@ CREATE INDEX index_links ON links(tid, fid);
             err = atx.Commit()
             if err != nil {
                 return fmt.Errorf("failed to commit table creation commands for %s; %w", path, err)
-            }
-
-            // Write-ahead logging is persistent and doesn't need to be set on every connection,
-            // see https://www.sqlite.org/wal.html#persistence_of_wal_mode.
-            _, err = atx.Exec("PRAGMA journal_mode = WAL")
-            if err != nil {
-                return fmt.Errorf("failed to enable write-ahead logging; %w", err)
             }
 
             return nil
