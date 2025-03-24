@@ -92,7 +92,7 @@ func main() {
     http.HandleFunc("GET " + prefix + "/", newDefaultHandler())
     http.HandleFunc("OPTIONS " + prefix + "/", newOptionsHandler())
 
-    // Adding an hourly job that does a full checkpoint.
+    // Adding an hourly job that tries to do a full checkpoint; this keeps the WAL small for better read performance.
     {
         lifetime := time.Duration(*checkpoint0) * time.Minute
         ticker := time.NewTicker(lifetime)
@@ -108,7 +108,7 @@ func main() {
         }()
     }
 
-    // Adding a per-day job that updates the paths.
+    // Adding a per-day job that updates the metadata in the registered paths.
     {
         ticker := time.NewTicker(time.Duration(*update0) * time.Hour)
         defer ticker.Stop()
@@ -127,7 +127,7 @@ func main() {
         }()
     }
 
-    // Adding another per-day job that does the backup.
+    // Adding another per-day job that cleans the database and does a backup.
     {
         bpath := *backup_path0
         if bpath == "" {
