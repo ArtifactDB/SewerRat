@@ -14,6 +14,7 @@ func main() {
     dbpath0 := flag.String("db", "index.sqlite3", "Path to the SQLite file for the metadata")
     port0 := flag.Int("port", 8080, "Port to listen to for requests")
     backup0 := flag.Int("backup", 24, "Frequency of creating or updating back-ups, in hours")
+    backup_path0 := flag.String("backup_path", "", "Path to the backup file (default \"\", in which case \".backup\" is appended to the '-db' path)")
     update0 := flag.Int("update", 24, "Frequency of updating the index by scanning registered directories, in hours")
     timeout0 := flag.Int("finish", 30, "Maximum time spent polling for the verification code when finishing (de)registration, in seconds")
     prefix0 := flag.String("prefix", "", "Prefix to add to each endpoint, after removing any leading or trailing slashes (default \"\")")
@@ -128,13 +129,17 @@ func main() {
 
     // Adding another per-day job that does the backup.
     {
+        bpath := *backup_path0
+        if bpath == "" {
+            bpath = dbpath + ".backup"
+        }
         ticker := time.NewTicker(time.Duration(*backup0) * time.Hour)
         defer ticker.Stop()
         go func() {
             time.Sleep(time.Hour * 12) // start at a different cycle from the path updates.
             for {
                 <-ticker.C
-                err := backupDatabase(db, dbpath + ".backup")
+                err := backupDatabase(db, bpath)
                 if err != nil {
                     log.Printf("[ERROR] failed to back up database; %v\n", err)
                 }

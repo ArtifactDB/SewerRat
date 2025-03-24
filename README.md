@@ -504,6 +504,8 @@ Additional arguments can be passed to `./SewerRat` to control its behavior (chec
 
 - `-backup` controls the frequency of back-up creation.
   This defaults to 24 hours.
+- `-backup_path` specifies the path to the back-up file.
+  This defaults to an empty string, in which case the back-up path is defined by appending `.backup` to the `-db` path.
 - `-update` controls the frequency of index updates.
   This defaults to 24 hours.
 - `-session` specifies the lifetime of a registration sesssion 
