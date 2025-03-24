@@ -135,11 +135,19 @@ func main() {
         }
         ticker := time.NewTicker(time.Duration(*backup0) * time.Hour)
         defer ticker.Stop()
+
         go func() {
             time.Sleep(time.Hour * 12) // start at a different cycle from the path updates.
             for {
                 <-ticker.C
-                err := backupDatabase(db, bpath)
+
+                err := cleanDatabase(db)
+                if err != nil {
+                    log.Printf("[ERROR] failed to clean up the database; %v\n", err)
+                    continue
+                }
+
+                err = backupDatabase(db, bpath)
                 if err != nil {
                     log.Printf("[ERROR] failed to back up database; %v\n", err)
                 }

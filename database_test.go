@@ -1167,6 +1167,126 @@ func TestUpdateDirectories(t *testing.T) {
     })
 }
 
+func TestCleanDatabase(t *testing.T) {
+    tmp, err := os.MkdirTemp("", "")
+    if err != nil {
+        t.Fatalf(err.Error())
+    }
+    defer os.RemoveAll(tmp)
+
+    dbpath := filepath.Join(tmp, "db.sqlite3")
+    dbconn, err := initializeDatabase(dbpath)
+    if err != nil {
+        t.Fatalf(err.Error())
+    }
+    defer dbconn.Close()
+
+    tokr, err := newUnicodeTokenizer(false)
+    if err != nil {
+        t.Fatalf(err.Error())
+    }
+
+    add_options := &addDirectoryContentsOptions{ Concurrency: 2 }
+
+    // Mocking up some contents.
+    for i := 0; i < 2; i++ {
+        name := "first" 
+        base := "metadata.json"
+        if i == 1 {
+            name = "second"
+            base = "other.json"
+        }
+
+        to_add := filepath.Join(tmp, name)
+        err = mockDirectory(to_add)
+        if err != nil {
+            t.Fatal(err)
+        }
+        comments, err := addNewDirectory(dbconn, to_add, []string{ base }, "myself", tokr, add_options)
+        if err != nil {
+            t.Fatal(err)
+        }
+        if len(comments) > 0 {
+            t.Fatalf("unexpected comments from the directory addition %v", comments)
+        }
+    }
+
+    // Deleting the first directory to create some garbage-collectable content.
+    err = deleteDirectory(dbconn, filepath.Join(tmp, "first"))
+    if err != nil {
+        t.Fatal(err)
+    }
+
+    // Checking that we get the expected results from our queries.
+    for i := 0; i < 2; i++ {
+        for _, token := range []string{ "aaron", "akari" } {
+            res := dbconn.QueryRow("SELECT COUNT(*) FROM tokens WHERE token == '" + token + "'")
+            var count int
+            err := res.Scan(&count)
+            if err != nil {
+                t.Fatal(err)
+            }
+            if i == 0 {
+                if count != 1 {
+                    t.Errorf("expected one row to be present, got %v", count)
+                }
+            } else {
+                if count != 0 {
+                    t.Errorf("expected no rows to be present, got %v", count)
+                }
+            }
+        }
+
+        for _, field := range []string{ "foo", "anime" } {
+            res := dbconn.QueryRow("SELECT COUNT(*) FROM fields WHERE field == '" + field + "'")
+            var count int
+            err := res.Scan(&count)
+            if err != nil {
+                t.Fatal(err)
+            }
+            if i == 0 {
+                if count != 1 {
+                    t.Errorf("expected one row to be present, got %v", count)
+                }
+            } else {
+                if count != 0 {
+                    t.Errorf("expected no rows to be present, got %v", count)
+                }
+            }
+        }
+
+        // As a control, we check that the other terms survive.
+        for _, token := range []string{ "lamb", "chicken", "biyori" } {
+            res := dbconn.QueryRow("SELECT COUNT(*) FROM tokens WHERE token == '" + token + "'")
+            var count int
+            err := res.Scan(&count)
+            if err != nil {
+                t.Fatal(err)
+            }
+            if count != 1 {
+                t.Errorf("expected one row to be present, got %v", count)
+            }
+        }
+
+        for _, field := range []string{ "variants", "category.nsfw" } {
+            res := dbconn.QueryRow("SELECT COUNT(*) FROM fields WHERE field == '" + field + "'")
+            var count int
+            err := res.Scan(&count)
+            if err != nil {
+                t.Fatal(err)
+            }
+            if count != 1 {
+                t.Errorf("expected one row to be present, got %v", count)
+            }
+        }
+
+        err = cleanDatabase(dbconn)
+        if err != nil {
+            t.Fatal(err)
+        }
+    }
+}
+
 func TestBackupDatabase(t *testing.T) {
     tmp, err := os.MkdirTemp("", "")
     if err != nil {

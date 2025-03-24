@@ -768,6 +768,43 @@ func updateDirectories(db *sql.DB, tokenizer *unicodeTokenizer, options *addDire
 
 /**********************************************************************/
 
+func removeUnusedTerms(db *sql.DB) error {
+    atx, err := createWriteTransaction(db)
+    if err != nil {
+        return fmt.Errorf("failed to prepare transaction for deletion; %w", err)
+    }
+    defer atx.Finish()
+
+    _, err = atx.Exec("DELETE FROM tokens WHERE tid NOT IN (SELECT tid FROM links)")
+    if err != nil {
+        return fmt.Errorf("failed to remove unused tokens; %w", err)
+    }
+
+    _, err = atx.Exec("DELETE FROM fields WHERE fid NOT IN (SELECT fid FROM links)")
+    if err != nil {
+        return fmt.Errorf("failed to remove unused field names; %w", err)
+    }
+
+    err = atx.Commit()
+    if err != nil {
+        return fmt.Errorf("failed to commit clean-up changes; %w", err)
+    }
+
+    return nil
+}
+
+func cleanDatabase(db *sql.DB) error {
+    err := removeUnusedTerms(db)
+    if err != nil {
+        return err
+    }
+    _, err = db.Exec("VACUUM")
+    if err != nil {
+        return fmt.Errorf("failed to vacuum the database; %w", err)
+    }
+    return nil
+}
+
 func backupDatabase(db *sql.DB, path string) error {
     var existing bool
     _, err := os.Lstat(path)
