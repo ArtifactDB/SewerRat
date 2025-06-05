@@ -96,9 +96,9 @@ func searchForLink(dbconn *sql.DB, path, field, token string) (bool, error) {
 
     err := dbconn.QueryRow(`
 SELECT COUNT(links.pid) FROM links
-LEFT JOIN paths ON paths.pid = links.pid 
-LEFT JOIN fields ON fields.fid = links.fid
-LEFT JOIN tokens ON tokens.tid = links.tid
+INNER JOIN paths ON paths.pid = links.pid 
+INNER JOIN fields ON fields.fid = links.fid
+INNER JOIN tokens ON tokens.tid = links.tid
 WHERE paths.path = ? AND fields.field = ? AND tokens.token = ? 
 `, path, field, token).Scan(&count)
     if err != nil {
@@ -528,7 +528,7 @@ func TestDeleteDirectory(t *testing.T) {
 
     {
         // Checking that only the second directory's links are present.
-        rows, err := dbconn.Query("SELECT paths.path FROM links LEFT JOIN paths ON paths.pid = links.pid")
+        rows, err := dbconn.Query("SELECT paths.path FROM links INNER JOIN paths ON paths.pid = links.pid")
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -602,9 +602,9 @@ func TestUpdateDirectories(t *testing.T) {
         count := -1
 
         err := dbconn.QueryRow(`
-    SELECT COUNT(links.pid) FROM links
-    LEFT JOIN paths ON paths.pid = links.pid 
-    WHERE paths.path = ?
+SELECT COUNT(links.pid) FROM links
+JOIN paths ON paths.pid = links.pid 
+WHERE paths.path = ?
     `, path).Scan(&count)
         if err != nil {
             return false, err
@@ -2383,9 +2383,9 @@ func TestTokenizePathField(t *testing.T) {
 
         for _, token := range tokens {
             rows, err := dbconn.Query(`SELECT paths.path FROM links
-LEFT JOIN paths ON paths.pid = links.pid
-LEFT JOIN tokens ON tokens.tid = links.tid
-LEFT JOIN fields ON fields.fid = links.fid
+INNER JOIN paths ON paths.pid = links.pid
+INNER JOIN tokens ON tokens.tid = links.tid
+INNER JOIN fields ON fields.fid = links.fid
 WHERE tokens.token = ? AND fields.field = ?`, 
                 token,
                 field,
@@ -2449,9 +2449,9 @@ WHERE tokens.token = ? AND fields.field = ?`,
         }
 
         res := dbconn.QueryRow(`SELECT COUNT(*) FROM links
-LEFT JOIN paths ON paths.pid = links.pid
-LEFT JOIN tokens ON tokens.tid = links.tid
-LEFT JOIN fields ON fields.fid = links.fid
+INNER JOIN paths ON paths.pid = links.pid
+INNER JOIN tokens ON tokens.tid = links.tid
+INNER JOIN fields ON fields.fid = links.fid
 WHERE tokens.token = ?`, 
             "asdasd" ,
         )

@@ -146,9 +146,9 @@ func assembleFilter(query *searchClause) (string, []interface{}) {
     if query.Type == "text" {
         parameters := []interface{}{}
 
-        filter := "paths.pid IN (SELECT pid from links LEFT JOIN tokens ON tokens.tid = links.tid"
+        filter := "paths.pid IN (SELECT pid from links INNER JOIN tokens ON tokens.tid = links.tid"
         if query.Field != "" {
-            filter += " LEFT JOIN fields ON fields.fid = links.fid WHERE fields.field = ? AND"
+            filter += " INNER JOIN fields ON fields.fid = links.fid WHERE fields.field = ? AND"
             parameters = append(parameters, query.Field)
         } else {
             filter += " WHERE"
@@ -239,9 +239,9 @@ func assembleFilter(query *searchClause) (string, []interface{}) {
             subfilters = append(subfilters, current)
         }
 
-        filter := "paths.pid IN (SELECT pid from links LEFT JOIN tokens ON tokens.tid = links.tid"
+        filter := "paths.pid IN (SELECT pid from links INNER JOIN tokens ON tokens.tid = links.tid"
         if has_field {
-            filter += " LEFT JOIN fields ON fields.fid = links.fid"
+            filter += " INNER JOIN fields ON fields.fid = links.fid"
         }
         filter += " WHERE " + strings.Join(subfilters, " OR ") + ")"
         collected = append(collected, filter)
