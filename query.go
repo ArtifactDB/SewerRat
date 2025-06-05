@@ -10,13 +10,8 @@ type searchClause struct {
 
     // Only relevant for type = path.
     // - Before sanitization: if IsPattern = false, Path is assumed to contain a substring of the path, to be extended at the front/back depending on IsPrefix and IsSuffix.
-    //   If IsPattern = true, Path is assumed to be a pattern with the non-SQLite wildcards.
-    //   Escape is obviously empty.
     // - After sanitization: Path is a SQLite-wildcard-containing pattern.
-    //   Escape may or may not be an empty string, depending on whether Path needed escaping of wildcard characters.
-    //   IsPrefix, IsPattern and IsSuffix are no longer used.
     Path string `json:"path"`
-    Escape string `json:"-"`
     IsPrefix bool `json:"is_prefix"`
     IsSuffix bool `json:"is_suffix"`
 
@@ -47,47 +42,6 @@ type searchClause struct {
     // - Before sanitization: the child may be a NOT clause.
     // - After sanitization: no child will be a NOT clause.
     Child *searchClause `json:"child"`
-}
-
-func escapeWildcards(input string) (string, string, error) {
-    all_characters := map[rune]bool{}
-    for _, x := range input {
-        all_characters[x] = true
-    }
-
-    _, has_under := all_characters['_']
-    _, has_percent := all_characters['%']
-    if !has_under && !has_percent {
-        return input, "", nil
-    }
-
-    // Choosing an escape character for wildcards.
-    var escape rune
-    found_escape := false
-    for _, candidate := range []rune{ '\\', '~', '!', '@', '#', '$', '^', '&' } {
-        _, has_escape := all_characters[candidate]
-        if !has_escape {
-            escape = candidate
-            found_escape = true
-            break
-        }
-    }
-
-    if !found_escape {
-        return "", "", fmt.Errorf("failed to escape wildcards in %q", input)
-    }
-    escape_str := string(escape)
-
-    // Need to escape all existing wildcards in the name.
-    pattern := ""
-    for _, x := range input {
-        if x == '%' || x == '_' {
-            pattern += escape_str
-        }
-        pattern += string(x)
-    }
-
-    return pattern, escape_str, nil
 }
 
 func sanitizeQuery(original *searchClause, deftok, wildtok *unicodeTokenizer) (*searchClause, error) {
@@ -175,26 +129,14 @@ func sanitizeQuery(original *searchClause, deftok, wildtok *unicodeTokenizer) (*
     }
 
     if original.Type == "path" {
-        pattern, escape, err := escapeWildcards(original.Path)
-        if err != nil {
-            return nil, fmt.Errorf("failed to escape wildcards for path %q; %w", original.Path, err)
+        pattern := original.Path
+        if !original.IsPrefix && !strings.HasPrefix(pattern, "*") {
+            pattern = "*" + pattern
         }
-
-        if original.IsPattern {
-            rep := strings.NewReplacer(
-                "?", "_",
-                "*", "%",
-            )
-            pattern = rep.Replace(pattern)
+        if !original.IsSuffix && !strings.HasSuffix(pattern, "*") {
+            pattern += "*"
         }
-        if !original.IsPrefix && !strings.HasPrefix(pattern, "%") {
-            pattern = "%" + pattern
-        }
-        if !original.IsSuffix && !strings.HasSuffix(pattern, "%") {
-            pattern += "%"
-        }
-
-        return &searchClause { Type: "path", Path: pattern, Escape: escape }, nil
+        return &searchClause { Type: "path", Path: pattern }, nil
     }
 
     return nil, fmt.Errorf("unknown search type %q", original.Type)
@@ -214,7 +156,7 @@ func assembleFilter(query *searchClause) (string, []interface{}) {
 
         filter += " tokens.token"
         if query.IsPattern {
-            filter += " LIKE"
+            filter += " GLOB"
         } else {
             filter += " ="
         }
@@ -230,11 +172,7 @@ func assembleFilter(query *searchClause) (string, []interface{}) {
     }
 
     if query.Type == "path" {
-        if query.Escape != "" {
-            return "paths.path LIKE ? ESCAPE ?", []interface{}{ query.Path, query.Escape }
-        } else {
-            return "paths.path LIKE ?", []interface{}{ query.Path }
-        }
+        return "paths.path GLOB ?", []interface{}{ query.Path }
     }
 
     if query.Type == "time" {
@@ -285,7 +223,7 @@ func assembleFilter(query *searchClause) (string, []interface{}) {
         for _, tchild := range text {
             current := "tokens.token"
             if tchild.IsPattern {
-                current += " LIKE"
+                current += " GLOB"
             } else {
                 current += " ="
             }
