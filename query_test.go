@@ -5,49 +5,6 @@ import (
     "strings"
 )
 
-func TestEscapeWildcards(t *testing.T) {
-    {
-        input := "asdasd asdasd asd"
-        out, escape, err := escapeWildcards(input)
-        if err != nil {
-            t.Fatalf(err.Error())
-        }
-        if out != input || escape != "" {
-            t.Fatalf("unexpected output from escape function")
-        }
-    }
-
-    {
-        input := "asdasd% asd_sd asd"
-        out, escape, err := escapeWildcards(input)
-        if err != nil {
-            t.Fatalf(err.Error())
-        }
-        if out != "asdasd\\% asd\\_sd asd" || escape != "\\" {
-            t.Fatalf("unexpected output from escape function %q", out)
-        }
-    }
-
-    {
-        input := "\\asdasd% asd_sd asd"
-        out, escape, err := escapeWildcards(input)
-        if err != nil {
-            t.Fatalf(err.Error())
-        }
-        if out != "\\asdasd~% asd~_sd asd" || escape != "~" {
-            t.Fatalf("unexpected output from escape function %q", out)
-        }
-    }
-
-    {
-        input := "\\asdasd% asd_sd asd~!@#$^&"
-        _, _, err := escapeWildcards(input)
-        if err == nil || !strings.Contains(err.Error(), "failed to escape") {
-            t.Fatalf("expected a wildcard escape error")
-        }
-    }
-}
-
 func TestSanitizeQuery(t *testing.T) {
     deftok, _ := newUnicodeTokenizer(false) // err=nil should be tested elsewhere.
     wildtok, _ := newUnicodeTokenizer(true)
@@ -261,7 +218,7 @@ func TestSanitizeQuery(t *testing.T) {
             if err != nil {
                 t.Fatalf(err.Error())
             }
-            if san == nil || san.Type != "text" || san.Text != "harvest%" || !san.IsPattern {
+            if san == nil || san.Type != "text" || san.Text != "harvest*" || !san.IsPattern {
                 t.Fatalf("unexpected result from sanitization %v", san)
             }
 
@@ -270,7 +227,7 @@ func TestSanitizeQuery(t *testing.T) {
             if err != nil {
                 t.Fatalf(err.Error())
             }
-            if san == nil || san.Type != "text" || san.Text != "mo_n" || !san.IsPattern {
+            if san == nil || san.Type != "text" || san.Text != "mo?n" || !san.IsPattern {
                 t.Fatalf("unexpected result from sanitization %v", san)
             }
         })
@@ -295,7 +252,7 @@ func TestSanitizeQuery(t *testing.T) {
             if err != nil {
                 t.Fatalf(err.Error())
             }
-            if san == nil || san.Type != "path" || san.Path != "%foo/bar%" || san.Escape != "" {
+            if san == nil || san.Type != "path" || san.Path != "*foo/bar*" {
                 t.Fatalf("unexpected result from sanitization %v", san)
             }
         }
@@ -306,7 +263,7 @@ func TestSanitizeQuery(t *testing.T) {
             if err != nil {
                 t.Fatalf(err.Error())
             }
-            if san == nil || san.Type != "path" || san.Path != "%foo/bar" || san.Escape != "" {
+            if san == nil || san.Type != "path" || san.Path != "*foo/bar" {
                 t.Fatalf("unexpected result from sanitization %v", san)
             }
         }
@@ -317,29 +274,18 @@ func TestSanitizeQuery(t *testing.T) {
             if err != nil {
                 t.Fatalf(err.Error())
             }
-            if san == nil || san.Type != "path" || san.Path != "foo/bar%" || san.Escape != "" {
+            if san == nil || san.Type != "path" || san.Path != "foo/bar*" {
                 t.Fatalf("unexpected result from sanitization %v", san)
             }
         }
 
-        t.Run("escaped wildcards", func(t *testing.T) {
-            query := &searchClause { Type: "path", Path: "foo%ba_r" }
+        t.Run("more wildcards", func(t *testing.T) {
+            query := &searchClause { Type: "path", Path: "foo*ba?r" }
             san, err := sanitizeQuery(query, deftok, wildtok)
             if err != nil {
                 t.Fatalf(err.Error())
             }
-            if san == nil || san.Type != "path" || san.Path != "%foo\\%ba\\_r%" || san.Escape != "\\" {
-                t.Fatalf("unexpected result from sanitization %v", san)
-            }
-        })
-
-        t.Run("translate wildcards", func(t *testing.T) {
-            query := &searchClause { Type: "path", Path: "/f*oo_b?r", IsPattern: true }
-            san, err := sanitizeQuery(query, deftok, wildtok)
-            if err != nil {
-                t.Fatalf(err.Error())
-            }
-            if san == nil || san.Type != "path" || san.Path != "%/f%oo\\_b_r%" || san.Escape != "\\" {
+            if san == nil || san.Type != "path" || san.Path != "*foo*ba?r*" {
                 t.Fatalf("unexpected result from sanitization %v", san)
             }
         })

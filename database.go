@@ -990,12 +990,12 @@ func listRegisteredDirectories(db * sql.DB, query *listRegisteredDirectoriesQuer
     }
 
     if query.WithinPath != nil {
-        filters = append(filters, "path LIKE ?")
-        parameters = append(parameters, *(query.WithinPath) + "%")
+        filters = append(filters, "path GLOB ?")
+        parameters = append(parameters, *(query.WithinPath) + "*")
     }
     if query.PathPrefix != nil { // this is for back-compatibility only.
-        filters = append(filters, "path LIKE ?")
-        parameters = append(parameters, *(query.PathPrefix) + "%")
+        filters = append(filters, "path GLOB ?")
+        parameters = append(parameters, *(query.PathPrefix) + "*")
     }
 
     if len(filters) > 0 {

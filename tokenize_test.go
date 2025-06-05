@@ -78,7 +78,7 @@ func TestUnicodeTokenizer(t *testing.T) {
             if err != nil {
                 t.Fatalf(err.Error())
             }
-            if !equalStringArrays(out, []string{ "aar%", "had", "a", "little", "l_mb" }) {
+            if !equalStringArrays(out, []string{ "aar*", "had", "a", "little", "l?mb" }) {
                 t.Fatalf("incorrect tokenization")
             }
         }
