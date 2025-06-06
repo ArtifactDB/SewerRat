@@ -853,12 +853,12 @@ type queryResult struct {
     Metadata json.RawMessage `json:"metadata,omitempty"`
 }
 
-type scrollPosition struct {
+type queryScrollPosition struct {
     Time int64
     Pid int64
 }
 
-func queryTokens(db * sql.DB, query *searchClause, scroll *scrollPosition, page_limit int) ([]queryResult, error) {
+func queryTokens(db * sql.DB, query *searchClause, scroll *queryScrollPosition, page_limit int) ([]queryResult, error) {
     full := "SELECT paths.pid, paths.path, paths.user, paths.time, json_extract(paths.metadata, '$') FROM paths"
 
     // The query can be nil.
@@ -951,12 +951,12 @@ func retrievePath(db * sql.DB, path string, include_metadata bool) (*queryResult
 
 /**********************************************************************/
 
-type listRegisteredDirectoriesQuery struct {
-    User *string `json:"user"`
-    ContainsPath *string `json:"contains_path"`
-    WithinPath *string `json:"path_prefix"`
-    PathPrefix *string `json:"path_prefix"`
-    Exists *string `json:"exists"`
+type listRegisteredDirectoriesOptions struct {
+    User *string
+    ContainsPath *string
+    WithinPath *string
+    PathPrefix *string
+    Exists *string
 }
 
 type listRegisteredDirectoriesResult struct {
@@ -966,18 +966,18 @@ type listRegisteredDirectoriesResult struct {
     Names json.RawMessage `json:"names"`
 }
 
-func listRegisteredDirectories(db * sql.DB, query *listRegisteredDirectoriesQuery) ([]listRegisteredDirectoriesResult, error) {
+func listRegisteredDirectories(db *sql.DB, options *listRegisteredDirectoriesOptions) ([]listRegisteredDirectoriesResult, error) {
     q := "SELECT path, user, time, json_extract(names, '$') FROM dirs"
 
     filters := []string{}
     parameters := []interface{}{}
-    if query.User != nil {
+    if options.User != nil {
         filters = append(filters, "user == ?")
-        parameters = append(parameters, *(query.User))
+        parameters = append(parameters, *(options.User))
     }
 
-    if query.ContainsPath != nil {
-        collected, err := getParentPaths(*(query.ContainsPath))
+    if options.ContainsPath != nil {
+        collected, err := getParentPaths(*(options.ContainsPath))
         if err != nil {
             return nil, err
         }
@@ -989,13 +989,13 @@ func listRegisteredDirectories(db * sql.DB, query *listRegisteredDirectoriesQuer
         parameters = append(parameters, collected...)
     }
 
-    if query.WithinPath != nil {
+    if options.WithinPath != nil {
         filters = append(filters, "path GLOB ?")
-        parameters = append(parameters, *(query.WithinPath) + "*")
+        parameters = append(parameters, *(options.WithinPath) + "*")
     }
-    if query.PathPrefix != nil { // this is for back-compatibility only.
+    if options.PathPrefix != nil { // this is for back-compatibility only.
         filters = append(filters, "path GLOB ?")
-        parameters = append(parameters, *(query.PathPrefix) + "*")
+        parameters = append(parameters, *(options.PathPrefix) + "*")
     }
 
     if len(filters) > 0 {
@@ -1004,9 +1004,9 @@ func listRegisteredDirectories(db * sql.DB, query *listRegisteredDirectoriesQuer
 
     only_exists := false 
     only_nonexists := false
-    if query.Exists != nil {
-        only_exists = (*(query.Exists) == "true")
-        only_nonexists = (*(query.Exists) == "false")
+    if options.Exists != nil {
+        only_exists = (*(options.Exists) == "true")
+        only_nonexists = (*(options.Exists) == "false")
     }
     check_exists := only_exists || only_nonexists
 
@@ -1040,8 +1040,8 @@ func listRegisteredDirectories(db * sql.DB, query *listRegisteredDirectoriesQuer
             }
         }
 
-        if query.WithinPath != nil {
-            rel, err := filepath.Rel(*(query.WithinPath), current.Path)
+        if options.WithinPath != nil {
+            rel, err := filepath.Rel(*(options.WithinPath), current.Path)
             if err != nil || !filepath.IsLocal(rel) {
                 continue
             }
@@ -1094,8 +1094,6 @@ func isDirectoryRegistered(db * sql.DB, path string) (bool, error) {
     return num > 0, nil
 }
 
-/**********************************************************************/
-
 func fetchRegisteredDirectoryNames(db *sql.DB, path string) ([]string, error) {
     row := db.QueryRow("SELECT json_extract(names, '$') FROM dirs WHERE path = ?", path)
     var names_as_str string
@@ -1116,3 +1114,164 @@ func fetchRegisteredDirectoryNames(db *sql.DB, path string) ([]string, error) {
     return output, nil
 }
 
+/**********************************************************************/
+
+type listFieldsOptions struct {
+    Pattern *string `json:"pattern"`
+    Count bool `json:"count"`
+}
+
+type listFieldsScrollPosition struct {
+    Latest string 
+}
+
+type listFieldsResult struct {
+    Field string `json:"field"`
+    Count *int64 `json:"count,omitempty"`
+}
+
+func listFields(db *sql.DB, options *listFieldsOptions, scroll *listFieldsScrollPosition, page_limit int) ([]listFieldsResult, error) {
+    outputs := []string{ "field" }
+    parameters := []interface{}{}
+    filters := []string{}
+    extra_before := ""
+    extra_after := ""
+
+    if options.Count {
+        outputs = append(outputs, "COUNT(DISTINCT links.pid)")
+        extra_before = " INNER JOIN links ON links.fid = fields.fid"
+        extra_after = " GROUP BY links.fid"
+    }
+
+    if options.Pattern != nil {
+        filters = append(filters, "field GLOB ?")
+        parameters = append(parameters, *(options.Pattern))
+    }
+
+    if scroll != nil {
+        filters = append(filters, "field > ?")
+        parameters = append(parameters, scroll.Latest)
+    }
+
+    query := "SELECT " + strings.Join(outputs, ", ") + " FROM fields" + extra_before
+    if len(filters) > 0 {
+        query += " WHERE " + strings.Join(filters, " AND ")
+    }
+    query += extra_after
+    query += " ORDER BY field ASC"
+    if page_limit > 0 {
+        query += " LIMIT " + strconv.Itoa(page_limit)
+    }
+
+    results, err := db.Query(query, parameters...)
+    if err != nil {
+        return nil, fmt.Errorf("failed to perform query; %w", err)
+    }
+
+    output := []listFieldsResult{}
+    for results.Next() {
+        current := listFieldsResult{}
+        var err error
+        if options.Count {
+            var count int64
+            err = results.Scan(&(current.Field), &count)
+            current.Count = &count
+        } else {
+            err = results.Scan(&(current.Field))
+        }
+        if err != nil {
+            return nil, fmt.Errorf("failed to extract row; %w", err)
+        }
+        output = append(output, current)
+    }
+
+    return output, nil
+}
+
+/**********************************************************************/
+
+type listTokensOptions struct {
+    Pattern *string `json:"pattern"`
+    Field *string `json:"field"`
+    Count bool `json:"count"`
+}
+
+type listTokensScrollPosition struct {
+    Latest string 
+}
+
+type listTokensResult struct {
+    Token string `json:"token"`
+    Count *int64 `json:"count,omitempty"`
+}
+
+func listTokens(db *sql.DB, options *listTokensOptions, scroll *listTokensScrollPosition, page_limit int) ([]listTokensResult, error) {
+    outputs := []string{ "token" }
+    parameters := []interface{}{}
+    filters := []string{}
+    extra_before := ""
+    extra_after := ""
+
+    if options.Count || options.Field != nil {
+        extra_before += " INNER JOIN links ON links.tid = tokens.tid"
+    }
+
+    if options.Count {
+        outputs = append(outputs, "COUNT(DISTINCT links.pid)")
+        extra_after += " GROUP BY links.tid"
+    }
+
+    if options.Field != nil {
+        field := *(options.Field)
+        action := "="
+        if strings.Contains(field, "?") || strings.Contains(field, "*") {
+            action = "GLOB"
+        }
+        extra_before += " INNER JOIN fields ON links.fid = fields.fid WHERE fields.field " + action + " ?"
+        parameters = append(parameters, field)
+    }
+
+    if options.Pattern != nil {
+        filters = append(filters, "token GLOB ?")
+        parameters = append(parameters, *(options.Pattern))
+    }
+
+    if scroll != nil {
+        filters = append(filters, "token > ?")
+        parameters = append(parameters, scroll.Latest)
+    }
+
+    query := "SELECT " + strings.Join(outputs, ", ") + " FROM tokens" + extra_before
+    if len(filters) > 0 {
+        query += " WHERE " + strings.Join(filters, " AND ")
+    }
+    query += extra_after
+    query += " ORDER BY token ASC"
+    if page_limit > 0 {
+        query += " LIMIT " + strconv.Itoa(page_limit)
+    }
+
+    results, err := db.Query(query, parameters...)
+    if err != nil {
+        return nil, fmt.Errorf("failed to perform query; %w", err)
+    }
+
+    output := []listTokensResult{}
+    for results.Next() {
+        current := listTokensResult{}
+        var err error
+        if options.Count {
+            var count int64
+            err = results.Scan(&(current.Token), &count)
+            current.Count = &count
+        } else {
+            err = results.Scan(&(current.Token))
+        }
+        if err != nil {
+            return nil, fmt.Errorf("failed to extract row; %w", err)
+        }
+        output = append(output, current)
+    }
+
+    return output, nil
+}

@@ -359,6 +359,114 @@ curl -X POST -L ${SEWER_RAT_URL}/query?translate=true \
 The [`html/`](html) subdirectory contains a minimal search page that queries a local SewerRat instance using this syntax.
 Developers can copy this page and change the `base_url` to point to their production instance.
 
+### Listing available tokens
+
+We can interrogate the database to find all available tokens by making a GET request to the `/list/tokens` endpoint.
+This can be used to provide a vocabulary of possible search terms.
+
+```shell
+curl -L ${SEWER_RAT_URL}/list/tokens | jq 
+## {
+##   "results": [
+##     {
+##       "token": "aaron"
+##     },
+##     {
+##       "token": "bar"
+##     },
+##     {
+##       "token": "blah"
+##     },
+##     {
+##       "token": "lun"
+##     },
+##     {
+##       "token": "stuff"
+##     },
+##     {
+##       "token": "whee"
+##     },
+##     {
+##       "token": "yay"
+##     }
+##   ]
+## }
+```
+
+On success, the response is a JSON object with the following properties:
+
+- `results`, an array of objects containing the tokens, sorted in alphanumeric order.
+   Each object has the following properties:
+   - `token`, the token string.
+   - (optional) `count`, the number of files containing this token.
+- (optional) `next`, a string containing the endpoint to use for the next page of results.
+  If `next` is not present, callers may assume that all results have already been obtained.
+
+On error, the response will contain `application/json` content encoding a JSON object with the `reason` for the error.
+
+We can adjust the behavior of the listing with the following query parameters:
+
+- `limit=`, the number of results to return in each page.
+  This should be a positive integer, up to a maximum of 100 (the default).
+  Any value greater than 100 is ignored.
+- `count=`, whether to return the number of metadata files associated with each token.
+  If set to `true`, SewerRat will add a `count` property to each token's object in the results.
+- `field=`, the name of a metadata property field, the `.`-concatenated names of properties for nested objects, or a URL-encoded pattern containing `*` or `?` wildcards.
+  Only those tokens that appear in the specified metadata property will be returned.
+- `pattern=`, a URL-encoded string containing `*` or `?` wildcards.
+  Only those tokens that match to the pattern will be returned.
+
+### Listing available fields
+
+Similarly, we can interrogate the database to find all available metadata fields by making a GET request to the `/list/fields` endpoint:
+
+```shell
+curl -L ${SEWER_RAT_URL}/list/fields | jq 
+## {
+##   "results": [
+##     {
+##       "field": "authors.first"
+##     },
+##     {
+##       "field": "authors.last"
+##     },
+##     {
+##       "field": "description"
+##     },
+##     {
+##       "field": "foo"
+##     },
+##     {
+##       "field": "gunk"
+##     },
+##     {
+##       "field": "title"
+##     }
+##   ]
+## }
+```
+
+On success, the response is a JSON object with the following properties:
+
+- `results`, an array of objects containing the metadata fields, sorted in alphanumeric order.
+   Each object has the following properties:
+   - `field`, the name of the metadata field or a concatenation of such names.
+   - (optional) `count`, the number of files containing this field.
+- (optional) `next`, a string containing the endpoint to use for the next page of results.
+  If `next` is not present, callers may assume that all results have already been obtained.
+
+On error, the response will contain `application/json` content encoding a JSON object with the `reason` for the error.
+
+We can adjust the behavior of the listing with the following query parameters:
+
+- `limit=`, the number of results to return in each page.
+  This should be a positive integer, up to a maximum of 100 (the default).
+  Any value greater than 100 is ignored.
+- `count=`, whether to return the number of metadata files associated with each field.
+  If set to `true`, SewerRat will add a `count` property to each field's object in the results.
+- `pattern=`, a URL-encoded string containing `*` or `?` wildcards.
+  Only those fields that match to the pattern will be returned.
+
 ## Accessing registered directories
 
 ### Motivation

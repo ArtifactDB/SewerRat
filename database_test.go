@@ -1770,7 +1770,7 @@ func TestQueryTokens(t *testing.T) {
         }
 
         // Picking up from the last position.
-        res, err = queryTokens(dbconn, nil, &scrollPosition{ Time: res[1].Time, Pid: res[1].Pid }, 100)
+        res, err = queryTokens(dbconn, nil, &queryScrollPosition{ Time: res[1].Time, Pid: res[1].Pid }, 100)
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -1788,7 +1788,7 @@ func TestQueryTokens(t *testing.T) {
         }
 
         // Checking that it works even after we've exhausted all records.
-        res, err = queryTokens(dbconn, nil, &scrollPosition{ Time: res[1].Time, Pid: res[1].Pid }, 2)
+        res, err = queryTokens(dbconn, nil, &queryScrollPosition{ Time: res[1].Time, Pid: res[1].Pid }, 2)
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -1932,7 +1932,7 @@ func TestListRegisteredDirectories(t *testing.T) {
     }
 
     t.Run("basic", func(t *testing.T) {
-        query := listRegisteredDirectoriesQuery{}
+        query := listRegisteredDirectoriesOptions{}
         out, err := listRegisteredDirectories(dbconn, &query)
         if err != nil {
             t.Fatal(err)
@@ -1964,7 +1964,7 @@ func TestListRegisteredDirectories(t *testing.T) {
     })
 
     t.Run("filtered on user", func(t *testing.T) {
-        query := listRegisteredDirectoriesQuery{}
+        query := listRegisteredDirectoriesOptions{}
         desired := "bar_user"
         query.User = &desired
         out, err := listRegisteredDirectories(dbconn, &query)
@@ -1990,7 +1990,7 @@ func TestListRegisteredDirectories(t *testing.T) {
     })
 
     t.Run("filtered on contains_path", func(t *testing.T) {
-        query := listRegisteredDirectoriesQuery{}
+        query := listRegisteredDirectoriesOptions{}
 
         desired := filepath.Join(tmp, "bar")
         query.ContainsPath = &desired
@@ -2018,7 +2018,7 @@ func TestListRegisteredDirectories(t *testing.T) {
     })
 
     t.Run("filtered on has_prefix", func(t *testing.T) {
-        query := listRegisteredDirectoriesQuery{}
+        query := listRegisteredDirectoriesOptions{}
         query.PathPrefix = &tmp
 
         out, err := listRegisteredDirectories(dbconn, &query)
@@ -2043,7 +2043,7 @@ func TestListRegisteredDirectories(t *testing.T) {
     t.Run("filtered on within_path", func(t *testing.T) {
         // Basic checks to see what we pick up or don't.
         {
-            query := listRegisteredDirectoriesQuery{}
+            query := listRegisteredDirectoriesOptions{}
             query.WithinPath = &tmp
 
             out, err := listRegisteredDirectories(dbconn, &query)
@@ -2081,7 +2081,7 @@ func TestListRegisteredDirectories(t *testing.T) {
                 t.Fatalf("unexpected comments from the directory addition %v", comments)
             }
 
-            query := listRegisteredDirectoriesQuery{}
+            query := listRegisteredDirectoriesOptions{}
             query.WithinPath = &to_add
             out, err := listRegisteredDirectories(dbconn, &query)
             if err != nil {
@@ -2127,7 +2127,7 @@ func TestListRegisteredDirectories(t *testing.T) {
         }
 
         exists := "true"
-        query := listRegisteredDirectoriesQuery{}
+        query := listRegisteredDirectoriesOptions{}
         query.Exists = &exists
         out, err := listRegisteredDirectories(dbconn, &query)
         if err != nil {
@@ -2529,5 +2529,495 @@ WHERE tokens.token = ?`,
         }
 
         validateTokenPaths(dbconn, t, []string{ "alpha", "bravo" }, "__blah__", "alpha/bravo")
+    })
+}
+
+func TestListFields(t *testing.T) {
+    tmp, err := os.MkdirTemp("", "")
+    if err != nil {
+        t.Fatalf(err.Error())
+    }
+    defer os.RemoveAll(tmp)
+
+    dbpath := filepath.Join(tmp, "db.sqlite3")
+    dbconn, err := initializeDatabase(dbpath)
+    if err != nil {
+        t.Fatalf(err.Error())
+    }
+    defer dbconn.Close()
+
+    tokr, err := newUnicodeTokenizer(false)
+    if err != nil {
+        t.Fatalf(err.Error())
+    }
+
+    add_options := &addDirectoryContentsOptions{ Concurrency: 10 }
+
+    to_add := filepath.Join(tmp, "liella")
+    err = mockDirectory(to_add)
+    if err != nil {
+        t.Fatalf(err.Error())
+    }
+
+    comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "aaron", tokr, add_options)
+    if err != nil {
+        t.Fatalf(err.Error())
+    }
+    if len(comments) > 0 {
+        t.Fatalf("unexpected comments from the directory addition %v", comments)
+    }
+
+    t.Run("simple", func (t *testing.T) {
+        options := listFieldsOptions{}
+        out, err := listFields(dbconn, &options, nil, 100)
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        expected := map[string]bool{ "bar.breed": false, "favorites": false, "category.iyashikei": false }
+        increasing := true
+        last := ""
+        for _, x := range out {
+            _, ok := expected[x.Field]
+            if ok {
+                expected[x.Field] = true
+            }
+            if last != "" && x.Field <= last {
+                increasing = false
+            }
+            last = x.Field
+        }
+
+        for f, val := range expected {
+            if !val {
+                t.Errorf("failed to find '%s' in the fields; %v", f, out)
+            }
+        }
+        if !increasing {
+            t.Errorf("field should be sorted in increasing order; %v", out)
+        }
+    })
+
+    t.Run("count", func (t *testing.T) {
+        options := listFieldsOptions{ Count: true }
+        out, err := listFields(dbconn, &options, nil, 100)
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        expected := map[string]bool{ "bar.breed": false, "favorites": false, "category.iyashikei": false }
+        increasing := true
+        last := ""
+        for _, x := range out {
+            _, ok := expected[x.Field]
+            if ok {
+                if *(x.Count) != 1 {
+                    t.Errorf("expected a count of 1 for %s, got %d instead", x.Field, *(x.Count))
+                }
+                expected[x.Field] = true
+            }
+            if last != "" && x.Field <= last {
+                increasing = false
+            }
+            last = x.Field
+        }
+
+        for f, val := range expected {
+            if !val {
+                t.Errorf("failed to find '%s' in the fields; %v", f, out)
+            }
+        }
+        if !increasing {
+            t.Errorf("field should be sorted in increasing order; %v", out)
+        }
+    })
+
+    t.Run("scroll", func (t *testing.T) {
+        options := listFieldsOptions{}
+        out, err := listFields(dbconn, &options, nil, 2)
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        // Page limit works as expected.
+        expected := map[string]bool{}
+        if len(out) != 2 {
+            t.Error("expected exactly two fields when limiting to 2")
+        }
+        for _, x := range out {
+            expected[x.Field] = true
+        }
+        for _, field := range []string{ "anime", "bar.breed" } {
+            if _, ok := expected[field]; !ok {
+                t.Errorf("expected the '%s' field; %v", field, expected)
+            }
+        }
+
+        // Scroll picks up from where we were before.
+        scroll := listFieldsScrollPosition{}
+        scroll.Latest = out[len(out) - 1].Field
+        out, err = listFields(dbconn, &options, &scroll, 2)
+        if err != nil {
+            t.Fatal(err)
+        }
+        if len(out) != 2 {
+            t.Error("expected exactly two fields when limiting to 2")
+        }
+        for _, x := range out {
+            if _, ok := expected[x.Field]; ok {
+                t.Errorf("unexpected duplicate field %s", x.Field)
+            }
+            expected[x.Field] = true
+        }
+        for _, field := range []string{ "bar.cost", "bar.type" } {
+            if _, ok := expected[field]; !ok {
+                t.Errorf("expected the '%s' field; %v", field, expected)
+            }
+        }
+
+        // Works okay with count=true.
+        options.Count = true
+        scroll.Latest = out[len(out) - 1].Field
+        out, err = listFields(dbconn, &options, &scroll, 2)
+        if err != nil {
+            t.Fatal(err)
+        }
+        if len(out) != 2 {
+            t.Error("expected exactly two fields when limiting to 2")
+        }
+        for _, x := range out {
+            if _, ok := expected[x.Field]; ok {
+                t.Errorf("unexpected duplicate field; %s", x.Field)
+            }
+            if *(x.Count) != 1 {
+                t.Errorf("expected a count of 1 for %s, got %d instead", x.Field, *(x.Count))
+            }
+            expected[x.Field] = true
+        }
+        for _, field := range []string{ "category.nsfw", "category.iyashikei" } {
+            if _, ok := expected[field]; !ok {
+                t.Errorf("expected the '%s' field; %v", field, expected)
+            }
+        }
+    })
+
+    t.Run("pattern", func (t *testing.T) {
+        pattern := "category.*"
+        options := listFieldsOptions{ Pattern: &pattern }
+        out, err := listFields(dbconn, &options, nil, 100)
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        expected := map[string]bool{ "category.iyashikei": false, "category.nsfw": false }
+        for _, x := range out {
+            if _, ok := expected[x.Field]; !ok {
+                t.Errorf("unexpected field after pattern restriction %v", x.Field)
+            }
+            expected[x.Field] = true
+        }
+        for f, val := range expected {
+            if !val {
+                t.Errorf("failed to find '%s' in the fields; %v", f, out)
+            }
+        }
+
+        // Works in conjunction with count = true.
+        options.Count = true
+        out, err = listFields(dbconn, &options, nil, 100)
+        expected = map[string]bool{ "category.iyashikei": false, "category.nsfw": false }
+        for _, x := range out {
+            _, ok := expected[x.Field]
+            if !ok {
+                t.Errorf("unexpected field after pattern restriction %v", x.Field)
+            }
+            if *(x.Count) != 1 {
+                t.Errorf("expected a count of 1 for %s, got %d instead", x.Field, *(x.Count))
+            }
+            expected[x.Field] = true
+        }
+        for f, val := range expected {
+            if !val {
+                t.Errorf("failed to find '%s' in the fields; %v", f, out)
+            }
+        }
+    })
+}
+
+func TestListTokens(t *testing.T) {
+    tmp, err := os.MkdirTemp("", "")
+    if err != nil {
+        t.Fatalf(err.Error())
+    }
+    defer os.RemoveAll(tmp)
+
+    dbpath := filepath.Join(tmp, "db.sqlite3")
+    dbconn, err := initializeDatabase(dbpath)
+    if err != nil {
+        t.Fatalf(err.Error())
+    }
+    defer dbconn.Close()
+
+    tokr, err := newUnicodeTokenizer(false)
+    if err != nil {
+        t.Fatalf(err.Error())
+    }
+
+    add_options := &addDirectoryContentsOptions{ Concurrency: 10 }
+
+    to_add := filepath.Join(tmp, "liella")
+    err = mockDirectory(to_add)
+    if err != nil {
+        t.Fatalf(err.Error())
+    }
+
+    comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "aaron", tokr, add_options)
+    if err != nil {
+        t.Fatalf(err.Error())
+    }
+    if len(comments) > 0 {
+        t.Fatalf("unexpected comments from the directory addition %v", comments)
+    }
+
+    t.Run("simple", func (t *testing.T) {
+        options := listTokensOptions{}
+        out, err := listTokens(dbconn, &options, nil, 100)
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        expected := map[string]bool{ "aaron": false, "hoshino": false, "biyori": false }
+        increasing := true
+        last := ""
+        for _, x := range out {
+            _, ok := expected[x.Token]
+            if ok {
+                expected[x.Token] = true
+            }
+            if last != "" && x.Token <= last {
+                increasing = false
+            }
+            last = x.Token
+        }
+
+        for f, val := range expected {
+            if !val {
+                t.Errorf("failed to find '%s' in the tokens; %v", f, out)
+            }
+        }
+        if !increasing {
+            t.Errorf("token should be sorted in increasing order; %v", out)
+        }
+    })
+
+    t.Run("count", func (t *testing.T) {
+        options := listTokensOptions{ Count: true }
+        out, err := listTokens(dbconn, &options, nil, 100)
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        expected := map[string]bool{ "akari": false, "yuru": false, "lamb": false }
+        expected_counts := map[string]int64{ "akari": 1, "yuru": 2, "lamb": 2 }
+        increasing := true
+        last := ""
+        for _, x := range out {
+            _, ok := expected[x.Token]
+            if ok {
+                if *(x.Count) != expected_counts[x.Token] {
+                    t.Errorf("expected a count of %d for %s, got %d instead", expected_counts[x.Token], x.Token, *(x.Count))
+                }
+                expected[x.Token] = true
+            }
+            if last != "" && x.Token <= last {
+                increasing = false
+                t.Log(x.Token) 
+            }
+            last = x.Token
+        }
+
+        for f, val := range expected {
+            if !val {
+                t.Errorf("failed to find '%s' in the tokens; %v", f, out)
+            }
+        }
+        if !increasing {
+            t.Errorf("token should be sorted in increasing order; %v", out)
+        }
+    })
+
+    t.Run("scroll", func (t *testing.T) {
+        options := listTokensOptions{}
+        out, err := listTokens(dbconn, &options, nil, 2)
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        // Page limit works as expected.
+        expected := map[string]bool{}
+        if len(out) != 2 {
+            t.Error("expected exactly two tokens when limiting to 2")
+        }
+        for _, x := range out {
+            expected[x.Token] = true
+        }
+        for _, token := range []string{ "1", "10495" } {
+            if _, ok := expected[token]; !ok {
+                t.Errorf("expected the '%s' token; %v", token, expected)
+            }
+        }
+
+        // Scroll picks up from where we were before.
+        scroll := listTokensScrollPosition{}
+        scroll.Latest = out[len(out) - 1].Token
+        out, err = listTokens(dbconn, &options, &scroll, 2)
+        if err != nil {
+            t.Fatal(err)
+        }
+        if len(out) != 2 {
+            t.Error("expected exactly two tokens when limiting to 2")
+        }
+        for _, x := range out {
+            _, ok := expected[x.Token]
+            if ok {
+                t.Error("unexpected duplicate token")
+            }
+            expected[x.Token] = true
+        }
+        for _, token := range []string{ "5", "a" } {
+            if _, ok := expected[token]; !ok {
+                t.Errorf("expected the '%s' token; %v", token, expected)
+            }
+        }
+
+        // Works okay with count=true.
+        options.Count = true
+        scroll.Latest = out[len(out) - 1].Token
+        out, err = listTokens(dbconn, &options, &scroll, 2)
+        if err != nil {
+            t.Fatal(err)
+        }
+        if len(out) != 2 {
+            t.Error("expected exactly two tokens when limiting to 2")
+        }
+        for _, x := range out {
+            _, ok := expected[x.Token]
+            if ok {
+                t.Errorf("unexpected duplicate token; %v", x.Token)
+            }
+            if *(x.Count) != 1 {
+                t.Errorf("expected a count of 1 for %s, got %d instead", x.Token, *(x.Count))
+            }
+            expected[x.Token] = true
+        }
+        for _, token := range []string{ "aaron", "akari" } {
+            if _, ok := expected[token]; !ok {
+                t.Errorf("expected the '%s' token; %v", token, expected)
+            }
+        }
+    })
+
+    t.Run("pattern", func (t *testing.T) {
+        pattern := "a?*"
+        options := listTokensOptions{ Pattern: &pattern }
+        out, err := listTokens(dbconn, &options, nil, 100)
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        expected := map[string]bool{ "aaron": false, "akari": false, "akaza": false }
+        for _, x := range out {
+            if _, ok := expected[x.Token]; !ok {
+                t.Errorf("unexpected field after pattern restriction %v", x.Token)
+            }
+            expected[x.Token] = true
+        }
+        for f, val := range expected {
+            if !val {
+                t.Errorf("failed to find '%s' in the tokens; %v", f, out)
+            }
+        }
+
+        // Works in conjunction with count = true.
+        options.Count = true
+        out, err = listTokens(dbconn, &options, nil, 100)
+        expected = map[string]bool{ "aaron": false, "akari": false, "akaza": false }
+        for _, x := range out {
+            _, ok := expected[x.Token]
+            if !ok {
+                t.Errorf("unexpected field after pattern restriction %v", x.Token)
+            }
+            if *(x.Count) != 1 {
+                t.Errorf("expected a count of 1 for %s, got %d instead", x.Token, *(x.Count))
+            }
+            expected[x.Token] = true
+        }
+        for f, val := range expected {
+            if !val {
+                t.Errorf("failed to find '%s' in the tokens; %v", f, out)
+            }
+        }
+    })
+
+    t.Run("field", func (t *testing.T) {
+        // Trying with a wildcard field.
+        field := "characters*"
+        options := listTokensOptions{ Field: &field }
+        out, err := listTokens(dbconn, &options, nil, 100)
+        if err != nil {
+            t.Fatal(err)
+        }
+        expected := map[string]bool{ "akari": false, "akaza": false, "hoshino": false, "kyouko": false }
+        for _, x := range out {
+            if _, ok := expected[x.Token]; !ok {
+                t.Errorf("unexpected field after field restriction %v", x.Token)
+            }
+            expected[x.Token] = true
+        }
+        for f, val := range expected {
+            if !val {
+                t.Errorf("failed to find '%s' in the tokens; %v", f, out)
+            }
+        }
+
+        // Trying without a wildcard.
+        field = "characters.first"
+        options.Field = &field
+        out, err = listTokens(dbconn, &options, nil, 100)
+        if err != nil {
+            t.Fatal(err)
+        }
+        expected = map[string]bool{ "akari": false, "hoshino": false }
+        for _, x := range out {
+            if _, ok := expected[x.Token]; !ok {
+                t.Errorf("unexpected field after field restriction %v", x.Token)
+            }
+            expected[x.Token] = true
+        }
+        for f, val := range expected {
+            if !val {
+                t.Errorf("failed to find '%s' in the tokens; %v", f, out)
+            }
+        }
+
+        // Works in conjunction with count = true.
+        options.Count = true
+        out, err = listTokens(dbconn, &options, nil, 100)
+        expected = map[string]bool{ "akari": false, "hoshino": false }
+        for _, x := range out {
+            _, ok := expected[x.Token]
+            if !ok {
+                t.Errorf("unexpected field after pattern restriction %v", x.Token)
+            }
+            if *(x.Count) != 1 {
+                t.Errorf("expected a count of 1 for %s, got %d instead", x.Token, *(x.Count))
+            }
+            expected[x.Token] = true
+        }
+        for f, val := range expected {
+            if !val {
+                t.Errorf("failed to find '%s' in the tokens; %v", f, out)
+            }
+        }
     })
 }

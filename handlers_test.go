@@ -1648,3 +1648,396 @@ func TestListRegisteredDirectoriesHandler(t *testing.T) {
         }
     })
 }
+
+func TestListFieldsHandler(t *testing.T) {
+    tmp, err := os.MkdirTemp("", "")
+    if err != nil {
+        t.Fatalf(err.Error())
+    }
+    defer os.RemoveAll(tmp)
+
+    dbpath := filepath.Join(tmp, "db.sqlite3")
+    dbconn, err := initializeDatabase(dbpath)
+    if err != nil {
+        t.Fatalf(err.Error())
+    }
+    defer dbconn.Close()
+
+    tokr, err := newUnicodeTokenizer(false)
+    if err != nil {
+        t.Fatalf(err.Error())
+    }
+
+    to_add := filepath.Join(tmp, "to_add")
+    err = mockDirectory(to_add)
+    if err != nil {
+        t.Fatalf(err.Error())
+    }
+
+    add_options := &addDirectoryContentsOptions{ Concurrency: 1 }
+    comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr, add_options)
+    if err != nil {
+        t.Fatal(err)
+    }
+    if len(comments) != 0 {
+        t.Fatal("no comments should be present")
+    }
+
+    handler := http.HandlerFunc(newListFieldsHandler(dbconn, "/fields"))
+
+    t.Run("basic", func (t *testing.T) {
+        req, err := http.NewRequest("GET", "/fields", nil)
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        rr := httptest.NewRecorder()
+        handler.ServeHTTP(rr, req)
+        if rr.Code != http.StatusOK {
+            t.Fatalf("should have succeeded (got %d)", rr.Code)
+        }
+
+        r := struct {
+            Results []listFieldsResult
+        }{}
+        dec := json.NewDecoder(rr.Body)
+        err = dec.Decode(&r)
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        if len(r.Results) == 0 || r.Results[0].Field != "anime" {
+            t.Errorf("unexpected results; %v", r.Results)
+        }
+    })
+
+    t.Run("counts", func (t *testing.T) {
+        req, err := http.NewRequest("GET", "/fields?count=true", nil)
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        rr := httptest.NewRecorder()
+        handler.ServeHTTP(rr, req)
+        if rr.Code != http.StatusOK {
+            t.Fatalf("should have succeeded (got %d)", rr.Code)
+        }
+
+        r := struct {
+            Results []listFieldsResult
+        }{}
+        dec := json.NewDecoder(rr.Body)
+        err = dec.Decode(&r)
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        if len(r.Results) == 0 || r.Results[0].Field != "anime" || *(r.Results[0].Count) != 1 {
+            t.Errorf("unexpected results; %v", r) 
+        }
+    })
+
+    t.Run("scroll", func (t *testing.T) {
+        req, err := http.NewRequest("GET", "/fields?limit=5", nil)
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        rr := httptest.NewRecorder()
+        handler.ServeHTTP(rr, req)
+        if rr.Code != http.StatusOK {
+            t.Fatalf("should have succeeded (got %d)", rr.Code)
+        }
+
+        r := struct {
+            Results []listFieldsResult
+            Next string
+        }{}
+        dec := json.NewDecoder(rr.Body)
+        err = dec.Decode(&r)
+        if err != nil {
+            t.Fatal(err)
+        }
+        if len(r.Results) != 5 {
+            t.Errorf("unexpected results; %v", r) 
+        }
+        if r.Next == "" || !strings.HasPrefix(r.Next, "/fields?scroll=") || !strings.HasSuffix(r.Next, "&limit=5") {
+            t.Errorf("expected a next string; %v", r) 
+        }
+
+        found := map[string]bool{}
+        for _, res := range r.Results {
+            found[res.Field] = true
+        }
+
+        // Hitting up the scroll. 
+        req, err = http.NewRequest("GET", r.Next, nil)
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        handler.ServeHTTP(rr, req)
+        if rr.Code != http.StatusOK {
+            t.Fatalf("should have succeeded (got %d)", rr.Code)
+        }
+
+        dec = json.NewDecoder(rr.Body)
+        err = dec.Decode(&r)
+        if err != nil {
+            t.Fatal(err)
+        }
+        if len(r.Results) != 5 {
+            t.Errorf("unexpected results; %v", r) 
+        }
+
+        for _, res := range r.Results {
+            if _, ok := found[res.Field]; ok {
+                t.Errorf("detected duplicate entries from scroll; %v", res.Field)
+            }
+        }
+    })
+
+    t.Run("pattern", func (t *testing.T) {
+        req, err := http.NewRequest("GET", "/fields?pattern=characters.%2A", nil)
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        rr := httptest.NewRecorder()
+        handler.ServeHTTP(rr, req)
+        if rr.Code != http.StatusOK {
+            t.Fatalf("should have succeeded (got %d)", rr.Code)
+        }
+
+        r := struct {
+            Results []listFieldsResult
+            Next string
+        }{}
+        dec := json.NewDecoder(rr.Body)
+        err = dec.Decode(&r)
+        if err != nil {
+            t.Fatal(err)
+        }
+        if len(r.Results) == 0 {
+            t.Errorf("unexpected results; %v", r) 
+        }
+        for _, res := range r.Results {
+            if !strings.HasPrefix(res.Field, "characters.") {
+                t.Errorf("unexpected field detected; %v", res.Field)
+            }
+        }
+    })
+}
+
+func TestListTokensHandler(t *testing.T) {
+    tmp, err := os.MkdirTemp("", "")
+    if err != nil {
+        t.Fatalf(err.Error())
+    }
+    defer os.RemoveAll(tmp)
+
+    dbpath := filepath.Join(tmp, "db.sqlite3")
+    dbconn, err := initializeDatabase(dbpath)
+    if err != nil {
+        t.Fatalf(err.Error())
+    }
+    defer dbconn.Close()
+
+    tokr, err := newUnicodeTokenizer(false)
+    if err != nil {
+        t.Fatalf(err.Error())
+    }
+
+    to_add := filepath.Join(tmp, "to_add")
+    err = mockDirectory(to_add)
+    if err != nil {
+        t.Fatalf(err.Error())
+    }
+
+    add_options := &addDirectoryContentsOptions{ Concurrency: 1 }
+    comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr, add_options)
+    if err != nil {
+        t.Fatal(err)
+    }
+    if len(comments) != 0 {
+        t.Fatal("no comments should be present")
+    }
+
+    handler := http.HandlerFunc(newListTokensHandler(dbconn, "/tokens"))
+
+    t.Run("basic", func (t *testing.T) {
+        req, err := http.NewRequest("GET", "/tokens", nil)
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        rr := httptest.NewRecorder()
+        handler.ServeHTTP(rr, req)
+        if rr.Code != http.StatusOK {
+            t.Fatalf("should have succeeded (got %d)", rr.Code)
+        }
+
+        r := struct {
+            Results []listTokensResult
+        }{}
+        dec := json.NewDecoder(rr.Body)
+        err = dec.Decode(&r)
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        if len(r.Results) == 0 || r.Results[0].Token != "1" {
+            t.Errorf("unexpected results; %v", r.Results)
+        }
+    })
+
+    t.Run("counts", func (t *testing.T) {
+        req, err := http.NewRequest("GET", "/tokens?count=true", nil)
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        rr := httptest.NewRecorder()
+        handler.ServeHTTP(rr, req)
+        if rr.Code != http.StatusOK {
+            t.Fatalf("should have succeeded (got %d)", rr.Code)
+        }
+
+        r := struct {
+            Results []listTokensResult
+        }{}
+        dec := json.NewDecoder(rr.Body)
+        err = dec.Decode(&r)
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        if len(r.Results) == 0 || r.Results[0].Token != "1" || *(r.Results[0].Count) != 1 {
+            t.Errorf("unexpected results; %v", r) 
+        }
+    })
+
+    t.Run("scroll", func (t *testing.T) {
+        req, err := http.NewRequest("GET", "/tokens?limit=5", nil)
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        rr := httptest.NewRecorder()
+        handler.ServeHTTP(rr, req)
+        if rr.Code != http.StatusOK {
+            t.Fatalf("should have succeeded (got %d)", rr.Code)
+        }
+
+        r := struct {
+            Results []listTokensResult
+            Next string
+        }{}
+        dec := json.NewDecoder(rr.Body)
+        err = dec.Decode(&r)
+        if err != nil {
+            t.Fatal(err)
+        }
+        if len(r.Results) != 5 {
+            t.Errorf("unexpected results; %v", r) 
+        }
+        if r.Next == "" || !strings.HasPrefix(r.Next, "/tokens?scroll=") || !strings.HasSuffix(r.Next, "&limit=5") {
+            t.Errorf("expected a next string; %v", r) 
+        }
+
+        found := map[string]bool{}
+        for _, res := range r.Results {
+            found[res.Token] = true
+        }
+
+        // Hitting up the scroll. 
+        req, err = http.NewRequest("GET", r.Next, nil)
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        handler.ServeHTTP(rr, req)
+        if rr.Code != http.StatusOK {
+            t.Fatalf("should have succeeded (got %d)", rr.Code)
+        }
+
+        dec = json.NewDecoder(rr.Body)
+        err = dec.Decode(&r)
+        if err != nil {
+            t.Fatal(err)
+        }
+        if len(r.Results) != 5 {
+            t.Errorf("unexpected results; %v", r) 
+        }
+
+        for _, res := range r.Results {
+            if _, ok := found[res.Token]; ok {
+                t.Errorf("detected duplicate entries from scroll; %v", res.Token)
+            }
+        }
+    })
+
+    t.Run("pattern", func (t *testing.T) {
+        req, err := http.NewRequest("GET", "/tokens?pattern=a%2A", nil)
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        rr := httptest.NewRecorder()
+        handler.ServeHTTP(rr, req)
+        if rr.Code != http.StatusOK {
+            t.Fatalf("should have succeeded (got %d)", rr.Code)
+        }
+
+        r := struct {
+            Results []listTokensResult
+            Next string
+        }{}
+        dec := json.NewDecoder(rr.Body)
+        err = dec.Decode(&r)
+        if err != nil {
+            t.Fatal(err)
+        }
+        if len(r.Results) == 0 {
+            t.Errorf("unexpected results; %v", r) 
+        }
+        for _, res := range r.Results {
+            if !strings.HasPrefix(res.Token, "a") {
+                t.Errorf("unexpected token detected; %v", res.Token)
+            }
+        }
+    })
+
+    t.Run("field", func (t *testing.T) {
+        req, err := http.NewRequest("GET", "/tokens?field=characters.first", nil)
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        rr := httptest.NewRecorder()
+        handler.ServeHTTP(rr, req)
+        if rr.Code != http.StatusOK {
+            t.Fatalf("should have succeeded (got %d)", rr.Code)
+        }
+
+        r := struct {
+            Results []listTokensResult
+            Next string
+        }{}
+        dec := json.NewDecoder(rr.Body)
+        err = dec.Decode(&r)
+        if err != nil {
+            t.Fatal(err)
+        }
+        if len(r.Results) == 0 {
+            t.Errorf("unexpected results; %v", r) 
+        }
+
+        expected := map[string]bool{ "akari": true, "hoshino": true }
+        for _, res := range r.Results {
+            if _, ok := expected[res.Token]; !ok {
+                t.Errorf("unexpected token detected; %v", res.Token)
+            }
+        }
+    })
+}
