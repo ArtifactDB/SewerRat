@@ -1764,9 +1764,7 @@ func TestQueryTokens(t *testing.T) {
 
         // Picking up from the last position.
         options.PageLimit = 100
-        options.UseScroll = true
-        options.ScrollTime = res[1].Time
-        options.ScrollPid = res[1].Pid
+        options.Scroll = &queryScroll{ Time: res[1].Time, Pid: res[1].Pid }
         res, err = queryTokens(dbconn, nil, options)
         if err != nil {
             t.Fatalf(err.Error())
@@ -1786,8 +1784,7 @@ func TestQueryTokens(t *testing.T) {
 
         // Checking that it works even after we've exhausted all records.
         options.PageLimit = 2
-        options.ScrollTime = res[1].Time
-        options.ScrollPid = res[1].Pid
+        options.Scroll = &queryScroll{ Time: res[1].Time, Pid: res[1].Pid }
         res, err = queryTokens(dbconn, nil, options)
         if err != nil {
             t.Fatalf(err.Error())
@@ -2602,7 +2599,7 @@ func TestListFields(t *testing.T) {
 
     t.Run("simple", func (t *testing.T) {
         options := listFieldsOptions{}
-        out, err := listFields(dbconn, &options, nil, 100)
+        out, err := listFields(dbconn, options)
         if err != nil {
             t.Fatal(err)
         }
@@ -2633,7 +2630,7 @@ func TestListFields(t *testing.T) {
 
     t.Run("count", func (t *testing.T) {
         options := listFieldsOptions{ Count: true }
-        out, err := listFields(dbconn, &options, nil, 100)
+        out, err := listFields(dbconn, options)
         if err != nil {
             t.Fatal(err)
         }
@@ -2666,8 +2663,8 @@ func TestListFields(t *testing.T) {
     })
 
     t.Run("scroll", func (t *testing.T) {
-        options := listFieldsOptions{}
-        out, err := listFields(dbconn, &options, nil, 2)
+        options := listFieldsOptions{ PageLimit: 2 }
+        out, err := listFields(dbconn, options)
         if err != nil {
             t.Fatal(err)
         }
@@ -2687,9 +2684,8 @@ func TestListFields(t *testing.T) {
         }
 
         // Scroll picks up from where we were before.
-        scroll := listFieldsScrollPosition{}
-        scroll.Latest = out[len(out) - 1].Field
-        out, err = listFields(dbconn, &options, &scroll, 2)
+        options.Scroll = &listFieldsScroll{ Field: out[len(out) - 1].Field }
+        out, err = listFields(dbconn, options)
         if err != nil {
             t.Fatal(err)
         }
@@ -2710,8 +2706,8 @@ func TestListFields(t *testing.T) {
 
         // Works okay with count=true.
         options.Count = true
-        scroll.Latest = out[len(out) - 1].Field
-        out, err = listFields(dbconn, &options, &scroll, 2)
+        options.Scroll = &listFieldsScroll{ Field: out[len(out) - 1].Field }
+        out, err = listFields(dbconn, options)
         if err != nil {
             t.Fatal(err)
         }
@@ -2737,7 +2733,7 @@ func TestListFields(t *testing.T) {
     t.Run("pattern", func (t *testing.T) {
         pattern := "category.*"
         options := listFieldsOptions{ Pattern: &pattern }
-        out, err := listFields(dbconn, &options, nil, 100)
+        out, err := listFields(dbconn, options)
         if err != nil {
             t.Fatal(err)
         }
@@ -2757,7 +2753,7 @@ func TestListFields(t *testing.T) {
 
         // Works in conjunction with count = true.
         options.Count = true
-        out, err = listFields(dbconn, &options, nil, 100)
+        out, err = listFields(dbconn, options)
         expected = map[string]bool{ "category.iyashikei": false, "category.nsfw": false }
         for _, x := range out {
             _, ok := expected[x.Field]
@@ -2814,7 +2810,7 @@ func TestListTokens(t *testing.T) {
 
     t.Run("simple", func (t *testing.T) {
         options := listTokensOptions{}
-        out, err := listTokens(dbconn, &options, nil, 100)
+        out, err := listTokens(dbconn, options)
         if err != nil {
             t.Fatal(err)
         }
@@ -2845,7 +2841,7 @@ func TestListTokens(t *testing.T) {
 
     t.Run("count", func (t *testing.T) {
         options := listTokensOptions{ Count: true }
-        out, err := listTokens(dbconn, &options, nil, 100)
+        out, err := listTokens(dbconn, options)
         if err != nil {
             t.Fatal(err)
         }
@@ -2880,8 +2876,8 @@ func TestListTokens(t *testing.T) {
     })
 
     t.Run("scroll", func (t *testing.T) {
-        options := listTokensOptions{}
-        out, err := listTokens(dbconn, &options, nil, 2)
+        options := listTokensOptions{ PageLimit: 2 }
+        out, err := listTokens(dbconn, options)
         if err != nil {
             t.Fatal(err)
         }
@@ -2901,9 +2897,8 @@ func TestListTokens(t *testing.T) {
         }
 
         // Scroll picks up from where we were before.
-        scroll := listTokensScrollPosition{}
-        scroll.Latest = out[len(out) - 1].Token
-        out, err = listTokens(dbconn, &options, &scroll, 2)
+        options.Scroll = &listTokensScroll{ Token: out[len(out) - 1].Token }
+        out, err = listTokens(dbconn, options)
         if err != nil {
             t.Fatal(err)
         }
@@ -2925,8 +2920,8 @@ func TestListTokens(t *testing.T) {
 
         // Works okay with count=true.
         options.Count = true
-        scroll.Latest = out[len(out) - 1].Token
-        out, err = listTokens(dbconn, &options, &scroll, 2)
+        options.Scroll = &listTokensScroll{ Token: out[len(out) - 1].Token }
+        out, err = listTokens(dbconn, options)
         if err != nil {
             t.Fatal(err)
         }
@@ -2953,7 +2948,7 @@ func TestListTokens(t *testing.T) {
     t.Run("pattern", func (t *testing.T) {
         pattern := "a?*"
         options := listTokensOptions{ Pattern: &pattern }
-        out, err := listTokens(dbconn, &options, nil, 100)
+        out, err := listTokens(dbconn, options)
         if err != nil {
             t.Fatal(err)
         }
@@ -2973,7 +2968,7 @@ func TestListTokens(t *testing.T) {
 
         // Works in conjunction with count = true.
         options.Count = true
-        out, err = listTokens(dbconn, &options, nil, 100)
+        out, err = listTokens(dbconn, options)
         expected = map[string]bool{ "aaron": false, "akari": false, "akaza": false }
         for _, x := range out {
             _, ok := expected[x.Token]
@@ -2996,7 +2991,7 @@ func TestListTokens(t *testing.T) {
         // Trying with a wildcard field.
         field := "characters*"
         options := listTokensOptions{ Field: &field }
-        out, err := listTokens(dbconn, &options, nil, 100)
+        out, err := listTokens(dbconn, options)
         if err != nil {
             t.Fatal(err)
         }
@@ -3016,7 +3011,7 @@ func TestListTokens(t *testing.T) {
         // Trying without a wildcard.
         field = "characters.first"
         options.Field = &field
-        out, err = listTokens(dbconn, &options, nil, 100)
+        out, err = listTokens(dbconn, options)
         if err != nil {
             t.Fatal(err)
         }
@@ -3035,7 +3030,7 @@ func TestListTokens(t *testing.T) {
 
         // Works in conjunction with count = true.
         options.Count = true
-        out, err = listTokens(dbconn, &options, nil, 100)
+        out, err = listTokens(dbconn, options)
         expected = map[string]bool{ "akari": false, "hoshino": false }
         for _, x := range out {
             _, ok := expected[x.Token]

@@ -365,11 +365,11 @@ Developers can copy this page and change the `base_url` to point to their produc
 
 ### Listing available tokens
 
-We can interrogate the database to find all available tokens by making a GET request to the `/list/tokens` endpoint.
+We can interrogate the database to find all available tokens by making a GET request to the `/tokens` endpoint.
 This can be used to provide a vocabulary of possible search terms.
 
 ```shell
-curl -L ${SEWER_RAT_URL}/list/tokens | jq 
+curl -L ${SEWER_RAT_URL}/tokens | jq 
 ## {
 ##   "results": [
 ##     {
@@ -411,8 +411,8 @@ On error, the response will contain `application/json` content encoding a JSON o
 We can adjust the behavior of the listing with the following query parameters:
 
 - `limit=`, the number of results to return in each page.
-  This should be a positive integer, up to a maximum of 100 (the default).
-  Any value greater than 100 is ignored.
+  This should be a positive integer, up to a maximum of 1000 (the default).
+  Any value greater than 1000 is ignored.
 - `count=`, whether to return the number of metadata files associated with each token.
   If set to `true`, SewerRat will add a `count` property to each token's object in the results.
 - `field=`, the name of a metadata property field, the `.`-concatenated names of properties for nested objects, or a URL-encoded pattern containing `*` or `?` wildcards.
@@ -422,10 +422,10 @@ We can adjust the behavior of the listing with the following query parameters:
 
 ### Listing available fields
 
-Similarly, we can interrogate the database to find all available metadata fields by making a GET request to the `/list/fields` endpoint:
+Similarly, we can interrogate the database to find all available metadata fields by making a GET request to the `/fields` endpoint:
 
 ```shell
-curl -L ${SEWER_RAT_URL}/list/fields | jq 
+curl -L ${SEWER_RAT_URL}/fields | jq 
 ## {
 ##   "results": [
 ##     {
@@ -464,8 +464,8 @@ On error, the response will contain `application/json` content encoding a JSON o
 We can adjust the behavior of the listing with the following query parameters:
 
 - `limit=`, the number of results to return in each page.
-  This should be a positive integer, up to a maximum of 100 (the default).
-  Any value greater than 100 is ignored.
+  This should be a positive integer, up to a maximum of 1000 (the default).
+  Any value greater than 1000 is ignored.
 - `count=`, whether to return the number of metadata files associated with each field.
   If set to `true`, SewerRat will add a `count` property to each field's object in the results.
 - `pattern=`, a URL-encoded string containing `*` or `?` wildcards.

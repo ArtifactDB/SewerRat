@@ -845,21 +845,22 @@ func backupDatabase(db *sql.DB, path string) error {
 
 /**********************************************************************/
 
+type queryScroll struct {
+    Time int64
+    Pid int64
+}
+
 type queryOptions struct {
     IncludeMetadata bool
     PageLimit int
-    UseScroll bool
-    ScrollTime int64
-    ScrollPid int64
+    Scroll *queryScroll
 }
 
 func newQueryOptions() queryOptions {
     return queryOptions{
         IncludeMetadata: true,
         PageLimit: 0,
-        UseScroll: false,
-        ScrollTime: 0,
-        ScrollPid: 0,
+        Scroll: nil,
     }
 }
 
@@ -890,14 +891,14 @@ func queryTokens(db * sql.DB, query *searchClause, options queryOptions) ([]quer
 
     // Handling pagination via scrolling window queries, see https://www.sqlite.org/rowvalue.html#scrolling_window_queries.
     // This should be pretty efficient as we have an index on 'time'.
-    if options.UseScroll {
+    if options.Scroll != nil {
         if query_present {
             full += " AND"
         } else {
             full += " WHERE"
         }
         full += " (paths.time, paths.pid) < (?, ?)"
-        parameters = append(parameters, options.ScrollTime, options.ScrollPid)
+        parameters = append(parameters, options.Scroll.Time, options.Scroll.Pid)
     }
     full += " ORDER BY paths.time DESC, paths.pid DESC"
     if options.PageLimit > 0 {
@@ -1143,13 +1144,15 @@ func fetchRegisteredDirectoryNames(db *sql.DB, path string) ([]string, error) {
 
 /**********************************************************************/
 
-type listFieldsOptions struct {
-    Pattern *string `json:"pattern"`
-    Count bool `json:"count"`
+type listFieldsScroll struct {
+    Field string
 }
 
-type listFieldsScrollPosition struct {
-    Latest string 
+type listFieldsOptions struct {
+    Pattern *string
+    Count bool
+    PageLimit int
+    Scroll *listFieldsScroll
 }
 
 type listFieldsResult struct {
@@ -1157,7 +1160,7 @@ type listFieldsResult struct {
     Count *int64 `json:"count,omitempty"`
 }
 
-func listFields(db *sql.DB, options *listFieldsOptions, scroll *listFieldsScrollPosition, page_limit int) ([]listFieldsResult, error) {
+func listFields(db *sql.DB, options listFieldsOptions) ([]listFieldsResult, error) {
     outputs := []string{ "field" }
     parameters := []interface{}{}
     filters := []string{}
@@ -1175,9 +1178,9 @@ func listFields(db *sql.DB, options *listFieldsOptions, scroll *listFieldsScroll
         parameters = append(parameters, *(options.Pattern))
     }
 
-    if scroll != nil {
+    if options.Scroll != nil {
         filters = append(filters, "field > ?")
-        parameters = append(parameters, scroll.Latest)
+        parameters = append(parameters, options.Scroll.Field)
     }
 
     query := "SELECT " + strings.Join(outputs, ", ") + " FROM fields" + extra_before
@@ -1186,8 +1189,8 @@ func listFields(db *sql.DB, options *listFieldsOptions, scroll *listFieldsScroll
     }
     query += extra_after
     query += " ORDER BY field ASC"
-    if page_limit > 0 {
-        query += " LIMIT " + strconv.Itoa(page_limit)
+    if options.PageLimit > 0 {
+        query += " LIMIT " + strconv.Itoa(options.PageLimit)
     }
 
     results, err := db.Query(query, parameters...)
@@ -1217,14 +1220,16 @@ func listFields(db *sql.DB, options *listFieldsOptions, scroll *listFieldsScroll
 
 /**********************************************************************/
 
-type listTokensOptions struct {
-    Pattern *string `json:"pattern"`
-    Field *string `json:"field"`
-    Count bool `json:"count"`
+type listTokensScroll struct {
+    Token string
 }
 
-type listTokensScrollPosition struct {
-    Latest string 
+type listTokensOptions struct {
+    Pattern *string
+    Field *string
+    Count bool
+    PageLimit int
+    Scroll *listTokensScroll
 }
 
 type listTokensResult struct {
@@ -1232,7 +1237,7 @@ type listTokensResult struct {
     Count *int64 `json:"count,omitempty"`
 }
 
-func listTokens(db *sql.DB, options *listTokensOptions, scroll *listTokensScrollPosition, page_limit int) ([]listTokensResult, error) {
+func listTokens(db *sql.DB, options listTokensOptions) ([]listTokensResult, error) {
     outputs := []string{ "token" }
     parameters := []interface{}{}
     filters := []string{}
@@ -1263,9 +1268,9 @@ func listTokens(db *sql.DB, options *listTokensOptions, scroll *listTokensScroll
         parameters = append(parameters, *(options.Pattern))
     }
 
-    if scroll != nil {
+    if options.Scroll != nil {
         filters = append(filters, "token > ?")
-        parameters = append(parameters, scroll.Latest)
+        parameters = append(parameters, options.Scroll.Token)
     }
 
     query := "SELECT " + strings.Join(outputs, ", ") + " FROM tokens" + extra_before
@@ -1274,8 +1279,8 @@ func listTokens(db *sql.DB, options *listTokensOptions, scroll *listTokensScroll
     }
     query += extra_after
     query += " ORDER BY token ASC"
-    if page_limit > 0 {
-        query += " LIMIT " + strconv.Itoa(page_limit)
+    if options.PageLimit > 0 {
+        query += " LIMIT " + strconv.Itoa(options.PageLimit)
     }
 
     results, err := db.Query(query, parameters...)

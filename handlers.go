@@ -389,7 +389,6 @@ func newQueryHandler(db *sql.DB, tokenizer *unicodeTokenizer, wild_tokenizer *un
         options := newQueryOptions()
 
         if params.Has("scroll") {
-            options.UseScroll = true
             val := params.Get("scroll")
             i := strings.Index(val, ",")
             if i < 0 {
@@ -402,14 +401,14 @@ func newQueryHandler(db *sql.DB, tokenizer *unicodeTokenizer, wild_tokenizer *un
                 dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": "failed to parse the time from 'scroll'" })
                 return
             }
-            options.ScrollTime = time
 
             pid, err := strconv.ParseInt(val[(i+1):], 10, 64)
             if err != nil {
                 dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": "failed to parse the path ID from 'scroll'" })
                 return
             }
-            options.ScrollPid = pid 
+
+            options.Scroll = &queryScroll{ Time: time, Pid: pid }
         }
 
         options.PageLimit = 100
@@ -697,7 +696,7 @@ func newListRegisteredDirectoriesHandler(db *sql.DB) func(http.ResponseWriter, *
 
 func newListFieldsHandler(db *sql.DB, endpoint string) func(http.ResponseWriter, *http.Request) {
     return func(w http.ResponseWriter, r *http.Request) {
-        options := listFieldsOptions{}
+        options := listFieldsOptions{ PageLimit: 1000 }
         params := r.URL.Query()
 
         if params.Has("pattern") {
@@ -709,33 +708,30 @@ func newListFieldsHandler(db *sql.DB, endpoint string) func(http.ResponseWriter,
             options.Count = params.Get("count") == "true"
         }
 
-        limit := 100
         if params.Has("limit") {
-            limit0, err := strconv.Atoi(params.Get("limit"))
-            if err != nil || limit0 <= 0 {
+            limit, err := strconv.Atoi(params.Get("limit"))
+            if err != nil || limit <= 0 {
                 dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": "invalid 'limit'" })
                 return
             }
-            if (limit0 < limit) {
-                limit = limit0
+            if (limit < options.PageLimit) {
+                options.PageLimit = limit
             }
         }
 
-        var scroll *listFieldsScrollPosition
         if params.Has("scroll") {
-            val := params.Get("scroll")
-            scroll = &listFieldsScrollPosition{ Latest : val }
+            options.Scroll = &listFieldsScroll{ Field: params.Get("scroll") }
         }
 
-        output, err := listFields(db, &options, scroll, limit)
+        output, err := listFields(db, options)
         if err != nil {
             dumpHttpErrorResponse(w, fmt.Errorf("failed to list available fields; %w", err))
             return
         }
 
         respbody := map[string]interface{} { "results": output }
-        if len(output) == limit {
-            next := endpoint + "?scroll=" + output[limit-1].Field
+        if len(output) == options.PageLimit {
+            next := endpoint + "?scroll=" + output[options.PageLimit - 1].Field
             for _, extra := range []string { "pattern", "count", "limit" } {
                 if params.Has(extra) {
                     next += "&" + extra + "=" + url.QueryEscape(params.Get(extra))
@@ -750,7 +746,7 @@ func newListFieldsHandler(db *sql.DB, endpoint string) func(http.ResponseWriter,
 
 func newListTokensHandler(db *sql.DB, endpoint string) func(http.ResponseWriter, *http.Request) {
     return func(w http.ResponseWriter, r *http.Request) {
-        options := listTokensOptions{}
+        options := listTokensOptions{ PageLimit: 1000 }
         params := r.URL.Query()
 
         if params.Has("pattern") {
@@ -767,33 +763,30 @@ func newListTokensHandler(db *sql.DB, endpoint string) func(http.ResponseWriter,
             options.Count = params.Get("count") == "true"
         }
 
-        limit := 100
         if params.Has("limit") {
-            limit0, err := strconv.Atoi(params.Get("limit"))
-            if err != nil || limit0 <= 0 {
+            limit, err := strconv.Atoi(params.Get("limit"))
+            if err != nil || limit <= 0 {
                 dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": "invalid 'limit'" })
                 return
             }
-            if (limit0 < limit) {
-                limit = limit0
+            if (limit < options.PageLimit) {
+                options.PageLimit = limit
             }
         }
 
-        var scroll *listTokensScrollPosition
         if params.Has("scroll") {
-            val := params.Get("scroll")
-            scroll = &listTokensScrollPosition{ Latest : val }
+            options.Scroll = &listTokensScroll{ Token: params.Get("scroll") }
         }
 
-        output, err := listTokens(db, &options, scroll, limit)
+        output, err := listTokens(db, options)
         if err != nil {
             dumpHttpErrorResponse(w, fmt.Errorf("failed to list available tokens; %w", err))
             return
         }
 
         respbody := map[string]interface{} { "results": output }
-        if len(output) == limit {
-            next := endpoint + "?scroll=" + output[limit-1].Token
+        if len(output) == options.PageLimit {
+            next := endpoint + "?scroll=" + output[options.PageLimit - 1].Token
             for _, extra := range []string { "pattern", "field", "count", "limit" } {
                 if params.Has(extra) {
                     next += "&" + extra + "=" + url.QueryEscape(params.Get(extra))

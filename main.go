@@ -83,8 +83,8 @@ func main() {
     http.HandleFunc("POST " + prefix + "/deregister/finish", newDeregisterFinishHandler(db, verifier, timeout))
 
     http.HandleFunc("POST " + prefix + "/query", newQueryHandler(ro_db, tokenizer, wild_tokenizer, "/query"))
-    http.HandleFunc("GET " + prefix + "/list/tokens", newListTokensHandler(ro_db, "/list/tokens"))
-    http.HandleFunc("GET " + prefix + "/list/fields", newListFieldsHandler(ro_db, "/list/fields"))
+    http.HandleFunc("GET " + prefix + "/tokens", newListTokensHandler(ro_db, "/tokens"))
+    http.HandleFunc("GET " + prefix + "/fields", newListFieldsHandler(ro_db, "/fields"))
 
     http.HandleFunc("GET " + prefix + "/registered", newListRegisteredDirectoriesHandler(ro_db))
     http.HandleFunc("GET " + prefix + "/list", newListFilesHandler(ro_db, add_options.LinkWhitelist))
