@@ -386,38 +386,46 @@ func newDeregisterFinishHandler(db *sql.DB, verifier *verificationRegistry, time
 func newQueryHandler(db *sql.DB, tokenizer *unicodeTokenizer, wild_tokenizer *unicodeTokenizer, endpoint string) func(http.ResponseWriter, *http.Request) {
     return func(w http.ResponseWriter, r *http.Request) {
         params := r.URL.Query()
-        var scroll *queryScrollPosition
-        limit := 100
+        options := newQueryOptions()
 
         if params.Has("scroll") {
+            options.UseScroll = true
             val := params.Get("scroll")
             i := strings.Index(val, ",")
             if i < 0 {
                 dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": "'scroll' should be a comma-separated string" })
                 return
             }
+
             time, err := strconv.ParseInt(val[:i], 10, 64)
             if err != nil {
                 dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": "failed to parse the time from 'scroll'" })
                 return
             }
+            options.ScrollTime = time
+
             pid, err := strconv.ParseInt(val[(i+1):], 10, 64)
             if err != nil {
                 dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": "failed to parse the path ID from 'scroll'" })
                 return
             }
-            scroll = &queryScrollPosition{ Time: time, Pid: pid }
+            options.ScrollPid = pid 
         }
 
+        options.PageLimit = 100
         if params.Has("limit") {
-            limit0, err := strconv.Atoi(params.Get("limit"))
-            if err != nil || limit0 <= 0 {
+            limit, err := strconv.Atoi(params.Get("limit"))
+            if err != nil || limit <= 0 {
                 dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": "invalid 'limit'" })
                 return
             }
-            if (limit0 < limit) {
-                limit = limit0
+            if limit < options.PageLimit {
+                options.PageLimit = limit
             }
+        }
+
+        if params.Has("metadata") {
+            options.IncludeMetadata = (params.Get("metadata") != "false")
         }
 
         translate := false
@@ -451,15 +459,15 @@ func newQueryHandler(db *sql.DB, tokenizer *unicodeTokenizer, wild_tokenizer *un
             return
         }
 
-        res, err := queryTokens(db, san, scroll, limit)
+        res, err := queryTokens(db, san, options)
         if err != nil {
             dumpJsonResponse(w, http.StatusInternalServerError, map[string]string{ "status": "ERROR", "reason": fmt.Sprintf("failed to query tokens; %v", err) })
             return
         }
 
         respbody := map[string]interface{} { "results": res }
-        if len(res) == limit {
-            last := &(res[limit-1])
+        if len(res) == options.PageLimit {
+            last := &(res[options.PageLimit - 1])
             next := endpoint + "?scroll=" + strconv.FormatInt(last.Time, 10) + "," + strconv.FormatInt(last.Pid, 10)
             if translate {
                 next += "&translate=true"

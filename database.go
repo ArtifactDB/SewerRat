@@ -845,6 +845,24 @@ func backupDatabase(db *sql.DB, path string) error {
 
 /**********************************************************************/
 
+type queryOptions struct {
+    IncludeMetadata bool
+    PageLimit int
+    UseScroll bool
+    ScrollTime int64
+    ScrollPid int64
+}
+
+func newQueryOptions() queryOptions {
+    return queryOptions{
+        IncludeMetadata: true,
+        PageLimit: 0,
+        UseScroll: false,
+        ScrollTime: 0,
+        ScrollPid: 0,
+    }
+}
+
 type queryResult struct {
     Pid int64 `json:"-"`
     Path string `json:"path"`
@@ -853,13 +871,12 @@ type queryResult struct {
     Metadata json.RawMessage `json:"metadata,omitempty"`
 }
 
-type queryScrollPosition struct {
-    Time int64
-    Pid int64
-}
-
-func queryTokens(db * sql.DB, query *searchClause, scroll *queryScrollPosition, page_limit int) ([]queryResult, error) {
-    full := "SELECT paths.pid, paths.path, paths.user, paths.time, json_extract(paths.metadata, '$') FROM paths"
+func queryTokens(db * sql.DB, query *searchClause, options queryOptions) ([]queryResult, error) {
+    full := "SELECT paths.pid, paths.path, paths.user, paths.time"
+    if options.IncludeMetadata {
+        full += ", json_extract(paths.metadata, '$')"
+    }
+    full += " FROM paths"
 
     // The query can be nil.
     parameters := []interface{}{}
@@ -873,19 +890,18 @@ func queryTokens(db * sql.DB, query *searchClause, scroll *queryScrollPosition, 
 
     // Handling pagination via scrolling window queries, see https://www.sqlite.org/rowvalue.html#scrolling_window_queries.
     // This should be pretty efficient as we have an index on 'time'.
-    if scroll != nil {
+    if options.UseScroll {
         if query_present {
             full += " AND"
         } else {
             full += " WHERE"
         }
         full += " (paths.time, paths.pid) < (?, ?)"
-        parameters = append(parameters, scroll.Time)
-        parameters = append(parameters, scroll.Pid)
+        parameters = append(parameters, options.ScrollTime, options.ScrollPid)
     }
     full += " ORDER BY paths.time DESC, paths.pid DESC"
-    if page_limit > 0 {
-        full += " LIMIT " + strconv.Itoa(page_limit)
+    if options.PageLimit > 0 {
+        full += " LIMIT " + strconv.Itoa(options.PageLimit)
     }
 
     rows, err := db.Query(full, parameters...)
@@ -901,11 +917,22 @@ func queryTokens(db * sql.DB, query *searchClause, scroll *queryScrollPosition, 
         var user string
         var time int64
         var metadata string
-        err = rows.Scan(&pid, &path, &user, &time, &metadata)
+
+        ptrs := []interface{}{ &pid, &path, &user, &time }
+        if options.IncludeMetadata {
+            ptrs = append(ptrs, &metadata)
+        }
+        err := rows.Scan(ptrs...)
         if err != nil {
             return nil, fmt.Errorf("failed to extract row; %w", err)
         }
-        output = append(output, queryResult{ Pid: pid, Path: path, User: user, Time: time, Metadata: []byte(metadata) })
+
+        res := queryResult{ Pid: pid, Path: path, User: user, Time: time }
+        if options.IncludeMetadata {
+            res.Metadata = []byte(metadata)
+        }
+
+        output = append(output, res)
     }
 
     return output, nil

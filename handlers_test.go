@@ -1016,6 +1016,41 @@ func TestQueryHandler(t *testing.T) {
             t.Fatalf("unexpected paths %v", all_paths)
         }
     })
+
+    t.Run("no metadata", func (t *testing.T) {
+        dummy_query := `{ "type": "text", "text": "aaron" }`
+
+        req, err := http.NewRequest("POST", "/query?metadata=false", strings.NewReader(dummy_query))
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        rr := httptest.NewRecorder()
+        handler.ServeHTTP(rr, req)
+        if rr.Code != http.StatusOK {
+            t.Fatalf("should have succeeded")
+        }
+
+        output := struct {
+            Results []map[string]interface{}
+            Next string
+        }{}
+
+        dec := json.NewDecoder(rr.Body)
+        err = dec.Decode(&output)
+        if err != nil {
+            t.Fatal(err)
+        }
+        if len(output.Results) == 0 { 
+            t.Fatalf("unexpected lack of results; %v", output)
+        }
+
+        for _, x := range output.Results {
+            if _, ok := x["metadata"]; ok {
+                t.Errorf("expected no metadata property in %v", x)
+            }
+        }
+    })
 }
 
 func TestRetrieveMetadataHandler(t *testing.T) {

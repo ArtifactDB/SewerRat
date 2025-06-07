@@ -1404,7 +1404,7 @@ func TestQueryTokens(t *testing.T) {
     }
 
     t.Run("basic text", func(t *testing.T) {
-        res, err := queryTokens(dbconn, &searchClause{ Type: "text", Text: "lamb" }, nil, 0)
+        res, err := queryTokens(dbconn, &searchClause{ Type: "text", Text: "lamb" }, newQueryOptions())
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -1414,7 +1414,7 @@ func TestQueryTokens(t *testing.T) {
     })
 
     t.Run("text with field", func(t *testing.T) {
-        res, err := queryTokens(dbconn, &searchClause{ Type: "text", Text: "lamb", Field: "variants" }, nil, 0)
+        res, err := queryTokens(dbconn, &searchClause{ Type: "text", Text: "lamb", Field: "variants" }, newQueryOptions())
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -1424,7 +1424,7 @@ func TestQueryTokens(t *testing.T) {
     })
 
     t.Run("partial test", func(t *testing.T) {
-        res, err := queryTokens(dbconn, &searchClause{ Type: "text", Text: "*ar*", IsPattern: true }, nil, 0)
+        res, err := queryTokens(dbconn, &searchClause{ Type: "text", Text: "*ar*", IsPattern: true }, newQueryOptions())
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -1432,7 +1432,7 @@ func TestQueryTokens(t *testing.T) {
             t.Fatalf("search results are not as expected %v", res)
         }
 
-        res, err = queryTokens(dbconn, &searchClause{ Type: "text", Text: "l?mb", IsPattern: true }, nil, 0)
+        res, err = queryTokens(dbconn, &searchClause{ Type: "text", Text: "l?mb", IsPattern: true }, newQueryOptions())
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -1442,7 +1442,7 @@ func TestQueryTokens(t *testing.T) {
     })
 
     t.Run("search on numbers", func(t *testing.T) {
-        res, err := queryTokens(dbconn, &searchClause{ Type: "text", Text: "5", Field: "bar.cost" }, nil, 0)
+        res, err := queryTokens(dbconn, &searchClause{ Type: "text", Text: "5", Field: "bar.cost" }, newQueryOptions())
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -1450,7 +1450,7 @@ func TestQueryTokens(t *testing.T) {
             t.Fatalf("search results are not as expected %v", res)
         }
 
-        res, err = queryTokens(dbconn, &searchClause{ Type: "text", Text: "10495" }, nil, 0)
+        res, err = queryTokens(dbconn, &searchClause{ Type: "text", Text: "10495" }, newQueryOptions())
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -1460,7 +1460,7 @@ func TestQueryTokens(t *testing.T) {
     })
 
     t.Run("search on booleans", func(t *testing.T) {
-        res, err := queryTokens(dbconn, &searchClause{ Type: "text", Text: "false" }, nil, 0)
+        res, err := queryTokens(dbconn, &searchClause{ Type: "text", Text: "false" }, newQueryOptions())
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -1468,7 +1468,7 @@ func TestQueryTokens(t *testing.T) {
             t.Fatalf("search results are not as expected %v", res)
         }
 
-        res, err = queryTokens(dbconn, &searchClause{ Type: "text", Text: "true", Field: "category.iyashikei" }, nil, 0)
+        res, err = queryTokens(dbconn, &searchClause{ Type: "text", Text: "true", Field: "category.iyashikei" }, newQueryOptions())
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -1484,8 +1484,7 @@ func TestQueryTokens(t *testing.T) {
                 Type: "not", 
                 Child: &searchClause{ Type: "text", Text: "yuru" }, 
             }, 
-            nil, 
-            0,
+            newQueryOptions(),
         )
         if err != nil {
             t.Fatalf(err.Error())
@@ -1508,8 +1507,7 @@ func TestQueryTokens(t *testing.T) {
                     },
                 }, 
             }, 
-            nil, 
-            0,
+            newQueryOptions(),
         )
         if err != nil {
             t.Fatalf(err.Error())
@@ -1526,8 +1524,7 @@ func TestQueryTokens(t *testing.T) {
                 Type: "not", 
                 Child: &searchClause{ Type: "text", Text: "*ar*", IsPattern: true },
             }, 
-            nil, 
-            0,
+            newQueryOptions(),
         )
         if err != nil {
             t.Fatalf(err.Error())
@@ -1550,8 +1547,7 @@ func TestQueryTokens(t *testing.T) {
                     }, 
                 },
             },
-            nil, 
-            0,
+            newQueryOptions(),
         )
         if err != nil {
             t.Fatalf(err.Error())
@@ -1571,8 +1567,7 @@ func TestQueryTokens(t *testing.T) {
                     &searchClause{ Type: "text", Text: "non" },
                 },
             }, 
-            nil, 
-            0,
+            newQueryOptions(),
         )
         if err != nil {
             t.Fatalf(err.Error())
@@ -1592,8 +1587,7 @@ func TestQueryTokens(t *testing.T) {
                     &searchClause{ Type: "text", Text: "lamb" },
                 },
             }, 
-            nil, 
-            0,
+            newQueryOptions(),
         )
         if err != nil {
             t.Fatalf(err.Error())
@@ -1613,8 +1607,7 @@ func TestQueryTokens(t *testing.T) {
                     &searchClause{ Type: "or", Children: []*searchClause{ &searchClause{ Type: "text", Text: "lamb" }, &searchClause{ Type: "text", Text: "non" } } },
                 },
             }, 
-            nil, 
-            0,
+            newQueryOptions(),
         )
         if err != nil {
             t.Fatalf(err.Error())
@@ -1634,8 +1627,7 @@ func TestQueryTokens(t *testing.T) {
                     &searchClause{ Type: "and", Children: []*searchClause{ &searchClause{ Type: "text", Text: "yuru" }, &searchClause{ Type: "text", Text: "non" } } },
                 },
             }, 
-            nil, 
-            0,
+            newQueryOptions(),
         )
         if err != nil {
             t.Fatalf(err.Error())
@@ -1655,8 +1647,7 @@ func TestQueryTokens(t *testing.T) {
                     &searchClause{ Type: "text", Text: "ak*", IsPattern: true },
                 },
             }, 
-            nil, 
-            0,
+            newQueryOptions(),
         )
         if err != nil {
             t.Fatalf(err.Error())
@@ -1676,8 +1667,7 @@ func TestQueryTokens(t *testing.T) {
                     &searchClause{ Type: "text", Text: "yuru", Field: "anime" },
                 },
             }, 
-            nil, 
-            0,
+            newQueryOptions(),
         )
         if err != nil {
             t.Fatalf(err.Error())
@@ -1693,7 +1683,7 @@ func TestQueryTokens(t *testing.T) {
             t.Fatalf(err.Error())
         }
 
-        res, err := queryTokens(dbconn, &searchClause{ Type: "user", User: self.Username }, nil, 0)
+        res, err := queryTokens(dbconn, &searchClause{ Type: "user", User: self.Username }, newQueryOptions())
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -1701,7 +1691,7 @@ func TestQueryTokens(t *testing.T) {
             t.Fatalf("search results are not as expected %v", res)
         }
 
-        res, err = queryTokens(dbconn, &searchClause{ Type: "user", User: self.Username + "2" }, nil, 0)
+        res, err = queryTokens(dbconn, &searchClause{ Type: "user", User: self.Username + "2" }, newQueryOptions())
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -1711,7 +1701,7 @@ func TestQueryTokens(t *testing.T) {
     })
 
     t.Run("path", func(t *testing.T) {
-        res, err := queryTokens(dbconn, &searchClause{ Type: "path", Path: "*stuff*" }, nil, 0)
+        res, err := queryTokens(dbconn, &searchClause{ Type: "path", Path: "*stuff*" }, newQueryOptions())
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -1720,7 +1710,7 @@ func TestQueryTokens(t *testing.T) {
         }
 
         // Try a more complex pattern.
-        res, err = queryTokens(dbconn, &searchClause{ Type: "path", Path: "*/metadata.*json" }, nil, 0)
+        res, err = queryTokens(dbconn, &searchClause{ Type: "path", Path: "*/metadata.*json" }, newQueryOptions())
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -1730,7 +1720,7 @@ func TestQueryTokens(t *testing.T) {
     })
 
     t.Run("time", func(t *testing.T) {
-        res, err := queryTokens(dbconn, &searchClause{ Type: "time", Time: 0 }, nil, 0)
+        res, err := queryTokens(dbconn, &searchClause{ Type: "time", Time: 0 }, newQueryOptions())
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -1738,7 +1728,7 @@ func TestQueryTokens(t *testing.T) {
             t.Fatalf("search results are not as expected %v", res)
         }
 
-        res, err = queryTokens(dbconn, &searchClause{ Type: "time", Time: time.Now().Unix() + 10 }, nil, 0)
+        res, err = queryTokens(dbconn, &searchClause{ Type: "time", Time: time.Now().Unix() + 10 }, newQueryOptions())
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -1746,7 +1736,7 @@ func TestQueryTokens(t *testing.T) {
             t.Fatalf("search results are not as expected %v", res)
         }
 
-        res, err = queryTokens(dbconn, &searchClause{ Type: "time", Time: time.Now().Unix() + 10, After: true }, nil, 0)
+        res, err = queryTokens(dbconn, &searchClause{ Type: "time", Time: time.Now().Unix() + 10, After: true }, newQueryOptions())
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -1756,7 +1746,10 @@ func TestQueryTokens(t *testing.T) {
     })
 
     t.Run("scrolling", func(t *testing.T) {
-        res, err := queryTokens(dbconn, nil, nil, 2)
+        options := newQueryOptions()
+
+        options.PageLimit = 2
+        res, err := queryTokens(dbconn, nil, options)
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -1770,7 +1763,11 @@ func TestQueryTokens(t *testing.T) {
         }
 
         // Picking up from the last position.
-        res, err = queryTokens(dbconn, nil, &queryScrollPosition{ Time: res[1].Time, Pid: res[1].Pid }, 100)
+        options.PageLimit = 100
+        options.UseScroll = true
+        options.ScrollTime = res[1].Time
+        options.ScrollPid = res[1].Pid
+        res, err = queryTokens(dbconn, nil, options)
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -1788,7 +1785,10 @@ func TestQueryTokens(t *testing.T) {
         }
 
         // Checking that it works even after we've exhausted all records.
-        res, err = queryTokens(dbconn, nil, &queryScrollPosition{ Time: res[1].Time, Pid: res[1].Pid }, 2)
+        options.PageLimit = 2
+        options.ScrollTime = res[1].Time
+        options.ScrollPid = res[1].Pid
+        res, err = queryTokens(dbconn, nil, options)
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -1798,12 +1798,45 @@ func TestQueryTokens(t *testing.T) {
     })
 
     t.Run("full", func(t *testing.T) {
-        res, err := queryTokens(dbconn, nil, nil, 0)
+        res, err := queryTokens(dbconn, nil, newQueryOptions())
         if err != nil {
             t.Fatalf(err.Error())
         }
         if len(res) != 4 {
             t.Fatalf("search results are not as expected")
+        }
+    })
+
+    t.Run("no metadata", func(t *testing.T) {
+        options := newQueryOptions()
+
+        // First, running a control.
+        res, err := queryTokens(dbconn, nil, options)
+        if err != nil {
+            t.Fatalf(err.Error())
+        }
+        if len(res) != 4 {
+            t.Fatalf("search results are not as expected")
+        }
+        for _, x := range res {
+            if x.Metadata == nil {
+                t.Error("unexpected nil metadata from default query")
+            }
+        }
+
+        // Checking that metadata is skipped.
+        options.IncludeMetadata = false
+        res, err = queryTokens(dbconn, nil, options)
+        if err != nil {
+            t.Fatalf(err.Error())
+        }
+        if len(res) != 4 {
+            t.Fatalf("search results are not as expected")
+        }
+        for _, x := range res {
+            if x.Metadata != nil {
+                t.Error("expected nil metadata from default query")
+            }
         }
     })
 }

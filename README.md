@@ -220,14 +220,18 @@ The response is a JSON object with the following properties:
    - `path`, a string containing the path to the file.
    - `user`, the identity of the file owner.
    - `time`, the Unix time of most recent file modification.
-   - `metadata`, the contents of the file.
+   - (options) `metadata`, the contents of the file.
 - (optional) `next`, a string containing the endpoint to use for the next page of results.
   A request to this endpoint should use the exact same request body to correctly obtain the next page.
   If `next` is not present, callers may assume that all results have already been obtained.
 
-Callers can control the number of results to return in each page by setting the `limit=` query parameter.
-This should be a positive integer, up to a maximum of 100.
-Any value greater than 100 is ignored.
+We can supply the following options to this endpoint as (URL) query parameters:
+
+- `limit=`, the number of results to return in each page by setting the `limit=` query parameter.
+  This should be a positive integer, up to a maximum of 100.
+  Any value greater than 100 is ignored.
+- `metadata=`, whether to return the contents of the metadata file in the search results.
+  This can be set to `false` to reduce the response size.
 
 ### Defining search clauses
 
