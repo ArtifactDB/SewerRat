@@ -758,6 +758,12 @@ func updateDirectories(db *sql.DB, tokenizer *unicodeTokenizer, options *addDire
         all_failures = append(all_failures, curfailures...)
     }
 
+    // Assist the query planner by optimizing the DB after its contents are updated.
+    _, err = atx.Exec("PRAGMA optimize=0x10002")
+    if err != nil {
+        return nil, fmt.Errorf("failed to optimize the database; %w", err)
+    }
+
     err = atx.Commit()
     if err != nil {
         return nil, fmt.Errorf("failed to commit the transaction to update directories; %w", err)
