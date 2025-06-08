@@ -71,6 +71,33 @@ func dumpHttpErrorResponse(w http.ResponseWriter, err error) {
     dumpErrorResponse(w, status_code, err.Error())
 }
 
+func getPageLimit(params url.Values, limit_name string, upper_limit int) (int, error) {
+    if !params.Has(limit_name) {
+        return upper_limit, nil
+    }
+
+    limit, err := strconv.Atoi(params.Get(limit_name))
+    if err != nil || limit <= 0 {
+        return 0, newHttpError(http.StatusBadRequest, errors.New("invalid '" + limit_name + "'"))
+    }
+
+    if limit > upper_limit {
+        return upper_limit, nil
+    }
+
+    return limit, nil
+}
+
+func encodeNextParameters(scroll_name string, scroll_value string, params url.Values, other_names []string) string {
+    gathered := url.Values{ scroll_name: []string{ scroll_value } }
+    for _, p := range other_names {
+        if params.Has(p) {
+            gathered[p] = params[p]
+        }
+    }
+    return gathered.Encode()
+}
+
 func checkVerificationCode(path string, verifier *verificationRegistry, timeout time.Duration) (fs.FileInfo, error) {
     expected_code, ok := verifier.Pop(path)
     if !ok {
@@ -411,17 +438,12 @@ func newQueryHandler(db *sql.DB, tokenizer *unicodeTokenizer, wild_tokenizer *un
             options.Scroll = &queryScroll{ Time: time, Pid: pid }
         }
 
-        options.PageLimit = 100
-        if params.Has("limit") {
-            limit, err := strconv.Atoi(params.Get("limit"))
-            if err != nil || limit <= 0 {
-                dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": "invalid 'limit'" })
-                return
-            }
-            if limit < options.PageLimit {
-                options.PageLimit = limit
-            }
+        limit, err := getPageLimit(params, "limit", 100)
+        if err != nil {
+            dumpHttpErrorResponse(w, err)
+            return
         }
+        options.PageLimit = limit
 
         if params.Has("metadata") {
             options.IncludeMetadata = (params.Get("metadata") != "false")
@@ -439,7 +461,7 @@ func newQueryHandler(db *sql.DB, tokenizer *unicodeTokenizer, wild_tokenizer *un
         query := &searchClause{}
         restricted := http.MaxBytesReader(w, r.Body, 1048576)
         dec := json.NewDecoder(restricted)
-        err := dec.Decode(query)
+        err = dec.Decode(query)
         if err != nil {
             dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": fmt.Sprintf("failed to parse request body; %v", err) })
             return
@@ -467,11 +489,12 @@ func newQueryHandler(db *sql.DB, tokenizer *unicodeTokenizer, wild_tokenizer *un
         respbody := map[string]interface{} { "results": res }
         if len(res) == options.PageLimit {
             last := &(res[options.PageLimit - 1])
-            next := endpoint + "?scroll=" + strconv.FormatInt(last.Time, 10) + "," + strconv.FormatInt(last.Pid, 10)
-            if translate {
-                next += "&translate=true"
-            }
-            respbody["next"] = next
+            respbody["next"] = endpoint + "?" + encodeNextParameters(
+                "scroll",
+                strconv.FormatInt(last.Time, 10) + "," + strconv.FormatInt(last.Pid, 10),
+                params, 
+                []string{ "limit", "metadata", "translate" },
+            )
         }
 
         dumpJsonResponse(w, http.StatusOK, respbody)
@@ -642,7 +665,7 @@ func newListFilesHandler(db *sql.DB, whitelist linkWhitelist) func(http.Response
 
 func newListRegisteredDirectoriesHandler(db *sql.DB, endpoint string) func(http.ResponseWriter, *http.Request) {
     return func(w http.ResponseWriter, r *http.Request) {
-        options := listRegisteredDirectoriesOptions{ PageLimit: 100 }
+        options := listRegisteredDirectoriesOptions{}
         params := r.URL.Query()
 
         if params.Has("user") {
@@ -682,16 +705,12 @@ func newListRegisteredDirectoriesHandler(db *sql.DB, endpoint string) func(http.
             options.Exists = &exists
         }
 
-        if params.Has("limit") {
-            limit, err := strconv.Atoi(params.Get("limit"))
-            if err != nil || limit <= 0 {
-                dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": "invalid 'limit'" })
-                return
-            }
-            if (limit < options.PageLimit) {
-                options.PageLimit = limit
-            }
+        limit, err := getPageLimit(params, "limit", 100)
+        if err != nil {
+            dumpHttpErrorResponse(w, err)
+            return
         }
+        options.PageLimit = limit
 
         if params.Has("scroll") {
             val := params.Get("scroll")
@@ -725,13 +744,12 @@ func newListRegisteredDirectoriesHandler(db *sql.DB, endpoint string) func(http.
         respbody := map[string]interface{} { "results": output }
         if len(output) == options.PageLimit {
             last := output[options.PageLimit - 1]
-            next := endpoint + "?scroll=" + strconv.FormatInt(last.Time, 10) + "," + strconv.FormatInt(last.Did, 10)
-            for _, extra := range []string { "user", "path_prefix", "within_path", "contains_path", "exists", "limit" } {
-                if params.Has(extra) {
-                    next += "&" + extra + "=" + url.QueryEscape(params.Get(extra))
-                }
-            }
-            respbody["next"] = next
+            respbody["next"] = endpoint + "?" + encodeNextParameters(
+                "scroll",
+                strconv.FormatInt(last.Time, 10) + "," + strconv.FormatInt(last.Did, 10),
+                params, 
+                []string { "user", "path_prefix", "within_path", "contains_path", "exists", "limit" },
+            )
         }
 
         dumpJsonResponse(w, http.StatusOK, respbody)
@@ -742,7 +760,7 @@ func newListRegisteredDirectoriesHandler(db *sql.DB, endpoint string) func(http.
 
 func newListFieldsHandler(db *sql.DB, endpoint string) func(http.ResponseWriter, *http.Request) {
     return func(w http.ResponseWriter, r *http.Request) {
-        options := listFieldsOptions{ PageLimit: 1000 }
+        options := listFieldsOptions{}
         params := r.URL.Query()
 
         if params.Has("pattern") {
@@ -754,16 +772,12 @@ func newListFieldsHandler(db *sql.DB, endpoint string) func(http.ResponseWriter,
             options.Count = params.Get("count") == "true"
         }
 
-        if params.Has("limit") {
-            limit, err := strconv.Atoi(params.Get("limit"))
-            if err != nil || limit <= 0 {
-                dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": "invalid 'limit'" })
-                return
-            }
-            if (limit < options.PageLimit) {
-                options.PageLimit = limit
-            }
+        limit, err := getPageLimit(params, "limit", 1000)
+        if err != nil {
+            dumpHttpErrorResponse(w, err)
+            return
         }
+        options.PageLimit = limit
 
         if params.Has("scroll") {
             options.Scroll = &listFieldsScroll{ Field: params.Get("scroll") }
@@ -777,13 +791,12 @@ func newListFieldsHandler(db *sql.DB, endpoint string) func(http.ResponseWriter,
 
         respbody := map[string]interface{} { "results": output }
         if len(output) == options.PageLimit {
-            next := endpoint + "?scroll=" + output[options.PageLimit - 1].Field
-            for _, extra := range []string { "pattern", "count", "limit" } {
-                if params.Has(extra) {
-                    next += "&" + extra + "=" + url.QueryEscape(params.Get(extra))
-                }
-            }
-            respbody["next"] = next
+            respbody["next"] = endpoint + "?" + encodeNextParameters(
+                "scroll",
+                output[options.PageLimit - 1].Field,
+                params,
+                []string { "pattern", "count", "limit" },
+            )
         }
 
         dumpJsonResponse(w, http.StatusOK, respbody)
@@ -792,7 +805,7 @@ func newListFieldsHandler(db *sql.DB, endpoint string) func(http.ResponseWriter,
 
 func newListTokensHandler(db *sql.DB, endpoint string) func(http.ResponseWriter, *http.Request) {
     return func(w http.ResponseWriter, r *http.Request) {
-        options := listTokensOptions{ PageLimit: 1000 }
+        options := listTokensOptions{}
         params := r.URL.Query()
 
         if params.Has("pattern") {
@@ -809,16 +822,12 @@ func newListTokensHandler(db *sql.DB, endpoint string) func(http.ResponseWriter,
             options.Count = params.Get("count") == "true"
         }
 
-        if params.Has("limit") {
-            limit, err := strconv.Atoi(params.Get("limit"))
-            if err != nil || limit <= 0 {
-                dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": "invalid 'limit'" })
-                return
-            }
-            if (limit < options.PageLimit) {
-                options.PageLimit = limit
-            }
+        limit, err := getPageLimit(params, "limit", 1000)
+        if err != nil {
+            dumpHttpErrorResponse(w, err)
+            return
         }
+        options.PageLimit = limit
 
         if params.Has("scroll") {
             options.Scroll = &listTokensScroll{ Token: params.Get("scroll") }
@@ -832,13 +841,12 @@ func newListTokensHandler(db *sql.DB, endpoint string) func(http.ResponseWriter,
 
         respbody := map[string]interface{} { "results": output }
         if len(output) == options.PageLimit {
-            next := endpoint + "?scroll=" + output[options.PageLimit - 1].Token
-            for _, extra := range []string { "pattern", "field", "count", "limit" } {
-                if params.Has(extra) {
-                    next += "&" + extra + "=" + url.QueryEscape(params.Get(extra))
-                }
-            }
-            respbody["next"] = next
+            respbody["next"] = endpoint + "?" + encodeNextParameters(
+                "scroll",
+                output[options.PageLimit - 1].Token,
+                params,
+                []string { "pattern", "field", "count", "limit" },
+            )
         }
 
         dumpJsonResponse(w, http.StatusOK, respbody)

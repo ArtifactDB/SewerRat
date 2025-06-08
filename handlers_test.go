@@ -976,41 +976,36 @@ func TestQueryHandler(t *testing.T) {
 
     t.Run("scroll", func (t *testing.T) {
         dummy_query := `{ "type": "text", "text": "   " }`
+        endpoint := "/query?limit=3"
+        all_paths := []string{}
 
-        req, err := http.NewRequest("POST", "/query?limit=2", strings.NewReader(dummy_query))
-        if err != nil {
-            t.Fatal(err)
+        // Scroll until exhaustion.
+        for i := 0; i < 100; i++ {
+            req, err := http.NewRequest("POST", endpoint, strings.NewReader(dummy_query))
+            if err != nil {
+                t.Fatal(err)
+            }
+
+            rr := httptest.NewRecorder()
+            handler.ServeHTTP(rr, req)
+            if rr.Code != http.StatusOK {
+                t.Fatalf("should have succeeded")
+            }
+
+            page_paths, scroll := validateSearchResults(rr.Body)
+            all_paths = append(all_paths, page_paths...)
+
+            if len(page_paths) != 3 {
+                if scroll == "" {
+                    break
+                } else {
+                    t.Fatalf("expected three paths from a limited page %v", page_paths)
+                }
+            }
+
+            endpoint = scroll
         }
 
-        rr := httptest.NewRecorder()
-        handler.ServeHTTP(rr, req)
-        if rr.Code != http.StatusOK {
-            t.Fatalf("should have succeeded")
-        }
-
-        all_paths, scroll := validateSearchResults(rr.Body)
-        if !strings.HasPrefix(scroll, "/query?scroll=") {
-            t.Fatalf("unexpected scroll %v", scroll)
-        }
-
-        // Next scroll.
-        req, err = http.NewRequest("POST", scroll, strings.NewReader(dummy_query))
-        if err != nil {
-            t.Fatal(err)
-        }
-
-        rr = httptest.NewRecorder()
-        handler.ServeHTTP(rr, req)
-        if rr.Code != http.StatusOK {
-            t.Fatalf("should have succeeded")
-        }
-
-        all_paths2, scroll := validateSearchResults(rr.Body)
-        if scroll != "" { // fully exhausted the scroll now.
-            t.Fatalf("unexpected scroll %v", scroll)
-        }
-
-        all_paths = append(all_paths, all_paths2...)
         sort.Strings(all_paths)
         if !equalPathArrays(all_paths, []string{ "metadata.json", "stuff/metadata.json", "stuff/other.json", "whee/other.json" }, to_add) {
             t.Fatalf("unexpected paths %v", all_paths)
@@ -1836,61 +1831,61 @@ func TestListFieldsHandler(t *testing.T) {
     })
 
     t.Run("scroll", func (t *testing.T) {
-        req, err := http.NewRequest("GET", "/fields?limit=5", nil)
-        if err != nil {
-            t.Fatal(err)
-        }
-
-        rr := httptest.NewRecorder()
-        handler.ServeHTTP(rr, req)
-        if rr.Code != http.StatusOK {
-            t.Fatalf("should have succeeded (got %d)", rr.Code)
-        }
-
-        r := struct {
-            Results []listFieldsResult
-            Next string
-        }{}
-        dec := json.NewDecoder(rr.Body)
-        err = dec.Decode(&r)
-        if err != nil {
-            t.Fatal(err)
-        }
-        if len(r.Results) != 5 {
-            t.Errorf("unexpected results; %v", r) 
-        }
-        if r.Next == "" || !strings.HasPrefix(r.Next, "/fields?scroll=") || !strings.HasSuffix(r.Next, "&limit=5") {
-            t.Errorf("expected a next string; %v", r) 
-        }
-
+        endpoint := "/fields?limit=5"
         found := map[string]bool{}
-        for _, res := range r.Results {
-            found[res.Field] = true
+
+        // Hitting up the scroll until exhaustion.
+        for i := 0; i < 100; i++ {
+            req, err := http.NewRequest("GET", endpoint, nil)
+            if err != nil {
+                t.Fatal(err)
+            }
+
+            rr := httptest.NewRecorder()
+            handler.ServeHTTP(rr, req)
+            if rr.Code != http.StatusOK {
+                t.Fatalf("should have succeeded (got %d)", rr.Code)
+            }
+
+            handler.ServeHTTP(rr, req)
+            if rr.Code != http.StatusOK {
+                t.Fatalf("should have succeeded (got %d)", rr.Code)
+            }
+
+            r := struct {
+                Results []listFieldsResult
+                Next string
+            }{}
+            dec := json.NewDecoder(rr.Body)
+            err = dec.Decode(&r)
+            if err != nil {
+                t.Fatal(err)
+            }
+
+            for _, res := range r.Results {
+                if _, ok := found[res.Field]; ok {
+                    t.Errorf("detected duplicate entries from scroll; %v", res.Field)
+                }
+                found[res.Field] = true
+            }
+
+            if len(r.Results) != 5 {
+                if r.Next != "" {
+                    t.Errorf("unexpected results; %v", r) 
+                } else {
+                    break
+                }
+            }
+
+            if !strings.Contains(r.Next, "scroll=") || !strings.Contains(r.Next, "limit=5") {
+                t.Errorf("expected a next string; %v", r) 
+            }
+            endpoint = r.Next
         }
 
-        // Hitting up the scroll. 
-        req, err = http.NewRequest("GET", r.Next, nil)
-        if err != nil {
-            t.Fatal(err)
-        }
-
-        handler.ServeHTTP(rr, req)
-        if rr.Code != http.StatusOK {
-            t.Fatalf("should have succeeded (got %d)", rr.Code)
-        }
-
-        dec = json.NewDecoder(rr.Body)
-        err = dec.Decode(&r)
-        if err != nil {
-            t.Fatal(err)
-        }
-        if len(r.Results) != 5 {
-            t.Errorf("unexpected results; %v", r) 
-        }
-
-        for _, res := range r.Results {
-            if _, ok := found[res.Field]; ok {
-                t.Errorf("detected duplicate entries from scroll; %v", res.Field)
+        for _, expected := range []string{ "anime", "recipe", "category.iyashikei" } {
+            if _, ok := found[expected]; !ok {
+                t.Errorf("couldn't find the '%s' field; %v", expected, found)
             }
         }
     })
@@ -2016,61 +2011,62 @@ func TestListTokensHandler(t *testing.T) {
     })
 
     t.Run("scroll", func (t *testing.T) {
-        req, err := http.NewRequest("GET", "/tokens?limit=5", nil)
-        if err != nil {
-            t.Fatal(err)
-        }
-
-        rr := httptest.NewRecorder()
-        handler.ServeHTTP(rr, req)
-        if rr.Code != http.StatusOK {
-            t.Fatalf("should have succeeded (got %d)", rr.Code)
-        }
-
-        r := struct {
-            Results []listTokensResult
-            Next string
-        }{}
-        dec := json.NewDecoder(rr.Body)
-        err = dec.Decode(&r)
-        if err != nil {
-            t.Fatal(err)
-        }
-        if len(r.Results) != 5 {
-            t.Errorf("unexpected results; %v", r) 
-        }
-        if r.Next == "" || !strings.HasPrefix(r.Next, "/tokens?scroll=") || !strings.HasSuffix(r.Next, "&limit=5") {
-            t.Errorf("expected a next string; %v", r) 
-        }
-
+        endpoint := "/tokens?limit=5"
         found := map[string]bool{}
-        for _, res := range r.Results {
-            found[res.Token] = true
+
+        // Hitting up the scroll until exhaustion.
+        for it := 0; it < 100; it++ {
+            req, err := http.NewRequest("GET", endpoint, nil)
+            if err != nil {
+                t.Fatal(err)
+            }
+
+            rr := httptest.NewRecorder()
+            handler.ServeHTTP(rr, req)
+            if rr.Code != http.StatusOK {
+                t.Fatalf("should have succeeded (got %d)", rr.Code)
+            }
+
+
+            handler.ServeHTTP(rr, req)
+            if rr.Code != http.StatusOK {
+                t.Fatalf("should have succeeded (got %d)", rr.Code)
+            }
+
+            r := struct {
+                Results []listTokensResult
+                Next string
+            }{}
+            dec := json.NewDecoder(rr.Body)
+            err = dec.Decode(&r)
+            if err != nil {
+                t.Fatal(err)
+            }
+
+            for _, res := range r.Results {
+                if _, ok := found[res.Token]; ok {
+                    t.Errorf("detected duplicate entries from scroll; %v", res.Token)
+                }
+                found[res.Token] = true
+            }
+
+            if len(r.Results) != 5 {
+                if r.Next != "" {
+                    t.Errorf("unexpected results; %v", r) 
+                } else {
+                    break
+                }
+            }
+
+            if !strings.Contains(r.Next, "scroll=") || !strings.Contains(r.Next, "limit=5") {
+                t.Errorf("expected a next string; %v", r) 
+            }
+            endpoint = r.Next
         }
 
-        // Hitting up the scroll. 
-        req, err = http.NewRequest("GET", r.Next, nil)
-        if err != nil {
-            t.Fatal(err)
-        }
-
-        handler.ServeHTTP(rr, req)
-        if rr.Code != http.StatusOK {
-            t.Fatalf("should have succeeded (got %d)", rr.Code)
-        }
-
-        dec = json.NewDecoder(rr.Body)
-        err = dec.Decode(&r)
-        if err != nil {
-            t.Fatal(err)
-        }
-        if len(r.Results) != 5 {
-            t.Errorf("unexpected results; %v", r) 
-        }
-
-        for _, res := range r.Results {
-            if _, ok := found[res.Token]; ok {
-                t.Errorf("detected duplicate entries from scroll; %v", res.Token)
+        for _, expected := range []string{ "yuru", "aaron", "merino" } {
+            if _, ok := found[expected]; !ok {
+                t.Errorf("couldn't find the '%s' token; %v", expected, found)
             }
         }
     })
