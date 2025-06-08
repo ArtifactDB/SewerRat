@@ -979,23 +979,31 @@ func retrievePath(db * sql.DB, path string, include_metadata bool) (*queryResult
 
 /**********************************************************************/
 
+type listRegisteredDirectoriesScroll struct {
+    Time int64
+    Did int64
+}
+
 type listRegisteredDirectoriesOptions struct {
     User *string
     ContainsPath *string
     WithinPath *string
     PathPrefix *string
     Exists *string
+    PageLimit int
+    Scroll *listRegisteredDirectoriesScroll
 }
 
 type listRegisteredDirectoriesResult struct {
+    Did int64 `json:"-"`
     Path string `json:"path"`
     User string `json:"user"`
     Time int64 `json:"time"`
     Names json.RawMessage `json:"names"`
 }
 
-func listRegisteredDirectories(db *sql.DB, options *listRegisteredDirectoriesOptions) ([]listRegisteredDirectoriesResult, error) {
-    q := "SELECT path, user, time, json_extract(names, '$') FROM dirs"
+func listRegisteredDirectories(db *sql.DB, options listRegisteredDirectoriesOptions) ([]listRegisteredDirectoriesResult, error) {
+    q := "SELECT did, path, user, time, json_extract(names, '$') FROM dirs"
 
     filters := []string{}
     parameters := []interface{}{}
@@ -1025,9 +1033,18 @@ func listRegisteredDirectories(db *sql.DB, options *listRegisteredDirectoriesOpt
         filters = append(filters, "path GLOB ?")
         parameters = append(parameters, *(options.PathPrefix) + "*")
     }
+    if options.Scroll != nil {
+        filters = append(filters, "(time, did) < (?, ?)")
+        parameters = append(parameters, options.Scroll.Time, options.Scroll.Did)
+    }
 
     if len(filters) > 0 {
-        q = q + " WHERE " + strings.Join(filters, " AND ")
+        q += " WHERE " + strings.Join(filters, " AND ")
+    }
+
+    q += " ORDER BY time DESC, did DESC"
+    if options.PageLimit > 0 {
+        q += " LIMIT " + strconv.Itoa(options.PageLimit)
     }
 
     only_exists := false 
@@ -1049,7 +1066,7 @@ func listRegisteredDirectories(db *sql.DB, options *listRegisteredDirectoriesOpt
         current := listRegisteredDirectoriesResult{}
 
         var names string
-        err := rows.Scan(&(current.Path), &(current.User), &(current.Time), &names)
+        err := rows.Scan(&(current.Did), &(current.Path), &(current.User), &(current.Time), &names)
         current.Names = []byte(names)
         if err != nil {
             return nil, fmt.Errorf("failed to traverse rows of the 'dir' table; %w", err)

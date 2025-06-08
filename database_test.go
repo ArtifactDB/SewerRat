@@ -1962,8 +1962,8 @@ func TestListRegisteredDirectories(t *testing.T) {
     }
 
     t.Run("basic", func(t *testing.T) {
-        query := listRegisteredDirectoriesOptions{}
-        out, err := listRegisteredDirectories(dbconn, &query)
+        options := listRegisteredDirectoriesOptions{}
+        out, err := listRegisteredDirectories(dbconn, options)
         if err != nil {
             t.Fatal(err)
         }
@@ -1972,9 +1972,9 @@ func TestListRegisteredDirectories(t *testing.T) {
         }
 
         for i := 0; i < 2; i++ {
-            name := "foo"
+            name := "bar"
             if i == 1 {
-                name = "bar"
+                name = "foo"
             }
 
             if out[i].User != name + "_user" || filepath.Base(out[i].Path) != name || out[i].Time == 0 {
@@ -1994,10 +1994,10 @@ func TestListRegisteredDirectories(t *testing.T) {
     })
 
     t.Run("filtered on user", func(t *testing.T) {
-        query := listRegisteredDirectoriesOptions{}
+        options := listRegisteredDirectoriesOptions{}
         desired := "bar_user"
-        query.User = &desired
-        out, err := listRegisteredDirectories(dbconn, &query)
+        options.User = &desired
+        out, err := listRegisteredDirectories(dbconn, options)
         if err != nil {
             t.Fatal(err)
         }
@@ -2009,8 +2009,8 @@ func TestListRegisteredDirectories(t *testing.T) {
         }
 
         desired = "bar_user2"
-        query.User = &desired
-        out, err = listRegisteredDirectories(dbconn, &query)
+        options.User = &desired
+        out, err = listRegisteredDirectories(dbconn, options)
         if err != nil {
             t.Fatal(err)
         }
@@ -2020,12 +2020,12 @@ func TestListRegisteredDirectories(t *testing.T) {
     })
 
     t.Run("filtered on contains_path", func(t *testing.T) {
-        query := listRegisteredDirectoriesOptions{}
+        options := listRegisteredDirectoriesOptions{}
 
         desired := filepath.Join(tmp, "bar")
-        query.ContainsPath = &desired
+        options.ContainsPath = &desired
 
-        out, err := listRegisteredDirectories(dbconn, &query)
+        out, err := listRegisteredDirectories(dbconn, options)
         if err != nil {
             t.Fatal(err)
         }
@@ -2037,8 +2037,8 @@ func TestListRegisteredDirectories(t *testing.T) {
         }
 
         desired = filepath.Join(filepath.Dir(tmp))
-        query.ContainsPath = &desired
-        out, err = listRegisteredDirectories(dbconn, &query)
+        options.ContainsPath = &desired
+        out, err = listRegisteredDirectories(dbconn, options)
         if err != nil {
             t.Fatal(err)
         }
@@ -2048,10 +2048,10 @@ func TestListRegisteredDirectories(t *testing.T) {
     })
 
     t.Run("filtered on has_prefix", func(t *testing.T) {
-        query := listRegisteredDirectoriesOptions{}
-        query.PathPrefix = &tmp
+        options := listRegisteredDirectoriesOptions{}
+        options.PathPrefix = &tmp
 
-        out, err := listRegisteredDirectories(dbconn, &query)
+        out, err := listRegisteredDirectories(dbconn, options)
         if err != nil {
             t.Fatal(err)
         }
@@ -2060,8 +2060,8 @@ func TestListRegisteredDirectories(t *testing.T) {
         }
 
         absent := tmp + "_asdasd"
-        query.PathPrefix = &absent
-        out, err = listRegisteredDirectories(dbconn, &query)
+        options.PathPrefix = &absent
+        out, err = listRegisteredDirectories(dbconn, options)
         if err != nil {
             t.Fatal(err)
         }
@@ -2073,10 +2073,10 @@ func TestListRegisteredDirectories(t *testing.T) {
     t.Run("filtered on within_path", func(t *testing.T) {
         // Basic checks to see what we pick up or don't.
         {
-            query := listRegisteredDirectoriesOptions{}
-            query.WithinPath = &tmp
+            options := listRegisteredDirectoriesOptions{}
+            options.WithinPath = &tmp
 
-            out, err := listRegisteredDirectories(dbconn, &query)
+            out, err := listRegisteredDirectories(dbconn, options)
             if err != nil {
                 t.Fatal(err)
             }
@@ -2085,8 +2085,8 @@ func TestListRegisteredDirectories(t *testing.T) {
             }
 
             absent := tmp + "_asdasd"
-            query.WithinPath = &absent
-            out, err = listRegisteredDirectories(dbconn, &query)
+            options.WithinPath = &absent
+            out, err = listRegisteredDirectories(dbconn, options)
             if err != nil {
                 t.Fatal(err)
             }
@@ -2111,9 +2111,9 @@ func TestListRegisteredDirectories(t *testing.T) {
                 t.Fatalf("unexpected comments from the directory addition %v", comments)
             }
 
-            query := listRegisteredDirectoriesOptions{}
-            query.WithinPath = &to_add
-            out, err := listRegisteredDirectories(dbconn, &query)
+            options := listRegisteredDirectoriesOptions{}
+            options.WithinPath = &to_add
+            out, err := listRegisteredDirectories(dbconn, options)
             if err != nil {
                 t.Fatal(err)
             }
@@ -2123,8 +2123,8 @@ func TestListRegisteredDirectories(t *testing.T) {
 
             // Checking foo as a control.
             control := filepath.Join(tmp, "foo")
-            query.WithinPath = &control
-            out, err = listRegisteredDirectories(dbconn, &query)
+            options.WithinPath = &control
+            out, err = listRegisteredDirectories(dbconn, options)
             if err != nil {
                 t.Fatal(err)
             }
@@ -2157,9 +2157,9 @@ func TestListRegisteredDirectories(t *testing.T) {
         }
 
         exists := "true"
-        query := listRegisteredDirectoriesOptions{}
-        query.Exists = &exists
-        out, err := listRegisteredDirectories(dbconn, &query)
+        options := listRegisteredDirectoriesOptions{}
+        options.Exists = &exists
+        out, err := listRegisteredDirectories(dbconn, options)
         if err != nil {
             t.Fatal(err)
         }
@@ -2168,8 +2168,8 @@ func TestListRegisteredDirectories(t *testing.T) {
         }
 
         exists = "false"
-        query.Exists = &exists
-        out, err = listRegisteredDirectories(dbconn, &query)
+        options.Exists = &exists
+        out, err = listRegisteredDirectories(dbconn, options)
         if err != nil {
             t.Fatal(err)
         }
@@ -2177,13 +2177,13 @@ func TestListRegisteredDirectories(t *testing.T) {
             t.Errorf("should have found 2 matching paths; %v", out)
         }
 
-        // Repeating this query after adding a file there; this is not a
+        // Repeating this options after adding a file there; this is not a
         // directory and so the path is still considered absent.
         err = os.WriteFile(to_add, []byte{}, 0644)
         if err != nil {
             t.Fatal(err)
         }
-        out, err = listRegisteredDirectories(dbconn, &query)
+        out, err = listRegisteredDirectories(dbconn, options)
         if err != nil {
             t.Fatal(err)
         }
@@ -2193,8 +2193,8 @@ func TestListRegisteredDirectories(t *testing.T) {
 
         // Checking that 'any' queries work as expected.
         exists = "any"
-        query.Exists = &exists
-        out, err = listRegisteredDirectories(dbconn, &query)
+        options.Exists = &exists
+        out, err = listRegisteredDirectories(dbconn, options)
         if err != nil {
             t.Fatal(err)
         }
@@ -2202,8 +2202,8 @@ func TestListRegisteredDirectories(t *testing.T) {
             t.Error("should have found 3 matching paths")
         }
 
-        query.Exists = nil
-        out, err = listRegisteredDirectories(dbconn, &query)
+        options.Exists = nil
+        out, err = listRegisteredDirectories(dbconn, options)
         if err != nil {
             t.Fatal(err)
         }
@@ -2211,6 +2211,39 @@ func TestListRegisteredDirectories(t *testing.T) {
             t.Error("should have found 3 matching paths")
         }
     })
+
+    t.Run("scroll", func(t *testing.T) {
+        options := listRegisteredDirectoriesOptions{ PageLimit: 1 }
+        out, err := listRegisteredDirectories(dbconn, options)
+        if err != nil {
+            t.Fatal(err)
+        }
+        if len(out) != 1 {
+            t.Fatal("should have found one path")
+        }
+
+        options.Scroll = &listRegisteredDirectoriesScroll{ Did: out[0].Did, Time: out[0].Time }
+        out2, err := listRegisteredDirectories(dbconn, options)
+        if err != nil {
+            t.Fatal(err)
+        }
+        if len(out2) != 1 {
+            t.Fatal("should have found one path")
+        }
+        if out[0].Path == out2[0].Path {
+            t.Error("should have gotten different paths from the scroll")
+        }
+
+        options.Scroll = &listRegisteredDirectoriesScroll{ Did: out2[0].Did, Time: out2[0].Time }
+        out3, err := listRegisteredDirectories(dbconn, options)
+        if err != nil {
+            t.Fatal(err)
+        }
+        if len(out3) != 0 {
+            t.Fatal("should have found no more paths at the end of the scroll")
+        }
+    })
+
 }
 
 func TestIsDirectoryRegistered(t *testing.T) {

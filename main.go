@@ -86,7 +86,7 @@ func main() {
     http.HandleFunc("GET " + prefix + "/tokens", newListTokensHandler(ro_db, "/tokens"))
     http.HandleFunc("GET " + prefix + "/fields", newListFieldsHandler(ro_db, "/fields"))
 
-    http.HandleFunc("GET " + prefix + "/registered", newListRegisteredDirectoriesHandler(ro_db))
+    http.HandleFunc("GET " + prefix + "/registered", newListRegisteredDirectoriesHandler(ro_db, "/registered"))
     http.HandleFunc("GET " + prefix + "/list", newListFilesHandler(ro_db, add_options.LinkWhitelist))
     http.HandleFunc("GET " + prefix + "/retrieve/metadata", newRetrieveMetadataHandler(ro_db))
     http.HandleFunc("GET " + prefix + "/retrieve/file", newRetrieveFileHandler(ro_db))

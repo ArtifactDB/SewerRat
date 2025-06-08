@@ -640,9 +640,9 @@ func newListFilesHandler(db *sql.DB, whitelist linkWhitelist) func(http.Response
     }
 }
 
-func newListRegisteredDirectoriesHandler(db *sql.DB) func(http.ResponseWriter, *http.Request) {
+func newListRegisteredDirectoriesHandler(db *sql.DB, endpoint string) func(http.ResponseWriter, *http.Request) {
     return func(w http.ResponseWriter, r *http.Request) {
-        options := listRegisteredDirectoriesOptions{}
+        options := listRegisteredDirectoriesOptions{ PageLimit: 100 }
         params := r.URL.Query()
 
         if params.Has("user") {
@@ -682,13 +682,59 @@ func newListRegisteredDirectoriesHandler(db *sql.DB) func(http.ResponseWriter, *
             options.Exists = &exists
         }
 
-        output, err := listRegisteredDirectories(db, &options)
+        if params.Has("limit") {
+            limit, err := strconv.Atoi(params.Get("limit"))
+            if err != nil || limit <= 0 {
+                dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": "invalid 'limit'" })
+                return
+            }
+            if (limit < options.PageLimit) {
+                options.PageLimit = limit
+            }
+        }
+
+        if params.Has("scroll") {
+            val := params.Get("scroll")
+            i := strings.Index(val, ",")
+            if i < 0 {
+                dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": "'scroll' should be a comma-separated string" })
+                return
+            }
+
+            time, err := strconv.ParseInt(val[:i], 10, 64)
+            if err != nil {
+                dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": "failed to parse the time from 'scroll'" })
+                return
+            }
+
+            did, err := strconv.ParseInt(val[(i+1):], 10, 64)
+            if err != nil {
+                dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": "failed to parse the directory ID from 'scroll'" })
+                return
+            }
+
+            options.Scroll = &listRegisteredDirectoriesScroll{ Time: time, Did: did }
+        }
+
+        output, err := listRegisteredDirectories(db, options)
         if err != nil {
             dumpHttpErrorResponse(w, fmt.Errorf("failed to check registered directories; %w", err))
             return
         }
 
-        dumpJsonResponse(w, http.StatusOK, output)
+        respbody := map[string]interface{} { "results": output }
+        if len(output) == options.PageLimit {
+            last := output[options.PageLimit - 1]
+            next := endpoint + "?scroll=" + strconv.FormatInt(last.Time, 10) + "," + strconv.FormatInt(last.Did, 10)
+            for _, extra := range []string { "user", "path_prefix", "within_path", "contains_path", "exists", "limit" } {
+                if params.Has(extra) {
+                    next += "&" + extra + "=" + url.QueryEscape(params.Get(extra))
+                }
+            }
+            respbody["next"] = next
+        }
+
+        dumpJsonResponse(w, http.StatusOK, respbody)
     }
 }
 

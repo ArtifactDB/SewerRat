@@ -480,6 +480,39 @@ This makes it trivial to access the contents of directories registered with Sewe
 For remote applications, the situation is more complicated as they are able to query the SewerRat index but cannot directly read from the filesystem.
 This section describes some API endpoints that fill this gap for remote access.
 
+### Identifying registered directories
+
+We can determine which directories are actually registered by making a GET request to the `/registered` endpoint of the SewerRat API.
+
+```shell
+curl -L ${SEWER_RAT_URL}/registered | jq
+```
+
+On success, the response is a JSON object with the following properties:
+
+- `results`, an array of objects containing the registered directories, sorted by the registration time.
+   Each object has the following properties:
+   - `path`, a string containing the path to the registered directory.
+   - `user`, the identity of the user who registered this directory.
+   - `time`, the Unix time of the registration.
+   - `names`, the base names of the metadata files to be indexed in this directory.
+- (optional) `next`, a string containing the endpoint to use for the next page of results.
+  If `next` is not present, callers may assume that all results have already been obtained.
+
+This can be filtered by passing additional query parameters:
+
+- `user=`, which filters on the `user`.
+- `contains_path=`, which filters for `path` that contain (i.e., are parents of) the specified path.
+- `within_path=`, which filters for `path` that are equal to or lie within the directory of specified path.
+- `exists=`, which filters for `path` that are existing directories on the filesystem.
+  This can be `true` (directory must be present at the path), `false` (no directory exists at the path) or `any`.
+- `limit=`, the number of results to return in each page.
+  This should be a positive integer, up to a maximum of 100 (the default).
+  Any value greater than 100 is ignored.
+
+On error, the response may either be `text/plain` content containing the error message directly,
+or `application/json` content encoding a JSON object with the `reason` for the error.
+
 ### Listing directory contents 
 
 We can list the contents of a directory by making a GET request to the `/list` endpoint of the SewerRat API,
@@ -561,32 +594,6 @@ we can skip it by setting the `metadata=false` URL query parameter in our reques
 On error, the exact response may either be `text/plain` content containing the error message directly,
 or `application/json` content encoding a JSON object with the `reason` for the error.
 If the path does not exist in the index, a standard 404 error is returned.
-
-### Identifying registered directories
-
-We can determine which directories are actually registered by making a GET request to the `/registered` endpoint of the SewerRat API.
-
-```shell
-curl -L ${SEWER_RAT_URL}/registered | jq
-```
-
-On success, this returns an array of objects containing:
-
-- `path`, a string containing the path to the registered directory.
-- `user`, the identity of the user who registered this directory.
-- `time`, the Unix time of the registration.
-- `names`, the base names of the metadata files to be indexed in this directory.
-
-This can be filtered by passing additional query parameters:
-
-- `user=`, which filters on the `user`.
-- `contains_path=`, which filters for `path` that contain (i.e., are parents of) the specified path.
-- `within_path=`, which filters for `path` that are equal to or lie within the directory of specified path.
-- `exists=`, which filters for `path` that are existing directories on the filesystem.
-  This can be `true` (directory must be present at the path), `false` (no directory exists at the path) or `any`.
-
-On error, the response may either be `text/plain` content containing the error message directly,
-or `application/json` content encoding a JSON object with the `reason` for the error.
 
 ## Administration
 

@@ -1521,13 +1521,18 @@ func TestListRegisteredDirectoriesHandler(t *testing.T) {
         }
     }
 
-    handler := http.HandlerFunc(newListRegisteredDirectoriesHandler(dbconn))
+    handler := http.HandlerFunc(newListRegisteredDirectoriesHandler(dbconn, "/registered"))
 
     type lrdResult struct {
         Path string
         User string
         Time int64
         Names []string
+    }
+
+    type lrdResponse struct {
+        Results []lrdResult
+        Next string
     }
 
     t.Run("basic", func (t *testing.T) {
@@ -1542,18 +1547,18 @@ func TestListRegisteredDirectoriesHandler(t *testing.T) {
             t.Fatalf("should have succeeded (got %d)", rr.Code)
         }
 
-        r := []lrdResult{}
+        resp := lrdResponse{}
         dec := json.NewDecoder(rr.Body)
-        err = dec.Decode(&r)
+        err = dec.Decode(&resp)
         if err != nil {
             t.Fatal(err)
         }
 
-        if len(r) != 3 || r[0].User != "akari" || r[1].User != "ai" || r[2].User != "alice" {
+        r := resp.Results
+        if len(r) != 3 || r[0].User != "alice" || r[1].User != "ai" || r[2].User != "akari" {
             t.Fatalf("unexpected listing results for the users %q", r)
         }
-
-        if filepath.Base(r[0].Path) != "to_add_akari" || r[0].Time == 0 || r[0].Names[0] != "metadata.json" {
+        if filepath.Base(r[0].Path) != "to_add_alice" || r[0].Time == 0 || r[0].Names[0] != "metadata.json" {
             t.Fatalf("unexpected listing results for the first entry %q", r)
         }
     })
@@ -1570,13 +1575,14 @@ func TestListRegisteredDirectoriesHandler(t *testing.T) {
             t.Fatalf("should have succeeded (got %d)", rr.Code)
         }
 
-        r := []lrdResult{}
+        resp := lrdResponse{}
         dec := json.NewDecoder(rr.Body)
-        err = dec.Decode(&r)
+        err = dec.Decode(&resp)
         if err != nil {
             t.Fatal(err)
         }
 
+        r := resp.Results
         if len(r) != 1 || r[0].User != "alice" || filepath.Base(r[0].Path) != "to_add_alice" || r[0].Time == 0 || r[0].Names[0] != "metadata.json" {
             t.Fatalf("unexpected listing results %q", r)
         }
@@ -1596,13 +1602,14 @@ func TestListRegisteredDirectoriesHandler(t *testing.T) {
             t.Fatalf("should have succeeded (got %d)", rr.Code)
         }
 
-        r := []lrdResult{}
+        resp := lrdResponse{}
         dec := json.NewDecoder(rr.Body)
-        err = dec.Decode(&r)
+        err = dec.Decode(&resp)
         if err != nil {
             t.Fatal(err)
         }
 
+        r := resp.Results
         if len(r) != 1 || r[0].User != "akari" {
             t.Fatalf("unexpected listing results %q", r)
         }
@@ -1621,13 +1628,14 @@ func TestListRegisteredDirectoriesHandler(t *testing.T) {
             t.Fatalf("should have succeeded (got %d)", rr.Code)
         }
 
-        r := []lrdResult{}
+        resp := lrdResponse{}
         dec := json.NewDecoder(rr.Body)
-        err = dec.Decode(&r)
+        err = dec.Decode(&resp)
         if err != nil {
             t.Fatal(err)
         }
 
+        r := resp.Results
         if len(r) != 1 || filepath.Base(r[0].Path) != "to_add_ai" {
             t.Fatalf("unexpected listing results %q", r)
         }
@@ -1646,13 +1654,14 @@ func TestListRegisteredDirectoriesHandler(t *testing.T) {
             t.Fatalf("should have succeeded (got %d)", rr.Code)
         }
 
-        r := []lrdResult{}
+        resp := lrdResponse{}
         dec := json.NewDecoder(rr.Body)
-        err = dec.Decode(&r)
+        err = dec.Decode(&resp)
         if err != nil {
             t.Fatal(err)
         }
 
+        r := resp.Results
         if len(r) != 1 || filepath.Base(r[0].Path) != "to_add_ai" {
             t.Fatalf("unexpected listing results %q", r)
         }
@@ -1670,16 +1679,70 @@ func TestListRegisteredDirectoriesHandler(t *testing.T) {
             t.Fatalf("should have succeeded (got %d)", rr.Code)
         }
 
-        r := []lrdResult{}
+        resp := lrdResponse{}
         dec := json.NewDecoder(rr.Body)
-        err = dec.Decode(&r)
+        err = dec.Decode(&resp)
         if err != nil {
             t.Fatal(err)
         }
 
         // All directories exist, so exists=false should not pick up anything.
+        r := resp.Results
         if len(r) != 0 {
             t.Fatalf("unexpected listing results %q", r)
+        }
+    })
+
+    t.Run("scroll", func (t *testing.T) {
+        req, err := http.NewRequest("GET", "/registered?limit=2", nil)
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        rr := httptest.NewRecorder()
+        handler.ServeHTTP(rr, req)
+        if rr.Code != http.StatusOK {
+            t.Fatalf("should have succeeded (got %d)", rr.Code)
+        }
+
+        resp := lrdResponse{}
+        dec := json.NewDecoder(rr.Body)
+        err = dec.Decode(&resp)
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        r := resp.Results
+        if len(r) != 2 || r[0].User != "alice" || r[1].User != "ai" {
+            t.Fatalf("unexpected listing results for the users %q", r)
+        }
+        if resp.Next == "" {
+            t.Fatal("expected next scroll to be non-empty")
+        }
+
+        // Continuing with the scroll.
+        req, err = http.NewRequest("GET", resp.Next, nil)
+        if err != nil {
+            t.Fatal(err)
+        }
+        handler.ServeHTTP(rr, req)
+        if rr.Code != http.StatusOK {
+            t.Fatalf("should have succeeded (got %d)", rr.Code)
+        }
+
+        resp = lrdResponse{}
+        dec = json.NewDecoder(rr.Body)
+        err = dec.Decode(&resp)
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        r = resp.Results
+        if len(r) != 1 || r[0].User != "akari" {
+            t.Fatalf("unexpected listing results for the users %q", r)
+        }
+        if resp.Next != "" {
+            t.Error("expected next scroll to be empty")
         }
     })
 }
