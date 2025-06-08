@@ -137,7 +137,6 @@ func TestAddNewDirectory(t *testing.T) {
         t.Fatalf(err.Error())
     }
     username := self.Username
-    now := time.Now().Unix()
 
     dbpath := filepath.Join(tmp, "db.sqlite3")
 
@@ -156,6 +155,7 @@ func TestAddNewDirectory(t *testing.T) {
         if len(comments) > 0 {
             t.Fatalf("unexpected comments from the directory addition %v", comments)
         }
+        now := time.Now().Unix()
 
         {
             rows, err := dbconn.Query("SELECT path, user, time, json_extract(names, '$') FROM dirs")
