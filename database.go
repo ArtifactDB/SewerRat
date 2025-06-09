@@ -128,6 +128,79 @@ func createWriteTransaction(db *sql.DB) (*writeTransaction, error) {
     return &writeTransaction{ Conn: conn, Committed: false, Ctx: ctx }, nil
 }
 
+func createTableStatement() string {
+    return `
+CREATE TABLE dirs(
+    did INTEGER PRIMARY KEY, 
+    path TEXT NOT NULL UNIQUE, 
+    user TEXT NOT NULL, 
+    time INTEGER NOT NULL,
+    names BLOB
+);
+
+CREATE TABLE paths(
+    pid INTEGER PRIMARY KEY, 
+    did INTEGER NOT NULL,
+    path TEXT NOT NULL UNIQUE, 
+    user TEXT NOT NULL, 
+    time INTEGER NOT NULL, 
+    metadata BLOB,
+    FOREIGN KEY(did) REFERENCES dirs(did) ON DELETE CASCADE
+);
+
+CREATE TABLE tokens(
+    tid INTEGER PRIMARY KEY,
+    token TEXT NOT NULL UNIQUE
+);
+
+CREATE TABLE fields(
+    fid INTEGER PRIMARY KEY,
+    field TEXT NOT NULL UNIQUE
+);
+
+CREATE TABLE links(
+    pid INTEGER NOT NULL,
+    fid INTEGER NOT NULL,
+    tid INTEGER NOT NULL,
+    FOREIGN KEY(pid) REFERENCES paths(pid) ON DELETE CASCADE,
+    UNIQUE(pid, fid, tid)
+);
+`
+}
+
+func createIndexStatement() string {
+    // Here, the general idea is to spam indices so that the query planner has many optimization options.
+    // - For 'dirs', we index on everything, but we don't stop each multi-column indices at the first column that only contains unique values.
+    //   There's no point in including more columns if there will never be tied values.
+    //   (Time is effectively unique at the resolutions we're using.)
+    // - For 'paths', the logic is the same as 'dirs'.
+    //   We throw in an index on 'did' to enable efficient cascading deletion.
+    // - For 'tokens' and 'fields', there is only one column worth indexing, so we just do that.
+    // - For 'links', we try both permutations of 'fid' and 'tid', which are (via 'fields' and 'tokens') what we want to search on.
+    //   A single 'pid' index created to enable efficient cascading deletion.
+    //   I don't think the 'pid' index would otherwise be used because we don't use it in the subqueries and those subqueries can't be flattened into inner joins anyway.
+    return `
+CREATE INDEX index_dirs_path ON dirs(path);
+CREATE INDEX index_dirs_time ON dirs(time);
+CREATE INDEX index_dirs_user_time ON dirs(user, time);
+CREATE INDEX index_dirs_user_path ON dirs(user, path);
+
+CREATE INDEX index_paths_path ON paths(path);
+CREATE INDEX index_paths_time ON paths(time);
+CREATE INDEX index_paths_user_time ON paths(user, time);
+CREATE INDEX index_paths_user_path ON paths(user, path);
+CREATE INDEX index_paths_did ON paths(did);
+
+CREATE INDEX index_tokens ON tokens(token);
+
+CREATE INDEX index_fields ON fields(field);
+
+CREATE INDEX index_links_tid_fid ON links(tid, fid);
+CREATE INDEX index_links_fid_tid ON links(fid, tid);
+CREATE INDEX index_links_pid ON links(pid);
+`
+}
+
 func initializeDatabase(path string) (*sql.DB, error) {
     accessible := false
     if _, err := os.Lstat(path); err == nil {
@@ -150,6 +223,8 @@ func initializeDatabase(path string) (*sql.DB, error) {
         return nil, fmt.Errorf("failed to enable write-ahead logging; %w", err)
     }
 
+    latest_version := 1
+
     if (!accessible) {
         err := func () error {
             atx, err := createWriteTransaction(db)
@@ -158,42 +233,19 @@ func initializeDatabase(path string) (*sql.DB, error) {
             }
             defer atx.Finish()
 
-            _, err = atx.Exec(`
-CREATE TABLE dirs(
-    did INTEGER PRIMARY KEY, 
-    path TEXT NOT NULL UNIQUE, 
-    user TEXT NOT NULL, 
-    time INTEGER NOT NULL,
-    names BLOB
-);
-CREATE INDEX index_dirs_path ON dirs(path);
-CREATE INDEX index_dirs_time ON dirs(time, user);
-CREATE INDEX index_dirs_user ON dirs(user, time);
-
-CREATE TABLE paths(
-    pid INTEGER PRIMARY KEY, 
-    did INTEGER NOT NULL,
-    path TEXT NOT NULL UNIQUE, 
-    user TEXT NOT NULL, 
-    time INTEGER NOT NULL, 
-    metadata BLOB,
-    FOREIGN KEY(did) REFERENCES dirs(did) ON DELETE CASCADE
-);
-CREATE INDEX index_paths_path ON paths(path);
-CREATE INDEX index_paths_time ON paths(time, user);
-CREATE INDEX index_paths_user ON paths(user, time);
-
-CREATE TABLE tokens(tid INTEGER PRIMARY KEY, token TEXT NOT NULL UNIQUE);
-CREATE INDEX index_tokens ON tokens(token);
-
-CREATE TABLE fields(fid INTEGER PRIMARY KEY, field TEXT NOT NULL UNIQUE);
-CREATE INDEX index_fields ON fields(field);
-
-CREATE TABLE links(pid INTEGER NOT NULL, fid INTEGER NOT NULL, tid INTEGER NOT NULL, FOREIGN KEY(pid) REFERENCES paths(pid) ON DELETE CASCADE, UNIQUE(pid, fid, tid));
-CREATE INDEX index_links ON links(tid, fid);
-`)
+            _, err = atx.Exec(createTableStatement())
             if err != nil {
-                return fmt.Errorf("failed to create table in %q; %w", path, err)
+                return fmt.Errorf("failed to create tables in %q; %w", path, err)
+            }
+
+            _, err = atx.Exec(createIndexStatement())
+            if err != nil {
+                return fmt.Errorf("failed to create indices in %q; %w", path, err)
+            }
+
+            _, err = atx.Exec("PRAGMA user_version = " + strconv.Itoa(latest_version))
+            if err != nil {
+                return fmt.Errorf("failed to set the latest version in %q; %w", path, err)
             }
 
             err = atx.Commit()
@@ -207,6 +259,72 @@ CREATE INDEX index_links ON links(tid, fid);
         if err != nil {
             os.Remove(path)
             return nil, fmt.Errorf("failed to create table in %q; %w", path, err)
+        }
+
+    } else {
+        err := func () error {
+            atx, err := createWriteTransaction(db)
+            if err != nil {
+                return fmt.Errorf("failed to prepare transaction for table setup; %w", err)
+            }
+            defer atx.Finish()
+
+            res := atx.QueryRow("PRAGMA user_version")
+            var version int
+            err = res.Scan(&version)
+            if err != nil {
+                if !errors.Is(err, sql.ErrNoRows) {
+                    return fmt.Errorf("failed to extract version; %w", err)
+                }
+                version = 0
+            }
+
+            if version < latest_version {
+                // Purging all existing (non-automatic) indices.
+                res, err := atx.Query("SELECT name FROM sqlite_master WHERE type == 'index' AND name NOT GLOB 'sqlite_autoindex_*'")
+                if err != nil {
+                    return fmt.Errorf("failed to identify all indices in the database; %w", err)
+                }
+
+                all_indices := []string{}
+                for res.Next() {
+                    var index_name string
+                    err := res.Scan(&index_name)
+                    if err != nil {
+                        return fmt.Errorf("failed to extract name of an index in the database; %w", err)
+                    }
+                    all_indices = append(all_indices, index_name)
+                }
+
+                for _, index_name := range all_indices {
+                    _, err = atx.Exec("DROP INDEX " + index_name)
+                    if err != nil {
+                        return fmt.Errorf("failed to remove index %q from the database; %w", index_name, err)
+                    }
+                }
+
+                // Adding the new indices.
+                _, err = atx.Exec(createIndexStatement())
+                if err != nil {
+                    return fmt.Errorf("failed to update indices in %q; %w", path, err)
+                }
+
+                _, err = atx.Exec("PRAGMA user_version = " + strconv.Itoa(latest_version))
+                if err != nil {
+                    return fmt.Errorf("failed to set the latest version in %q; %w", path, err)
+                }
+
+                err = atx.Commit()
+                if err != nil {
+                    return fmt.Errorf("failed to commit update commands for %s; %w", path, err)
+                }
+            }
+
+            return nil
+        }()
+
+        if err != nil {
+            return nil, fmt.Errorf("failed to update the database in %q; %w", path, err)
         }
     }
 

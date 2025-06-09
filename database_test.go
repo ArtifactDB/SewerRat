@@ -52,6 +52,16 @@ func TestInitializeDatabase(t *testing.T) {
         if !equalStringArrays(collected, []string{ "dirs", "fields", "links", "paths", "tokens" }) {
             t.Fatalf("not all tables were correctly initialized")
         }
+
+        ver_res := dbconn.QueryRow("PRAGMA user_version")
+        var version int
+        err = ver_res.Scan(&version)
+        if err != nil {
+            t.Fatalf("failed to extract version; %v", err)
+        }
+        if version != 1 {
+            t.Error("expected version 1 of the file")
+        }
     })
 
     // Checking that initializeDatabase doesn't wipe our existing information.
@@ -87,6 +97,72 @@ func TestInitializeDatabase(t *testing.T) {
         }
         if len(all_paths) != 1 {
             t.Fatalf("unexpected number of paths in the DB %v", all_paths)
+        }
+    })
+
+    // Checking that we auto-update the indices based on the version.
+    t.Run("updated", func(t *testing.T) {
+        dbpath2 := filepath.Join(tmp, "db2.sqlite3")
+
+        err := func() error {
+            db, err := sql.Open("sqlite", dbpath2) 
+            if err != nil {
+                return err
+            }
+            defer db.Close()
+
+            _, err = db.Exec(createTableStatement())
+            if err != nil {
+                return err
+            }
+
+            _, err = db.Exec("CREATE INDEX super_foo_bar ON dirs(path)")
+            if err != nil {
+                return err
+            }
+
+            _, err = db.Exec("CREATE INDEX ur_mom ON tokens(token)")
+            if err != nil {
+                return err
+            }
+
+            return nil
+        }()
+        if err != nil {
+            t.Fatal(err)
+        }
+
+        dbconn, err := initializeDatabase(dbpath2)
+        if err != nil {
+            t.Fatal(err)
+        }
+        defer dbconn.Close()
+
+        res, err := dbconn.Query("SELECT name FROM sqlite_master WHERE type == 'index'")
+        if err != nil {
+            t.Fatalf("failed to identify all indices in the database; %v", err)
+        }
+
+        all_indices := map[string]bool{}
+        for res.Next() {
+            var index_name string
+            err := res.Scan(&index_name)
+            if err != nil {
+                t.Fatalf("failed to extract name of an index in the database; %v", err)
+            }
+            all_indices[index_name] = true
+        }
+
+        for _, previous := range []string{ "super_foo_bar", "ur_mom" } {
+            if _, ok := all_indices[previous]; ok {
+                t.Errorf("existing index %q should have been deleted on update", previous)
+            }
+        }
+
+        for _, updated := range []string{ "index_dirs_path", "index_tokens" } {
+            if _, ok := all_indices[updated]; !ok {
+                t.Errorf("new index %q should have been added on update", updated)
+            }
         }
     })
 }
