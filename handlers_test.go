@@ -1877,7 +1877,7 @@ func TestListFieldsHandler(t *testing.T) {
                 }
             }
 
-            if !strings.Contains(r.Next, "scroll=") || !strings.Contains(r.Next, "limit=5") {
+            if !strings.Contains(r.Next, "scroll=") {
                 t.Errorf("expected a next string; %v", r) 
             }
             endpoint = r.Next
@@ -2058,7 +2058,7 @@ func TestListTokensHandler(t *testing.T) {
                 }
             }
 
-            if !strings.Contains(r.Next, "scroll=") || !strings.Contains(r.Next, "limit=5") {
+            if !strings.Contains(r.Next, "scroll=") {
                 t.Errorf("expected a next string; %v", r) 
             }
             endpoint = r.Next

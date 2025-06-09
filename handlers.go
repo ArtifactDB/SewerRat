@@ -493,7 +493,7 @@ func newQueryHandler(db *sql.DB, tokenizer *unicodeTokenizer, wild_tokenizer *un
                 "scroll",
                 strconv.FormatInt(last.Time, 10) + "," + strconv.FormatInt(last.Pid, 10),
                 params, 
-                []string{ "limit", "metadata", "translate" },
+                []string{ "metadata", "translate" },
             )
         }
 
@@ -748,7 +748,7 @@ func newListRegisteredDirectoriesHandler(db *sql.DB, endpoint string) func(http.
                 "scroll",
                 strconv.FormatInt(last.Time, 10) + "," + strconv.FormatInt(last.Did, 10),
                 params, 
-                []string { "user", "path_prefix", "within_path", "contains_path", "exists", "limit" },
+                []string { "user", "path_prefix", "within_path", "contains_path", "exists" },
             )
         }
 
@@ -795,7 +795,7 @@ func newListFieldsHandler(db *sql.DB, endpoint string) func(http.ResponseWriter,
                 "scroll",
                 output[options.PageLimit - 1].Field,
                 params,
-                []string { "pattern", "count", "limit" },
+                []string { "pattern", "count" },
             )
         }
 
@@ -845,7 +845,7 @@ func newListTokensHandler(db *sql.DB, endpoint string) func(http.ResponseWriter,
                 "scroll",
                 output[options.PageLimit - 1].Token,
                 params,
-                []string { "pattern", "field", "count", "limit" },
+                []string { "pattern", "field", "count" },
             )
         }
 
