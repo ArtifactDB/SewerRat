@@ -2924,13 +2924,14 @@ func TestListTokens(t *testing.T) {
             t.Fatal(err)
         }
 
-        expected := map[string]bool{ "aaron": false, "hoshino": false, "biyori": false }
+        found := map[string]bool{}
         increasing := true
         last := ""
         for _, x := range out {
-            _, ok := expected[x.Token]
-            if ok {
-                expected[x.Token] = true
+            if _, ok := found[x.Token]; ok {
+                t.Errorf("duplicate token returned %s", x.Token)
+            } else {
+                found[x.Token] = true
             }
             if last != "" && x.Token <= last {
                 increasing = false
@@ -2938,9 +2939,9 @@ func TestListTokens(t *testing.T) {
             last = x.Token
         }
 
-        for f, val := range expected {
-            if !val {
-                t.Errorf("failed to find '%s' in the tokens; %v", f, out)
+        for _, expected := range []string{ "aaron", "hoshino", "biyori" } {
+            if _, ok := found[expected]; !ok {
+                t.Errorf("failed to find '%s' in the tokens; %v", expected, out)
             }
         }
         if !increasing {
@@ -2955,17 +2956,14 @@ func TestListTokens(t *testing.T) {
             t.Fatal(err)
         }
 
-        expected := map[string]bool{ "akari": false, "yuru": false, "lamb": false }
-        expected_counts := map[string]int64{ "akari": 1, "yuru": 2, "lamb": 2 }
+        found := map[string]int64{}
         increasing := true
         last := ""
         for _, x := range out {
-            _, ok := expected[x.Token]
-            if ok {
-                if *(x.Count) != expected_counts[x.Token] {
-                    t.Errorf("expected a count of %d for %s, got %d instead", expected_counts[x.Token], x.Token, *(x.Count))
-                }
-                expected[x.Token] = true
+            if _, ok := found[x.Token]; ok {
+                t.Errorf("duplicate token %s", x.Token)
+            } else {
+                found[x.Token] = *(x.Count)
             }
             if last != "" && x.Token <= last {
                 increasing = false
@@ -2974,9 +2972,14 @@ func TestListTokens(t *testing.T) {
             last = x.Token
         }
 
-        for f, val := range expected {
-            if !val {
-                t.Errorf("failed to find '%s' in the tokens; %v", f, out)
+        expected := map[string]int64{ "akari": 1, "yuru": 2, "lamb": 2 }
+        for tok, val := range expected {
+            n, ok := found[tok]
+            if !ok {
+                t.Errorf("failed to find '%s' in the tokens; %v", tok, out)
+            }
+            if n != val {
+                t.Errorf("expected a count of %d for %s, got %d instead", val, tok, n)
             }
         }
         if !increasing {
@@ -2991,17 +2994,17 @@ func TestListTokens(t *testing.T) {
             t.Fatal(err)
         }
 
-        // Page limit works as expected.
-        expected := map[string]bool{}
+        // Page limit works as found.
+        found := map[string]bool{}
         if len(out) != 2 {
-            t.Error("expected exactly two tokens when limiting to 2")
+            t.Error("found exactly two tokens when limiting to 2")
         }
         for _, x := range out {
-            expected[x.Token] = true
+            found[x.Token] = true
         }
         for _, token := range []string{ "1", "10495" } {
-            if _, ok := expected[token]; !ok {
-                t.Errorf("expected the '%s' token; %v", token, expected)
+            if _, ok := found[token]; !ok {
+                t.Errorf("found the '%s' token; %v", token, found)
             }
         }
 
@@ -3012,18 +3015,18 @@ func TestListTokens(t *testing.T) {
             t.Fatal(err)
         }
         if len(out) != 2 {
-            t.Error("expected exactly two tokens when limiting to 2")
+            t.Error("found exactly two tokens when limiting to 2")
         }
         for _, x := range out {
-            _, ok := expected[x.Token]
+            _, ok := found[x.Token]
             if ok {
-                t.Error("unexpected duplicate token")
+                t.Error("unfound duplicate token")
             }
-            expected[x.Token] = true
+            found[x.Token] = true
         }
         for _, token := range []string{ "5", "a" } {
-            if _, ok := expected[token]; !ok {
-                t.Errorf("expected the '%s' token; %v", token, expected)
+            if _, ok := found[token]; !ok {
+                t.Errorf("found the '%s' token; %v", token, found)
             }
         }
 
@@ -3035,21 +3038,21 @@ func TestListTokens(t *testing.T) {
             t.Fatal(err)
         }
         if len(out) != 2 {
-            t.Error("expected exactly two tokens when limiting to 2")
+            t.Error("found exactly two tokens when limiting to 2")
         }
         for _, x := range out {
-            _, ok := expected[x.Token]
+            _, ok := found[x.Token]
             if ok {
-                t.Errorf("unexpected duplicate token; %v", x.Token)
+                t.Errorf("unfound duplicate token; %v", x.Token)
             }
             if *(x.Count) != 1 {
-                t.Errorf("expected a count of 1 for %s, got %d instead", x.Token, *(x.Count))
+                t.Errorf("found a count of 1 for %s, got %d instead", x.Token, *(x.Count))
             }
-            expected[x.Token] = true
+            found[x.Token] = true
         }
         for _, token := range []string{ "aaron", "akari" } {
-            if _, ok := expected[token]; !ok {
-                t.Errorf("expected the '%s' token; %v", token, expected)
+            if _, ok := found[token]; !ok {
+                t.Errorf("found the '%s' token; %v", token, found)
             }
         }
     })
@@ -3062,99 +3065,104 @@ func TestListTokens(t *testing.T) {
             t.Fatal(err)
         }
 
-        expected := map[string]bool{ "aaron": false, "akari": false, "akaza": false }
-        for _, x := range out {
-            if _, ok := expected[x.Token]; !ok {
-                t.Errorf("unexpected field after pattern restriction %v", x.Token)
-            }
-            expected[x.Token] = true
+        expected := []string{ "aaron", "akari", "akaza" }
+        if len(out) != len(expected) {
+            t.Fatalf("unexpected length of output %v", out)
         }
-        for f, val := range expected {
-            if !val {
-                t.Errorf("failed to find '%s' in the tokens; %v", f, out)
+        for i, x := range out {
+            if x.Token != expected[i] {
+                t.Errorf("unexpected field after pattern restriction %v", x.Token)
             }
         }
 
         // Works in conjunction with count = true.
         options.Count = true
         out, err = listTokens(dbconn, options)
-        expected = map[string]bool{ "aaron": false, "akari": false, "akaza": false }
-        for _, x := range out {
-            _, ok := expected[x.Token]
-            if !ok {
+        for i, x := range out {
+            if x.Token != expected[i] {
                 t.Errorf("unexpected field after pattern restriction %v", x.Token)
             }
             if *(x.Count) != 1 {
                 t.Errorf("expected a count of 1 for %s, got %d instead", x.Token, *(x.Count))
-            }
-            expected[x.Token] = true
-        }
-        for f, val := range expected {
-            if !val {
-                t.Errorf("failed to find '%s' in the tokens; %v", f, out)
             }
         }
     })
 
     t.Run("field", func (t *testing.T) {
-        // Trying with a wildcard field.
-        field := "characters*"
-        options := listTokensOptions{ Field: &field }
-        out, err := listTokens(dbconn, options)
-        if err != nil {
-            t.Fatal(err)
-        }
-        expected := map[string]bool{ "akari": false, "akaza": false, "hoshino": false, "kyouko": false }
-        for _, x := range out {
-            if _, ok := expected[x.Token]; !ok {
-                t.Errorf("unexpected field after field restriction %v", x.Token)
+        t.Run("wildcard", func(t *testing.T) {
+            field := "characters*"
+            options := listTokensOptions{ Field: &field }
+            out, err := listTokens(dbconn, options)
+            if err != nil {
+                t.Fatal(err)
             }
-            expected[x.Token] = true
-        }
-        for f, val := range expected {
-            if !val {
-                t.Errorf("failed to find '%s' in the tokens; %v", f, out)
+            expected := []string{ "akari", "akaza", "hoshino", "kyouko" }
+            if len(out) != len(expected) {
+                t.Fatalf("unexpected length of output %v", out)
             }
-        }
+            for i, x := range out {
+                if x.Token != expected[i] {
+                    t.Errorf("unexpected field after pattern restriction %v", x.Token)
+                }
+            }
+        })
 
-        // Trying without a wildcard.
-        field = "characters.first"
-        options.Field = &field
-        out, err = listTokens(dbconn, options)
-        if err != nil {
-            t.Fatal(err)
-        }
-        expected = map[string]bool{ "akari": false, "hoshino": false }
-        for _, x := range out {
-            if _, ok := expected[x.Token]; !ok {
-                t.Errorf("unexpected field after field restriction %v", x.Token)
+        t.Run("no wildcard", func(t *testing.T) {
+            field := "characters.first"
+            options := listTokensOptions{ Field: &field }
+            out, err := listTokens(dbconn, options)
+            if err != nil {
+                t.Fatal(err)
             }
-            expected[x.Token] = true
-        }
-        for f, val := range expected {
-            if !val {
-                t.Errorf("failed to find '%s' in the tokens; %v", f, out)
+            expected := []string{ "akari", "hoshino" }
+            if len(out) != len(expected) {
+                t.Fatalf("unexpected length of output %v", out)
             }
-        }
+            for i, x := range out {
+                if x.Token != expected[i] {
+                    t.Errorf("unexpected field after pattern restriction %v", x.Token)
+                }
+            }
+        })
 
-        // Works in conjunction with count = true.
-        options.Count = true
-        out, err = listTokens(dbconn, options)
-        expected = map[string]bool{ "akari": false, "hoshino": false }
-        for _, x := range out {
-            _, ok := expected[x.Token]
-            if !ok {
-                t.Errorf("unexpected field after pattern restriction %v", x.Token)
+        t.Run("count", func(t *testing.T) {
+            field := "characters*"
+            options := listTokensOptions{ Field: &field, Count: true }
+            out, err := listTokens(dbconn, options)
+            if err != nil {
+                t.Fatal(err)
             }
-            if *(x.Count) != 1 {
-                t.Errorf("expected a count of 1 for %s, got %d instead", x.Token, *(x.Count))
+            expected := []string{ "akari", "akaza", "hoshino", "kyouko" }
+            if len(out) != len(expected) {
+                t.Fatalf("unexpected length of output %v", out)
             }
-            expected[x.Token] = true
-        }
-        for f, val := range expected {
-            if !val {
-                t.Errorf("failed to find '%s' in the tokens; %v", f, out)
+            for i, x := range out {
+                if x.Token != expected[i] {
+                    t.Errorf("unexpected field after pattern restriction %v", x.Token)
+                }
+                if *(x.Count) != 1 {
+                    t.Errorf("expected a count of 1 for %s, got %d instead", x.Token, *(x.Count))
+                }
             }
-        }
+        })
+
+        t.Run("multiple options", func(t *testing.T) {
+            field := "*a*i*e" // match 'anime' and 'favorites'
+            pattern := "yuru*" // match yuru only
+            options := listTokensOptions{ Field: &field, Pattern: &pattern } // multiple WHERE conditions being applied here.
+            out, err := listTokens(dbconn, options)
+            if err != nil {
+                t.Fatal(err)
+            }
+            expected := []string{ "yuru" } // check that 'yuru' only appears once, despite the inner join.
+            if len(out) != len(expected) {
+                t.Fatalf("unexpected length of output %v", out)
+            }
+            for i, x := range out {
+                if x.Token != expected[i] {
+                    t.Errorf("unexpected field after pattern restriction %v", x.Token)
+                }
+            }
+        })
     })
 }

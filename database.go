@@ -1387,11 +1387,11 @@ func listTokens(db *sql.DB, options listTokensOptions) ([]listTokensResult, erro
 
     if options.Count || options.Field != nil {
         extra_before += " INNER JOIN links ON links.tid = tokens.tid"
+        extra_after += " GROUP BY links.tid" // Avoid duplicates if the inner join is performed.
     }
 
     if options.Count {
         outputs = append(outputs, "COUNT(DISTINCT links.pid)")
-        extra_after += " GROUP BY links.tid"
     }
 
     if options.Field != nil {
@@ -1400,7 +1400,8 @@ func listTokens(db *sql.DB, options listTokensOptions) ([]listTokensResult, erro
         if strings.Contains(field, "?") || strings.Contains(field, "*") {
             action = "GLOB"
         }
-        extra_before += " INNER JOIN fields ON links.fid = fields.fid WHERE fields.field " + action + " ?"
+        extra_before += " INNER JOIN fields ON links.fid = fields.fid"
+        filters = append(filters, "fields.field " + action + " ?")
         parameters = append(parameters, field)
     }
 
