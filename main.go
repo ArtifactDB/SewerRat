@@ -8,6 +8,7 @@ import (
     "strconv"
     "fmt"
     "os"
+    "context"
 )
 
 func main() {
@@ -116,9 +117,10 @@ func main() {
         ticker := time.NewTicker(time.Duration(*update0) * time.Hour)
         defer ticker.Stop()
         go func() {
+            ctx := context.Background()
             for {
                 <-ticker.C
-                fails, err := updateDirectories(db, tokenizer, add_options)
+                fails, err := updateDirectories(tokenizer, db, ctx, add_options)
                 if err != nil {
                     log.Printf("[ERROR] failed to update directories; %v\n", err.Error())
                 } else {
@@ -141,16 +143,17 @@ func main() {
 
         go func() {
             time.Sleep(time.Hour * 12) // start at a different cycle from the path updates.
+            ctx := context.Background()
             for {
                 <-ticker.C
 
-                err := cleanDatabase(db)
+                err := cleanDatabase(db, ctx)
                 if err != nil {
                     log.Printf("[ERROR] failed to clean up the database; %v\n", err)
                     continue
                 }
 
-                err = backupDatabase(db, bpath)
+                err = backupDatabase(bpath, db, ctx)
                 if err != nil {
                     log.Printf("[ERROR] failed to back up database; %v\n", err)
                 }

@@ -72,8 +72,7 @@ func (wt * writeTransaction) QueryRow(query string, args ...any) *sql.Row {
     return wt.Conn.QueryRowContext(wt.Ctx, query, args...)
 }
 
-func createWriteTransaction(db *sql.DB) (*writeTransaction, error) {
-    ctx := context.Background()
+func createWriteTransaction(db *sql.DB, ctx context.Context) (*writeTransaction, error) {
     success := false
 
     // We acquire a connection to run all of the pragmas. We don't know whether
@@ -227,7 +226,7 @@ func initializeDatabase(path string) (*sql.DB, error) {
 
     if (!accessible) {
         err := func () error {
-            atx, err := createWriteTransaction(db)
+            atx, err := createWriteTransaction(db, context.Background())
             if err != nil {
                 return fmt.Errorf("failed to prepare transaction for table setup; %w", err)
             }
@@ -263,7 +262,7 @@ func initializeDatabase(path string) (*sql.DB, error) {
 
     } else {
         err := func () error {
-            atx, err := createWriteTransaction(db)
+            atx, err := createWriteTransaction(db, context.Background())
             if err != nil {
                 return fmt.Errorf("failed to prepare transaction for table setup; %w", err)
             }
@@ -401,18 +400,18 @@ func newInsertStatements(tx *writeTransaction) (*insertStatements, error) {
 
 /**********************************************************************/
 
-func processToken(path string, pid int64, field, token string, prepped *insertStatements) error {
-    _, err := prepped.Token.Exec(token)
+func processToken(path string, pid int64, field, token string, prepped *insertStatements, ctx context.Context) error {
+    _, err := prepped.Token.ExecContext(ctx, token)
     if err != nil {
         return fmt.Errorf("failed to insert token %q from %q; %w", token, path, err)
     }
 
-    _, err = prepped.Field.Exec(field)
+    _, err = prepped.Field.ExecContext(ctx, field)
     if err != nil {
         return fmt.Errorf("failed to insert field %q from %q; %w", field, path, err)
     }
 
-    _, err = prepped.Link.Exec(pid, field, token)
+    _, err = prepped.Link.ExecContext(ctx, pid, field, token)
     if err != nil {
         return fmt.Errorf("failed to insert link for field %q to token %q from %q; %w", field, token, path, err)
     }
@@ -421,13 +420,13 @@ func processToken(path string, pid int64, field, token string, prepped *insertSt
 }
 
 // Recurse through the metadata structure to disassemble the tokens.
-func tokenizeMetadata(parsed interface{}, path string, pid int64, field string, prepped *insertStatements, tokenizer *unicodeTokenizer) []string {
+func tokenizeMetadata(parsed interface{}, path string, pid int64, field string, tokenizer *unicodeTokenizer, prepped *insertStatements, ctx context.Context) []string {
     failures := []string{}
 
     switch v := parsed.(type) {
     case []interface{}:
         for _, w := range v {
-            tokfails := tokenizeMetadata(w, path, pid, field, prepped, tokenizer)
+            tokfails := tokenizeMetadata(w, path, pid, field, tokenizer, prepped, ctx)
             failures = append(failures, tokfails...)
         }
 
@@ -437,7 +436,7 @@ func tokenizeMetadata(parsed interface{}, path string, pid int64, field string, 
             if field != "" {
                 new_field = field + "." + k
             }
-            tokfails := tokenizeMetadata(w, path, pid, new_field, prepped, tokenizer)
+            tokfails := tokenizeMetadata(w, path, pid, new_field, tokenizer, prepped, ctx)
             failures = append(failures, tokfails...)
         }
 
@@ -452,19 +451,19 @@ func tokenizeMetadata(parsed interface{}, path string, pid int64, field string, 
         }
 
         for _, t := range tokens {
-            _, err := prepped.Token.Exec(t)
+            _, err := prepped.Token.ExecContext(ctx, t)
             if err != nil {
                 failures = append(failures, fmt.Sprintf("failed to insert token %q from %q; %v", t, path, err))
                 continue
             }
 
-            _, err = prepped.Field.Exec(field)
+            _, err = prepped.Field.ExecContext(ctx, field)
             if err != nil {
                 failures = append(failures, fmt.Sprintf("failed to insert field %q from %q; %v", field, path, err))
                 continue
             }
 
-            _, err = prepped.Link.Exec(pid, field, t)
+            _, err = prepped.Link.ExecContext(ctx, pid, field, t)
             if err != nil {
                 failures = append(failures, fmt.Sprintf("failed to insert link for field %q to token %q from %q; %v", field, t, path, err))
                 continue
@@ -478,7 +477,7 @@ func tokenizeMetadata(parsed interface{}, path string, pid int64, field string, 
         }
 
         for _, t := range tokens {
-            err = processToken(path, pid, field, t, prepped)
+            err := processToken(path, pid, field, t, prepped, ctx)
             if err != nil {
                 failures = append(failures, err.Error())
                 continue
@@ -493,19 +492,19 @@ func tokenizeMetadata(parsed interface{}, path string, pid int64, field string, 
             t = "false"
         }
 
-        _, err := prepped.Token.Exec(t)
+        _, err := prepped.Token.ExecContext(ctx, t)
         if err != nil {
             failures = append(failures, fmt.Sprintf("failed to insert token %q from %q; %v", t, path, err))
             break
         }
 
-        _, err = prepped.Field.Exec(field)
+        _, err = prepped.Field.ExecContext(ctx, field)
         if err != nil {
             failures = append(failures, fmt.Sprintf("failed to insert field %q from %q; %v", field, path, err))
             break
         }
 
-        _, err = prepped.Link.Exec(pid, field, t)
+        _, err = prepped.Link.ExecContext(ctx, pid, field, t)
         if err != nil {
             failures = append(failures, fmt.Sprintf("failed to insert link for field %q to token %q from %q; %v", field, t, path, err))
             break
@@ -515,7 +514,7 @@ func tokenizeMetadata(parsed interface{}, path string, pid int64, field string, 
     return failures
 }
 
-func tokenizePath(path string, pid int64, field string, prepped *insertStatements, tokenizer *unicodeTokenizer) []string {
+func tokenizePath(path string, pid int64, field string, tokenizer *unicodeTokenizer, prepped *insertStatements, ctx context.Context) []string {
     tokens, err := tokenizer.Tokenize(path)
     if err != nil {
         return []string{ fmt.Sprintf("failed to tokenize path %q; %v", path, err) }
@@ -523,7 +522,7 @@ func tokenizePath(path string, pid int64, field string, prepped *insertStatement
 
     failures := []string{}
     for _, t := range tokens {
-        err = processToken(path, pid, field, t, prepped)
+        err := processToken(path, pid, field, t, prepped, ctx)
         if err != nil {
             failures = append(failures, err.Error())
             continue
@@ -535,8 +534,8 @@ func tokenizePath(path string, pid int64, field string, prepped *insertStatement
 
 /**********************************************************************/
 
-func deleteDirectory(db *sql.DB, directory string) error {
-    atx, err := createWriteTransaction(db)
+func deleteDirectory(directory string, db *sql.DB, ctx context.Context) error {
+    atx, err := createWriteTransaction(db, ctx)
     if err != nil {
         return fmt.Errorf("failed to prepare transaction for deletion; %w", err)
     }
@@ -562,7 +561,7 @@ type FileInfoWithPath struct {
     Info fs.FileInfo
 }
 
-func compareToExistingPaths(tx *writeTransaction, did int64, all_paths map[string]fs.FileInfo) ([]*FileInfoWithPath, []*FileInfoWithPath, []string, error) {
+func compareToExistingPaths(did int64, all_paths map[string]fs.FileInfo, tx *writeTransaction) ([]*FileInfoWithPath, []*FileInfoWithPath, []string, error) {
     rows, err := tx.Query("SELECT path, time from paths WHERE did = ?", did) 
     if err != nil {
         return nil, nil, nil, fmt.Errorf("failed to query the 'paths' table; %w", err)
@@ -578,6 +577,10 @@ func compareToExistingPaths(tx *writeTransaction, did int64, all_paths map[strin
         var time int64
         if err := rows.Scan(&path, &time); err != nil {
             return nil, nil, nil, fmt.Errorf("failed to traverse rows of the 'paths' table; %w", err)
+        }
+
+        if err := tx.Ctx.Err(); err != nil {
+            return nil, nil, nil, fmt.Errorf("request canceled while comparing paths; %w", err)
         }
 
         candidate, ok := all_paths[path]
@@ -611,15 +614,15 @@ type addDirectoryContentsOptions struct {
     LinkWhitelist linkWhitelist
 }
 
-func addDirectoryContents(tx *writeTransaction, path string, did int64, base_names []string, tokenizer* unicodeTokenizer, options *addDirectoryContentsOptions) ([]string, error) {
+func addDirectoryContents(path string, did int64, base_names []string, tokenizer* unicodeTokenizer, tx *writeTransaction, options *addDirectoryContentsOptions) ([]string, error) {
     all_failures := []string{}
 
-    dir_contents, dir_failures := listMetadata(path, base_names, options.LinkWhitelist)
+    dir_contents, dir_failures := listMetadata(path, base_names, options.LinkWhitelist, tx.Ctx)
     all_failures = append(all_failures, dir_failures...)
 
-    new_paths, update_paths, purge_paths, err := compareToExistingPaths(tx, did, dir_contents)
+    new_paths, update_paths, purge_paths, err := compareToExistingPaths(did, dir_contents, tx)
     if err != nil {
-        return nil, err
+        return nil, fmt.Errorf("path comparisons failed for %q; %w", path, err)
     }
 
     // Loading the metadata into memory; we use a thread pool to avoid opening too many file handles at once.
@@ -635,10 +638,16 @@ func addDirectoryContents(tx *writeTransaction, path string, did int64, base_nam
             go func() {
                 defer wg.Done()
                 for i := range ichannel {
+                    if tx.Ctx.Err() != nil {
+                        continue // don't break; we make sure to empty 'ichannel' so that we don't deadlock trying to put stuff in 'ichannel' below.
+                    }
                     e := new_paths[i]
                     new_assets[i] = loadMetadata(e.Path, e.Info)
                 }
                 for i := range uchannel {
+                    if tx.Ctx.Err() != nil {
+                        continue // see above.
+                    }
                     e := update_paths[i]
                     update_assets[i] = loadMetadata(e.Path, e.Info)
                 }
@@ -657,6 +666,10 @@ func addDirectoryContents(tx *writeTransaction, path string, did int64, base_nam
         wg.Wait()
     }
 
+    if err := tx.Ctx.Err(); err != nil {
+        return nil, fmt.Errorf("request canceled while adding contents of %q; %w", path, err)
+    }
+
     token_stmts, err := newInsertStatements(tx)
     if err != nil {
         return nil, fmt.Errorf("failed to prepare token insertion statements for the update; %w", err)
@@ -671,23 +684,27 @@ func addDirectoryContents(tx *writeTransaction, path string, did int64, base_nam
         defer new_stmt.Close()
 
         for _, loaded := range new_assets {
+            if err := tx.Ctx.Err(); err != nil {
+                return nil, fmt.Errorf("request canceled while adding %q; %w", loaded.Path, err)
+            }
+
             if loaded.Failure != nil {
                 all_failures = append(all_failures, loaded.Failure.Error())
                 continue
             }
 
             var pid int64
-            err := new_stmt.QueryRow(loaded.Path, did, loaded.User, loaded.Time.Unix(), loaded.Raw).Scan(&pid)
+            err := new_stmt.QueryRowContext(tx.Ctx, loaded.Path, did, loaded.User, loaded.Time.Unix(), loaded.Raw).Scan(&pid)
             if err != nil {
                 all_failures = append(all_failures, fmt.Sprintf("failed to insert %q into the database; %v", loaded.Path, err))
                 continue
             }
 
-            tokfails := tokenizeMetadata(loaded.Parsed, loaded.Path, pid, "", token_stmts, tokenizer)
+            tokfails := tokenizeMetadata(loaded.Parsed, loaded.Path, pid, "", tokenizer, token_stmts, tx.Ctx)
             all_failures = append(all_failures, tokfails...)
 
             if options.PathField != "" {
-                tokfails = tokenizePath(loaded.Path, pid, options.PathField, token_stmts, tokenizer)
+                tokfails = tokenizePath(loaded.Path, pid, options.PathField, tokenizer, token_stmts, tx.Ctx)
                 all_failures = append(all_failures, tokfails...)
             }
         }
@@ -713,6 +730,10 @@ func addDirectoryContents(tx *writeTransaction, path string, did int64, base_nam
         defer dellnk_stmt.Close()
 
         for _, loaded := range update_assets {
+            if err := tx.Ctx.Err(); err != nil {
+                return nil, fmt.Errorf("request canceled while updating %q; %w", loaded.Path, err)
+            }
+
             if loaded.Failure != nil {
                 purge_paths = append(purge_paths, loaded.Path)
                 all_failures = append(all_failures, loaded.Failure.Error())
@@ -720,30 +741,30 @@ func addDirectoryContents(tx *writeTransaction, path string, did int64, base_nam
             }
 
             var pid int64
-            _, err := update_stmt.Exec(loaded.User, loaded.Time.Unix(), loaded.Raw, loaded.Path)
+            _, err := update_stmt.ExecContext(tx.Ctx, loaded.User, loaded.Time.Unix(), loaded.Raw, loaded.Path)
             if err != nil {
                 all_failures = append(all_failures, fmt.Sprintf("failed to update %q in the database; %v", loaded.Path, err))
                 continue
             }
 
-            err = pid_stmt.QueryRow(loaded.Path).Scan(&pid)
+            err = pid_stmt.QueryRowContext(tx.Ctx, loaded.Path).Scan(&pid)
             if err != nil {
                 all_failures = append(all_failures, fmt.Sprintf("failed to inspect path ID for %q; %v", loaded.Path, err))
                 continue
             }
 
-            _, err = dellnk_stmt.Exec(pid)
+            _, err = dellnk_stmt.ExecContext(tx.Ctx, pid)
             if err != nil {
                 all_failures = append(all_failures, fmt.Sprintf("failed to delete links for %q; %v", loaded.Path, err))
                 continue
             }
 
-            tokfails := tokenizeMetadata(loaded.Parsed, loaded.Path, pid, "", token_stmts, tokenizer)
+            tokfails := tokenizeMetadata(loaded.Parsed, loaded.Path, pid, "", tokenizer, token_stmts, tx.Ctx)
             all_failures = append(all_failures, tokfails...)
 
             if options.PathField != "" {
-                tokfails = tokenizePath(loaded.Path, pid, options.PathField, token_stmts, tokenizer)
-                all_failures = append(all_failures, tokfails...)
+                ptokfails := tokenizePath(loaded.Path, pid, options.PathField, tokenizer, token_stmts, tx.Ctx)
+                all_failures = append(all_failures, ptokfails...)
             }
         }
     }
@@ -756,7 +777,11 @@ func addDirectoryContents(tx *writeTransaction, path string, did int64, base_nam
         defer del_stmt.Close()
 
         for _, x := range purge_paths {
-            _, err := del_stmt.Exec(x)
+            if err := tx.Ctx.Err(); err != nil {
+                return nil, fmt.Errorf("request canceled while deleting %q; %w", x, err)
+            }
+
+            _, err := del_stmt.ExecContext(tx.Ctx, x)
             if err != nil {
                 all_failures = append(all_failures, fmt.Sprintf("failed to purge path %q from the database; %v", x, err))
             }
@@ -768,13 +793,13 @@ func addDirectoryContents(tx *writeTransaction, path string, did int64, base_nam
 
 /**********************************************************************/
 
-func addNewDirectory(db *sql.DB, path string, base_names []string, user string, tokenizer* unicodeTokenizer, options *addDirectoryContentsOptions) ([]string, error) {
+func addNewDirectory(path string, base_names []string, user string, tokenizer* unicodeTokenizer, db *sql.DB, ctx context.Context, options *addDirectoryContentsOptions) ([]string, error) {
     b, err := json.Marshal(base_names)
     if err != nil {
         return nil, fmt.Errorf("failed to encode names as JSON; %w", err)
     }
 
-    atx, err := createWriteTransaction(db)
+    atx, err := createWriteTransaction(db, ctx)
     if err != nil {
         return nil, fmt.Errorf("failed to prepare transaction for adding a new directory; %w", err)
     }
@@ -806,7 +831,7 @@ func addNewDirectory(db *sql.DB, path string, base_names []string, user string, 
         return nil, fmt.Errorf("failed to insert new directory; %w", err)
     }
 
-    failures, err := addDirectoryContents(atx, path, did, base_names, tokenizer, options)
+    failures, err := addDirectoryContents(path, did, base_names, tokenizer, atx, options)
     if err != nil {
         return nil, err
     }
@@ -836,6 +861,10 @@ func listDirectories(tx *writeTransaction) ([]*registeredDirectory, error) {
 
     all_dirs := []*registeredDirectory{}
     for rows.Next() {
+        if err := tx.Ctx.Err(); err != nil {
+            return nil, fmt.Errorf("request canceled while listing directories; %w", err)
+        }
+
         var id int64
         var path string
         var names_raw []byte
@@ -844,7 +873,7 @@ func listDirectories(tx *writeTransaction) ([]*registeredDirectory, error) {
         }
 
         var names []string
-        err = json.Unmarshal(names_raw, &names)
+        err := json.Unmarshal(names_raw, &names)
         if err != nil {
             return nil, fmt.Errorf("failed to parse names of 'dirs' for %q; %w", path, err)
         }
@@ -855,8 +884,8 @@ func listDirectories(tx *writeTransaction) ([]*registeredDirectory, error) {
     return all_dirs, nil
 }
 
-func updateDirectories(db *sql.DB, tokenizer *unicodeTokenizer, options *addDirectoryContentsOptions) ([]string, error) {
-    atx, err := createWriteTransaction(db)
+func updateDirectories(tokenizer *unicodeTokenizer, db *sql.DB, ctx context.Context, options *addDirectoryContentsOptions) ([]string, error) {
+    atx, err := createWriteTransaction(db, ctx)
     if err != nil {
         return nil, fmt.Errorf("failed to prepare transaction for update; %w", err)
     }
@@ -869,7 +898,10 @@ func updateDirectories(db *sql.DB, tokenizer *unicodeTokenizer, options *addDire
 
     all_failures := []string{}
     for _, d := range all_dirs {
-        curfailures, err := addDirectoryContents(atx, d.Path, d.Id, d.Names, tokenizer, options)
+        if err := ctx.Err(); err != nil {
+            return nil, fmt.Errorf("request canceled while updating directory %q; %w", d.Path, err)
+        }
+        curfailures, err := addDirectoryContents(d.Path, d.Id, d.Names, tokenizer, atx, options)
         if err != nil {
             return nil, err
         }
@@ -892,8 +924,8 @@ func updateDirectories(db *sql.DB, tokenizer *unicodeTokenizer, options *addDire
 
 /**********************************************************************/
 
-func removeUnusedTerms(db *sql.DB) error {
-    atx, err := createWriteTransaction(db)
+func removeUnusedTerms(db *sql.DB, ctx context.Context) error {
+    atx, err := createWriteTransaction(db, ctx)
     if err != nil {
         return fmt.Errorf("failed to prepare transaction for deletion; %w", err)
     }
@@ -917,19 +949,19 @@ func removeUnusedTerms(db *sql.DB) error {
     return nil
 }
 
-func cleanDatabase(db *sql.DB) error {
-    err := removeUnusedTerms(db)
+func cleanDatabase(db *sql.DB, ctx context.Context) error {
+    err := removeUnusedTerms(db, ctx)
     if err != nil {
         return err
     }
-    _, err = db.Exec("VACUUM")
+    _, err = db.ExecContext(ctx, "VACUUM")
     if err != nil {
         return fmt.Errorf("failed to vacuum the database; %w", err)
     }
     return nil
 }
 
-func backupDatabase(db *sql.DB, path string) error {
+func backupDatabase(path string, db *sql.DB, ctx context.Context) error {
     var existing bool
     _, err := os.Lstat(path)
     if err == nil {
@@ -944,7 +976,7 @@ func backupDatabase(db *sql.DB, path string) error {
         return fmt.Errorf("failed to inspect the backup database; %w", err) 
     }
 
-    _, err = db.Exec("VACUUM INTO ?", path)
+    _, err = db.ExecContext(ctx, "VACUUM INTO ?", path)
     if err != nil {
         all_errors := []error{ fmt.Errorf("failed to create a backup database; %w", err) }
         if existing {
@@ -996,7 +1028,7 @@ type queryResult struct {
     Metadata json.RawMessage `json:"metadata,omitempty"`
 }
 
-func queryTokens(db * sql.DB, query *searchClause, options queryOptions) ([]queryResult, error) {
+func queryTokens(query *searchClause, db * sql.DB, ctx context.Context, options queryOptions) ([]queryResult, error) {
     full := "SELECT paths.pid, paths.path, paths.user, paths.time"
     if options.IncludeMetadata {
         full += ", json_extract(paths.metadata, '$')"
@@ -1029,7 +1061,7 @@ func queryTokens(db * sql.DB, query *searchClause, options queryOptions) ([]quer
         full += " LIMIT " + strconv.Itoa(options.PageLimit)
     }
 
-    rows, err := db.Query(full, parameters...)
+    rows, err := db.QueryContext(ctx, full, parameters...)
     if err != nil {
         return nil, fmt.Errorf("failed to perform query; %w", err)
     }
@@ -1037,6 +1069,10 @@ func queryTokens(db * sql.DB, query *searchClause, options queryOptions) ([]quer
 
     output := []queryResult{}
     for rows.Next() {
+        if err := ctx.Err(); err != nil {
+            return nil, fmt.Errorf("request canceled while scanning query results; %w", err)
+        }
+
         var pid int64
         var path string
         var user string
@@ -1065,7 +1101,7 @@ func queryTokens(db * sql.DB, query *searchClause, options queryOptions) ([]quer
 
 /**********************************************************************/
 
-func retrievePath(db * sql.DB, path string, include_metadata bool) (*queryResult, error) {
+func retrievePath(path string, include_metadata bool, db * sql.DB, ctx context.Context) (*queryResult, error) {
     hot := ""
     if include_metadata {
         hot = ", json_extract(paths.metadata, '$')"
@@ -1078,7 +1114,7 @@ func retrievePath(db * sql.DB, path string, include_metadata bool) (*queryResult
     var metadata string
 
     var err error
-    row := db.QueryRow(full, path)
+    row := db.QueryRowContext(ctx, full, path)
     if include_metadata {
         err = row.Scan(&user, &time, &metadata)
     } else {
@@ -1126,7 +1162,7 @@ type listRegisteredDirectoriesResult struct {
     Names json.RawMessage `json:"names"`
 }
 
-func listRegisteredDirectories(db *sql.DB, options listRegisteredDirectoriesOptions) ([]listRegisteredDirectoriesResult, error) {
+func listRegisteredDirectories(db *sql.DB, ctx context.Context, options listRegisteredDirectoriesOptions) ([]listRegisteredDirectoriesResult, error) {
     q := "SELECT did, path, user, time, json_extract(names, '$') FROM dirs"
 
     filters := []string{}
@@ -1179,7 +1215,7 @@ func listRegisteredDirectories(db *sql.DB, options listRegisteredDirectoriesOpti
     }
     check_exists := only_exists || only_nonexists
 
-    rows, err := db.Query(q, parameters...)
+    rows, err := db.QueryContext(ctx, q, parameters...)
     if err != nil {
         return nil, fmt.Errorf("failed to list registered directories; %w", err)
     }
@@ -1187,6 +1223,10 @@ func listRegisteredDirectories(db *sql.DB, options listRegisteredDirectoriesOpti
 
     output := []listRegisteredDirectoriesResult{}
     for rows.Next() {
+        if err := ctx.Err(); err != nil {
+            return nil, fmt.Errorf("request canceled while scanning directory listing; %w", err)
+        }
+
         current := listRegisteredDirectoriesResult{}
 
         var names string
@@ -1238,7 +1278,7 @@ func getParentPaths(path string) ([]interface{}, error) {
     return collected, nil
 }
 
-func isDirectoryRegistered(db * sql.DB, path string) (bool, error) {
+func isDirectoryRegistered(path string, db * sql.DB, ctx context.Context) (bool, error) {
     collected, err := getParentPaths(path)
     if err != nil {
         return false, err
@@ -1253,7 +1293,7 @@ func isDirectoryRegistered(db * sql.DB, path string) (bool, error) {
     }
 
     q := fmt.Sprintf("SELECT COUNT(1) FROM dirs WHERE path IN (%s)", query)
-    row := db.QueryRow(q, collected...)
+    row := db.QueryRowContext(ctx, q, collected...)
     var num int
     err = row.Scan(&num)
 
@@ -1263,8 +1303,8 @@ func isDirectoryRegistered(db * sql.DB, path string) (bool, error) {
     return num > 0, nil
 }
 
-func fetchRegisteredDirectoryNames(db *sql.DB, path string) ([]string, error) {
-    row := db.QueryRow("SELECT json_extract(names, '$') FROM dirs WHERE path = ?", path)
+func fetchRegisteredDirectoryNames(path string, db *sql.DB, ctx context.Context) ([]string, error) {
+    row := db.QueryRowContext(ctx, "SELECT json_extract(names, '$') FROM dirs WHERE path = ?", path)
     var names_as_str string
     err := row.Scan(&names_as_str) 
 
@@ -1301,7 +1341,7 @@ type listFieldsResult struct {
     Count *int64 `json:"count,omitempty"`
 }
 
-func listFields(db *sql.DB, options listFieldsOptions) ([]listFieldsResult, error) {
+func listFields(db *sql.DB, ctx context.Context, options listFieldsOptions) ([]listFieldsResult, error) {
     outputs := []string{ "field" }
     parameters := []interface{}{}
     filters := []string{}
@@ -1334,13 +1374,17 @@ func listFields(db *sql.DB, options listFieldsOptions) ([]listFieldsResult, erro
         query += " LIMIT " + strconv.Itoa(options.PageLimit)
     }
 
-    results, err := db.Query(query, parameters...)
+    results, err := db.QueryContext(ctx, query, parameters...)
     if err != nil {
         return nil, fmt.Errorf("failed to perform query; %w", err)
     }
 
     output := []listFieldsResult{}
     for results.Next() {
+        if err := ctx.Err(); err != nil {
+            return nil, fmt.Errorf("request canceled while scanning field listing; %w", err)
+        }
+
         current := listFieldsResult{}
         var err error
         if options.Count {
@@ -1378,7 +1422,7 @@ type listTokensResult struct {
     Count *int64 `json:"count,omitempty"`
 }
 
-func listTokens(db *sql.DB, options listTokensOptions) ([]listTokensResult, error) {
+func listTokens(db *sql.DB, ctx context.Context, options listTokensOptions) ([]listTokensResult, error) {
     outputs := []string{ "token" }
     parameters := []interface{}{}
     filters := []string{}
@@ -1425,13 +1469,17 @@ func listTokens(db *sql.DB, options listTokensOptions) ([]listTokensResult, erro
         query += " LIMIT " + strconv.Itoa(options.PageLimit)
     }
 
-    results, err := db.Query(query, parameters...)
+    results, err := db.QueryContext(ctx, query, parameters...)
     if err != nil {
         return nil, fmt.Errorf("failed to perform query; %w", err)
     }
 
     output := []listTokensResult{}
     for results.Next() {
+        if err := ctx.Err(); err != nil {
+            return nil, fmt.Errorf("request canceled while scanning token listing; %w", err)
+        }
+
         current := listTokensResult{}
         var err error
         if options.Count {
