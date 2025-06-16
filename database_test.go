@@ -1821,11 +1821,65 @@ func TestQueryTokens(t *testing.T) {
         }
     })
 
-    t.Run("scroll", func(t *testing.T) {
-        t.Run("decreasing time", func(t *testing.T) {
-            options := newQueryOptions()
+    t.Run("ordering", func(t *testing.T) {
+        opt := newQueryOptions()
+        if opt.Order.Type != queryOrderTime || opt.Order.Increasing {
+            t.Errorf("unexpected defaults %v", opt.Order)
+        }
 
+        for _, ty := range []queryOrderType{ queryOrderTime, queryOrderPath } {
+            for _, inc := range []bool{ false, true } {
+                opt := newQueryOptions()
+                opt.Order.Type = ty
+                opt.Order.Increasing = inc
+
+                res, err := queryTokens(dbconn, nil, opt)
+                if err != nil {
+                    t.Fatal(err)
+                }
+                if len(res) != 4 {
+                    t.Fatalf("search results are not as expected")
+                }
+
+                var last_time int64
+                var last_path string
+                for i, x := range res {
+                    if i > 0 {
+                        failed := false
+                        if ty == queryOrderTime {
+                            if inc {
+                                failed = last_time > x.Time
+                            } else {
+                                failed = last_time < x.Time
+                            }
+                        } else {
+                            if inc {
+                                failed = last_path > x.Path
+                            } else {
+                                failed = last_path < x.Path
+                            }
+                        }
+                        if failed {
+                            t.Errorf("unexpected ordering with %v", ty)
+                        }
+                    }
+                    last_path = x.Path
+                    last_time = x.Time
+                }
+            }
+        }
+    })
+
+    t.Run("scroll", func(t *testing.T) {
+        for _, mode := range []string { "-time", "path" } {
+            options := newQueryOptions()
             options.PageLimit = 2
+
+            if mode == "path" {
+                options.Order.Type = queryOrderPath
+                options.Order.Increasing = true
+            }
+
             res, err := queryTokens(dbconn, nil, options)
             if err != nil {
                 t.Fatalf(err.Error())
@@ -1839,20 +1893,30 @@ func TestQueryTokens(t *testing.T) {
                 collected = append(collected, x.Path)
             }
 
-            last_time := res[1].Time
-
             // Picking up from the last position.
             options.PageLimit = 100
-            options.Scroll = &queryScroll{ Time: res[1].Time, Pid: res[1].Pid }
+            last_res := res[len(res) - 1]
+            if mode == "path" {
+                options.Scroll = &queryScroll{ Path: last_res.Path }
+            } else {
+                options.Scroll = &queryScroll{ Time: last_res.Time, Pid: last_res.Pid }
+            }
             res, err = queryTokens(dbconn, nil, options)
             if err != nil {
                 t.Fatal(err)
             }
+
             if len(res) != 2 {
                 t.Fatalf("search results are not as expected %v", res)
             }
-            if res[0].Time > last_time {
-                t.Fatalf("scroll expects results to be sorted by time%v", res)
+            if mode == "path" {
+                if res[0].Path < last_res.Path {
+                    t.Fatalf("scroll expects results to be sorted by path %v", res)
+                }
+            } else {
+                if res[0].Time > last_res.Time {
+                    t.Fatalf("scroll expects results to be sorted by time %v", res)
+                }
             }
 
             for _, x := range res {
@@ -1866,7 +1930,12 @@ func TestQueryTokens(t *testing.T) {
 
             // Checking that it works even after we've exhausted all records.
             options.PageLimit = 2
-            options.Scroll = &queryScroll{ Time: res[1].Time, Pid: res[1].Pid }
+            last_res = res[len(res) - 1]
+            if mode == "path" {
+                options.Scroll = &queryScroll{ Path: last_res.Path }
+            } else {
+                options.Scroll = &queryScroll{ Time: last_res.Time, Pid: last_res.Pid }
+            }
             res, err = queryTokens(dbconn, nil, options)
             if err != nil {
                 t.Fatalf(err.Error())
@@ -1874,61 +1943,6 @@ func TestQueryTokens(t *testing.T) {
             if len(res) != 0 {
                 t.Fatalf("search results are not as expected %v", err)
             }
-        })
-
-        t.Run("increasing path", func(t *testing.T) {
-            options := newQueryOptions()
-            options.Order.Type = queryOrderPath
-            options.Order.Increasing = true
-
-            options.PageLimit = 2
-            res, err := queryTokens(dbconn, nil, options)
-            if err != nil {
-                t.Fatalf(err.Error())
-            }
-            if len(res) != 2 {
-                t.Fatalf("search results are not as expected %v", res)
-            }
-
-            collected := []string{}
-            for _, x := range res {
-                collected = append(collected, x.Path)
-            }
-
-            last_path := res[len(res) - 1].Path
-
-            // Picking up from the last position.
-            options.PageLimit = 100
-            options.Scroll = &queryScroll{ Path: res[1].Path }
-            res, err = queryTokens(dbconn, nil, options)
-            if err != nil {
-                t.Fatal(err)
-            }
-            if len(res) != 2 {
-                t.Fatalf("search results are not as expected %v", res)
-            }
-            if res[0].Path < last_path {
-                t.Fatalf("scroll expects results to be sorted by path %v", res)
-            }
-
-            for _, x := range res {
-                collected = append(collected, x.Path)
-            }
-            sort.Strings(collected)
-
-            if !equalPathArrays(collected, []string{ "metadata.json", "stuff/metadata.json", "stuff/other.json", "whee/other.json" }, to_add) {
-                t.Fatalf("search results are not as expected %v", collected)
-            }
-        })
-    })
-
-    t.Run("full", func(t *testing.T) {
-        res, err := queryTokens(dbconn, nil, newQueryOptions())
-        if err != nil {
-            t.Fatalf(err.Error())
-        }
-        if len(res) != 4 {
-            t.Fatalf("search results are not as expected")
         }
     })
 

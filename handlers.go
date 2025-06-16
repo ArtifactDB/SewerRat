@@ -435,7 +435,11 @@ func newQueryHandler(db *sql.DB, tokenizer *unicodeTokenizer, wild_tokenizer *un
         if params.Has("scroll") {
             val := params.Get("scroll")
             if options.Order.Type == queryOrderPath {
-                options.Scroll = &queryScroll{ Path: val }
+                valpath, err := url.QueryUnescape(val)
+                if err != nil {
+                    dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": "'scroll' should contain a URL-encoded path" })
+                }
+                options.Scroll = &queryScroll{ Path: valpath }
             } else {
                 i := strings.Index(val, ",")
                 if i < 0 {

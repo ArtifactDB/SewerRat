@@ -974,41 +974,112 @@ func TestQueryHandler(t *testing.T) {
         }
     })
 
-    t.Run("scroll", func (t *testing.T) {
+    t.Run("order", func (t *testing.T) {
         dummy_query := `{ "type": "text", "text": "   " }`
-        endpoint := "/query?limit=3"
-        all_paths := []string{}
 
-        // Scroll until exhaustion.
-        for i := 0; i < 100; i++ {
-            req, err := http.NewRequest("POST", endpoint, strings.NewReader(dummy_query))
-            if err != nil {
-                t.Fatal(err)
+        for _, opt := range []string{ "", "-path", "path", "-time", "time" } {
+            endpoint := "/query"
+            if opt != "" {
+                endpoint += "?order=" + opt
             }
 
+            req, err := http.NewRequest("POST", endpoint, strings.NewReader(dummy_query))
             rr := httptest.NewRecorder()
             handler.ServeHTTP(rr, req)
             if rr.Code != http.StatusOK {
-                t.Fatalf("should have succeeded")
+                t.Fatal("should have succeeded")
             }
 
-            page_paths, scroll := validateSearchResults(rr.Body)
-            all_paths = append(all_paths, page_paths...)
+            output := struct {
+                Results []queryResult
+                Next string
+            }{}
 
-            if len(page_paths) != 3 {
-                if scroll == "" {
-                    break
-                } else {
-                    t.Fatalf("expected three paths from a limited page %v", page_paths)
+            dec := json.NewDecoder(rr.Body)
+            err = dec.Decode(&output)
+            if err != nil {
+                t.Fatal(err)
+            }
+            if len(output.Results) != 4 {
+                t.Fatalf("unexpected number of results %v", output)
+            }
+
+            var last_time int64
+            var last_path string
+            for i, x := range output.Results {
+                if i > 0 {
+                    failed := false
+                    if opt == "" || opt == "-time" {
+                        failed = last_time < x.Time
+                    } else if opt == "time" {
+                        failed = last_time > x.Time
+                    } else if opt == "path" {
+                        failed = last_path > x.Path
+                    } else if opt == "-path" {
+                        failed = last_path < x.Path
+                    }
+                    if failed {
+                        t.Errorf("unexpected ordering with %s", opt)
+                    }
                 }
+                last_path = x.Path
+                last_time = x.Time
             }
-
-            endpoint = scroll
         }
 
-        sort.Strings(all_paths)
-        if !equalPathArrays(all_paths, []string{ "metadata.json", "stuff/metadata.json", "stuff/other.json", "whee/other.json" }, to_add) {
-            t.Fatalf("unexpected paths %v", all_paths)
+        t.Run("unknown option", func(t *testing.T) {
+            req, err := http.NewRequest("POST", "/query?order=random", strings.NewReader(dummy_query))
+            if err != nil {
+                t.Fatal(err)
+            }
+            rr := httptest.NewRecorder()
+            handler.ServeHTTP(rr, req)
+            if rr.Code != http.StatusBadRequest {
+                t.Fatal("should have failed with a bad request")
+            }
+        })
+    })
+
+    t.Run("scroll", func (t *testing.T) {
+        for _, opt := range []string{ "", "path" } { // scrolling by time (default) or by path.
+            dummy_query := `{ "type": "text", "text": "   " }`
+            endpoint := "/query?limit=3"
+            if opt != "" {
+                endpoint += "&order=" + opt
+            }
+
+            // Scroll until exhaustion.
+            all_paths := []string{}
+            for i := 0; i < 100; i++ {
+                req, err := http.NewRequest("POST", endpoint, strings.NewReader(dummy_query))
+                if err != nil {
+                    t.Fatal(err)
+                }
+
+                rr := httptest.NewRecorder()
+                handler.ServeHTTP(rr, req)
+                if rr.Code != http.StatusOK {
+                    t.Fatalf("should have succeeded")
+                }
+
+                page_paths, scroll := validateSearchResults(rr.Body)
+                all_paths = append(all_paths, page_paths...)
+
+                if len(page_paths) != 3 {
+                    if scroll == "" {
+                        break
+                    } else {
+                        t.Fatalf("expected three paths from a limited page %v", page_paths)
+                    }
+                }
+
+                endpoint = scroll
+            }
+
+            sort.Strings(all_paths)
+            if !equalPathArrays(all_paths, []string{ "metadata.json", "stuff/metadata.json", "stuff/other.json", "whee/other.json" }, to_add) {
+                t.Fatalf("unexpected paths %v", all_paths)
+            }
         }
     })
 
