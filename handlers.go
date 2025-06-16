@@ -415,27 +415,48 @@ func newQueryHandler(db *sql.DB, tokenizer *unicodeTokenizer, wild_tokenizer *un
         params := r.URL.Query()
         options := newQueryOptions()
 
+        if params.Has("order") {
+            val := params.Get("order")
+            if val == "path" {
+                options.Order.Type = queryOrderPath
+                options.Order.Increasing = true
+            } else if val == "-path" {
+                options.Order.Type = queryOrderPath
+                options.Order.Increasing = false
+            } else if val == "time" {
+                options.Order.Type = queryOrderTime
+                options.Order.Increasing = true
+            } else if val != "-time" {
+                dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": "'order' should be one of 'time' or 'path'" })
+                return
+            }
+        }
+
         if params.Has("scroll") {
             val := params.Get("scroll")
-            i := strings.Index(val, ",")
-            if i < 0 {
-                dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": "'scroll' should be a comma-separated string" })
-                return
-            }
+            if options.Order.Type == queryOrderPath {
+                options.Scroll = &queryScroll{ Path: val }
+            } else {
+                i := strings.Index(val, ",")
+                if i < 0 {
+                    dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": "'scroll' should be a comma-separated string" })
+                    return
+                }
 
-            time, err := strconv.ParseInt(val[:i], 10, 64)
-            if err != nil {
-                dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": "failed to parse the time from 'scroll'" })
-                return
-            }
+                time, err := strconv.ParseInt(val[:i], 10, 64)
+                if err != nil {
+                    dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": "failed to parse the time from 'scroll'" })
+                    return
+                }
 
-            pid, err := strconv.ParseInt(val[(i+1):], 10, 64)
-            if err != nil {
-                dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": "failed to parse the path ID from 'scroll'" })
-                return
-            }
+                pid, err := strconv.ParseInt(val[(i+1):], 10, 64)
+                if err != nil {
+                    dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": "failed to parse the path ID from 'scroll'" })
+                    return
+                }
 
-            options.Scroll = &queryScroll{ Time: time, Pid: pid }
+                options.Scroll = &queryScroll{ Time: time, Pid: pid }
+            }
         }
 
         limit, err := getPageLimit(params, "limit", 100)
@@ -489,12 +510,13 @@ func newQueryHandler(db *sql.DB, tokenizer *unicodeTokenizer, wild_tokenizer *un
         respbody := map[string]interface{} { "results": res }
         if len(res) == options.PageLimit {
             last := &(res[options.PageLimit - 1])
-            respbody["next"] = endpoint + "?" + encodeNextParameters(
-                "scroll",
-                strconv.FormatInt(last.Time, 10) + "," + strconv.FormatInt(last.Pid, 10),
-                params, 
-                []string{ "metadata", "translate" },
-            )
+            var scroll string
+            if options.Order.Type == queryOrderPath {
+                scroll = last.Path
+            } else {
+                scroll = strconv.FormatInt(last.Time, 10) + "," + strconv.FormatInt(last.Pid, 10)
+            }
+            respbody["next"] = endpoint + "?" + encodeNextParameters("scroll", scroll, params, []string{ "order", "metadata", "translate" })
         }
 
         dumpJsonResponse(w, http.StatusOK, respbody)
