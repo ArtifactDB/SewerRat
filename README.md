@@ -230,6 +230,9 @@ We can supply the following options to this endpoint as (URL) query parameters:
 - `limit=`, the number of results to return in each page by setting the `limit=` query parameter.
   This should be a positive integer, up to a maximum of 100.
   Any value greater than 100 is ignored.
+- `order=`, how the results should be ordered.
+  This can be set to `time` or `path`, optionally prefixed by `-` to sort in decreasing order.
+  The default is to sort by decreasing time (`-time`).
 - `metadata=`, whether to return the contents of the metadata file in the search results.
   This can be set to `false` to reduce the response size.
 
