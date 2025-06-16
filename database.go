@@ -972,11 +972,25 @@ func backupDatabase(db *sql.DB, path string) error {
 type queryScroll struct {
     Time int64
     Pid int64
+    Path string
+}
+
+type queryOrderType int
+
+const (
+    queryOrderTime queryOrderType = iota
+    queryOrderPath
+)
+
+type queryOrder struct {
+    Type queryOrderType
+    Increasing bool
 }
 
 type queryOptions struct {
     IncludeMetadata bool
     PageLimit int
+    Order queryOrder
     Scroll *queryScroll
 }
 
@@ -984,6 +998,10 @@ func newQueryOptions() queryOptions {
     return queryOptions{
         IncludeMetadata: true,
         PageLimit: 0,
+        Order: queryOrder{
+            Type: queryOrderTime,
+            Increasing: false,
+        },
         Scroll: nil,
     }
 }
@@ -1014,17 +1032,36 @@ func queryTokens(db * sql.DB, query *searchClause, options queryOptions) ([]quer
     }
 
     // Handling pagination via scrolling window queries, see https://www.sqlite.org/rowvalue.html#scrolling_window_queries.
-    // This should be pretty efficient as we have an index on 'time'.
-    if options.Scroll != nil {
+    // This should be pretty efficient as we have an index on 'time' and 'path', depending on what we choose to index on.
+    addScrollFilter := func(filter string) {
         if query_present {
-            full += " AND"
+            full += " AND "
         } else {
-            full += " WHERE"
+            full += " WHERE "
         }
-        full += " (paths.time, paths.pid) < (?, ?)"
-        parameters = append(parameters, options.Scroll.Time, options.Scroll.Pid)
+        full += filter
     }
-    full += " ORDER BY paths.time DESC, paths.pid DESC"
+
+    scroll_cmp := "<"
+    ordering := "DESC"
+    if options.Order.Increasing {
+        scroll_cmp = ">"
+        ordering = "ASC"
+    }
+
+    if options.Order.Type == queryOrderPath {
+        if options.Scroll != nil {
+            addScrollFilter("paths.path " + scroll_cmp + " ?")
+            parameters = append(parameters, options.Scroll.Path)
+        }
+        full += " ORDER BY paths.path " + ordering
+    } else {
+        if options.Scroll != nil {
+            addScrollFilter("(paths.time, paths.pid) " + scroll_cmp + " (?, ?)")
+            parameters = append(parameters, options.Scroll.Time, options.Scroll.Pid)
+        }
+        full += " ORDER BY paths.time " + ordering + ", paths.pid " + ordering
+    }
     if options.PageLimit > 0 {
         full += " LIMIT " + strconv.Itoa(options.PageLimit)
     }
