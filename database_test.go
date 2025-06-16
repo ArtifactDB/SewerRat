@@ -11,6 +11,7 @@ import (
     "errors"
     "database/sql"
     "encoding/json"
+    "context"
 )
 
 func TestInitializeDatabase(t *testing.T) {
@@ -224,7 +225,7 @@ func TestAddNewDirectory(t *testing.T) {
         defer dbconn.Close()
         defer os.Remove(dbpath)
 
-        comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json" }, "myself", tokr, add_options)
+        comments, err := addNewDirectory(to_add, []string{ "metadata.json" }, "myself", tokr, dbconn, context.Background(), add_options)
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -346,7 +347,7 @@ func TestAddNewDirectory(t *testing.T) {
         defer os.Remove(dbpath)
 
         // Works with multiple JSON targets.
-        comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myslef", tokr, add_options)
+        comments, err := addNewDirectory(to_add, []string{ "metadata.json", "other.json" }, "myslef", tokr, dbconn, context.Background(), add_options)
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -390,7 +391,7 @@ func TestAddNewDirectory(t *testing.T) {
         defer os.Remove(dbpath)
 
         // Works with multiple JSON directories.
-        comments, err := addNewDirectory(dbconn, to_add, []string{ "other.json" }, "myself", tokr, add_options)
+        comments, err := addNewDirectory(to_add, []string{ "other.json" }, "myself", tokr, dbconn, context.Background(), add_options)
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -398,7 +399,7 @@ func TestAddNewDirectory(t *testing.T) {
             t.Fatalf("unexpected comments from the directory addition %v", comments)
         }
 
-        comments, err = addNewDirectory(dbconn, to_add2, []string{ "metadata.json" }, "myself", tokr, add_options)
+        comments, err = addNewDirectory(to_add2, []string{ "metadata.json" }, "myself", tokr, dbconn, context.Background(), add_options)
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -431,7 +432,7 @@ func TestAddNewDirectory(t *testing.T) {
         }
 
         // Recalling on an existing directory wipes out existing entries and replaces it.
-        comments, err = addNewDirectory(dbconn, to_add, []string{ "metadata.json" }, "myself", tokr, add_options)
+        comments, err = addNewDirectory(to_add, []string{ "metadata.json" }, "myself", tokr, dbconn, context.Background(), add_options)
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -469,7 +470,7 @@ func TestAddNewDirectory(t *testing.T) {
         defer os.Remove(dbpath)
 
         // Reports the error correctly.
-        comments, err := addNewDirectory(dbconn, to_fail, []string{ "metadata.json", "other.json" }, "myself", tokr, add_options)
+        comments, err := addNewDirectory(to_fail, []string{ "metadata.json", "other.json" }, "myself", tokr, dbconn, context.Background(), add_options)
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -508,7 +509,7 @@ func TestAddNewDirectory(t *testing.T) {
         defer dbconn.Close()
         defer os.Remove(dbpath)
 
-        comments, err := addNewDirectory(dbconn, symdir, []string{ "metadata.json", "other.json" }, "myself", tokr, add_options)
+        comments, err := addNewDirectory(symdir, []string{ "metadata.json", "other.json" }, "myself", tokr, dbconn, context.Background(), add_options)
         if err != nil {
             t.Fatal(err)
         }
@@ -524,6 +525,23 @@ func TestAddNewDirectory(t *testing.T) {
         // All symlink paths to directories/files are ignored.
         if !equalStringArrays(all_paths, []string{ "symlink/metadata.json", "symlink/other.json" }) {
             t.Fatalf("unexpected paths %v", all_paths)
+        }
+    })
+
+    t.Run("canceled", func(t *testing.T) {
+        dbconn, err := initializeDatabase(dbpath)
+        if err != nil {
+            t.Fatalf(err.Error())
+        }
+        defer dbconn.Close()
+        defer os.Remove(dbpath)
+
+        canceled, cancelfun := context.WithCancel(context.Background())
+        cancelfun()
+
+        _, err = addNewDirectory(to_add, []string{ "metadata.json" }, "myself", tokr, dbconn, canceled, add_options)
+        if err == nil || !errors.Is(err, context.Canceled) {
+            t.Error("expected add directory job to be canceled")
         }
     })
 }
@@ -562,7 +580,7 @@ func TestDeleteDirectory(t *testing.T) {
 
     add_options := &addDirectoryContentsOptions{ Concurrency: 2 }
 
-    comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr, add_options)
+    comments, err := addNewDirectory(to_add, []string{ "metadata.json", "other.json" }, "myself", tokr, dbconn, context.Background(), add_options)
     if err != nil {
         t.Fatalf(err.Error())
     }
@@ -570,7 +588,7 @@ func TestDeleteDirectory(t *testing.T) {
         t.Fatalf("unexpected comments from the directory addition %v", comments)
     }
 
-    comments, err = addNewDirectory(dbconn, to_add2, []string{ "other.json" }, "myself", tokr, add_options)
+    comments, err = addNewDirectory(to_add2, []string{ "other.json" }, "myself", tokr, dbconn, context.Background(), add_options)
     if err != nil {
         t.Fatalf(err.Error())
     }
@@ -579,7 +597,7 @@ func TestDeleteDirectory(t *testing.T) {
     }
 
     // Deleting the first directory; this does not affect the second directory.
-    err = deleteDirectory(dbconn, to_add)
+    err = deleteDirectory(to_add, dbconn, context.Background())
     if err != nil {
         t.Fatalf(err.Error())
     }
@@ -646,6 +664,24 @@ func TestDeleteDirectory(t *testing.T) {
             t.Fatalf("could not find token/field combination")
         }
     }
+
+    t.Run("canceled", func(t *testing.T) {
+        canceled, cancelfun := context.WithCancel(context.Background())
+        cancelfun()
+
+        err := deleteDirectory(to_add2, dbconn, canceled)
+        if err == nil || !errors.Is(err, context.Canceled) {
+            t.Error("expected delete directory to be canceled")
+        }
+
+        all_paths, err := listPaths(dbconn, tmp)
+        if err != nil {
+            t.Fatal(err)
+        }
+        if !equalStringArrays(all_paths, []string{ "to_add2/stuff/other.json", "to_add2/whee/other.json"}) {
+            t.Fatalf("unexpected paths in the index %v", all_paths)
+        }
+    })
 }
 
 func TestUpdateDirectories(t *testing.T) {
@@ -729,7 +765,7 @@ WHERE paths.path = ?
 
         var oldtime1, oldtime2 int64
         {
-            comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr, add_options)
+            comments, err := addNewDirectory(to_add, []string{ "metadata.json", "other.json" }, "myself", tokr, dbconn, context.Background(), add_options)
             if err != nil {
                 t.Fatalf(err.Error())
             }
@@ -760,7 +796,7 @@ WHERE paths.path = ?
         }
 
         // Now actually running the update.
-        comments, err := updateDirectories(dbconn, tokr, add_options)
+        comments, err := updateDirectories(tokr, dbconn, context.Background(), add_options)
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -842,7 +878,7 @@ WHERE paths.path = ?
         defer os.RemoveAll(to_add)
 
         {
-            comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr, add_options)
+            comments, err := addNewDirectory(to_add, []string{ "metadata.json", "other.json" }, "myself", tokr, dbconn, context.Background(), add_options)
             if err != nil {
                 t.Fatalf(err.Error())
             }
@@ -863,7 +899,7 @@ WHERE paths.path = ?
         }
 
         // Now actually running the update.
-        comments, err := updateDirectories(dbconn, tokr, add_options)
+        comments, err := updateDirectories(tokr, dbconn, context.Background(), add_options)
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -925,7 +961,7 @@ WHERE paths.path = ?
         defer os.RemoveAll(to_add)
 
         {
-            comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr, add_options)
+            comments, err := addNewDirectory(to_add, []string{ "metadata.json", "other.json" }, "myself", tokr, dbconn, context.Background(), add_options)
             if err != nil {
                 t.Fatalf(err.Error())
             }
@@ -940,7 +976,7 @@ WHERE paths.path = ?
             t.Fatalf(err.Error())
         }
 
-        comments, err := updateDirectories(dbconn, tokr, add_options)
+        comments, err := updateDirectories(tokr, dbconn, context.Background(), add_options)
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -974,7 +1010,7 @@ WHERE paths.path = ?
         defer os.RemoveAll(to_add)
 
         {
-            comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr, add_options)
+            comments, err := addNewDirectory(to_add, []string{ "metadata.json", "other.json" }, "myself", tokr, dbconn, context.Background(), add_options)
             if err != nil {
                 t.Fatalf(err.Error())
             }
@@ -1000,7 +1036,7 @@ WHERE paths.path = ?
         }
 
         // Now actually running the update.
-        comments, err := updateDirectories(dbconn, tokr, add_options)
+        comments, err := updateDirectories(tokr, dbconn, context.Background(), add_options)
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -1080,7 +1116,7 @@ WHERE paths.path = ?
         defer os.RemoveAll(to_add)
 
         {
-            comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr, add_options)
+            comments, err := addNewDirectory(to_add, []string{ "metadata.json", "other.json" }, "myself", tokr, dbconn, context.Background(), add_options)
             if err != nil {
                 t.Fatalf(err.Error())
             }
@@ -1127,7 +1163,7 @@ WHERE paths.path = ?
         }
 
         // Now actually running the update.
-        comments, err := updateDirectories(dbconn, tokr, add_options)
+        comments, err := updateDirectories(tokr, dbconn, context.Background(), add_options)
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -1210,7 +1246,7 @@ WHERE paths.path = ?
         }
         defer os.RemoveAll(to_add)
 
-        comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr, add_options)
+        comments, err := addNewDirectory(to_add, []string{ "metadata.json", "other.json" }, "myself", tokr, dbconn, context.Background(), add_options)
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -1225,7 +1261,7 @@ WHERE paths.path = ?
             t.Fatalf(err.Error())
         }
 
-        comments, err = updateDirectories(dbconn, tokr, add_options)
+        comments, err = updateDirectories(tokr, dbconn, context.Background(), add_options)
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -1239,6 +1275,23 @@ WHERE paths.path = ?
         }
         if !equalStringArrays(all_paths, []string{ "to_add/metadata.json", "to_add/stuff/metadata.json", "to_add/stuff/other.json" }) {
             t.Fatalf("unexpected paths in the index %v", all_paths)
+        }
+    })
+
+    t.Run("canceled", func(t *testing.T) {
+        dbconn, err := initializeDatabase(dbpath)
+        if err != nil {
+            t.Fatalf(err.Error())
+        }
+        defer dbconn.Close()
+        defer os.Remove(dbpath)
+
+        canceled, cancelfun := context.WithCancel(context.Background())
+        cancelfun()
+
+        _, err = updateDirectories(tokr, dbconn, canceled, add_options)
+        if err == nil || !errors.Is(err, context.Canceled) {
+            t.Error("failed to cancel update request")
         }
     })
 }
@@ -1278,7 +1331,7 @@ func TestCleanDatabase(t *testing.T) {
         if err != nil {
             t.Fatal(err)
         }
-        comments, err := addNewDirectory(dbconn, to_add, []string{ base }, "myself", tokr, add_options)
+        comments, err := addNewDirectory(to_add, []string{ base }, "myself", tokr, dbconn, context.Background(), add_options)
         if err != nil {
             t.Fatal(err)
         }
@@ -1288,7 +1341,7 @@ func TestCleanDatabase(t *testing.T) {
     }
 
     // Deleting the first directory to create some garbage-collectable content.
-    err = deleteDirectory(dbconn, filepath.Join(tmp, "first"))
+    err = deleteDirectory(filepath.Join(tmp, "first"), dbconn, context.Background())
     if err != nil {
         t.Fatal(err)
     }
@@ -1356,11 +1409,21 @@ func TestCleanDatabase(t *testing.T) {
             }
         }
 
-        err = cleanDatabase(dbconn)
+        err = cleanDatabase(dbconn, context.Background())
         if err != nil {
             t.Fatal(err)
         }
     }
+
+    t.Run("canceled", func(t *testing.T) {
+        canceled, cancelfun := context.WithCancel(context.Background())
+        cancelfun()
+
+        err := cleanDatabase(dbconn, canceled)
+        if err == nil || !errors.Is(err, context.Canceled) {
+            t.Error("failed to cancel clean request")
+        }
+    })
 }
 
 func TestBackupDatabase(t *testing.T) {
@@ -1391,7 +1454,7 @@ func TestBackupDatabase(t *testing.T) {
         t.Fatalf(err.Error())
     }
 
-    comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr, add_options)
+    comments, err := addNewDirectory(to_add, []string{ "metadata.json", "other.json" }, "myself", tokr, dbconn, context.Background(), add_options)
     if err != nil {
         t.Fatalf(err.Error())
     }
@@ -1401,7 +1464,7 @@ func TestBackupDatabase(t *testing.T) {
 
     // Running the backup.
     backpath := filepath.Join(tmp, "db.sqlite3.backup")
-    err = backupDatabase(dbconn, backpath)
+    err = backupDatabase(backpath, dbconn, context.Background())
     if err != nil {
         t.Fatalf(err.Error())
     }
@@ -1428,10 +1491,20 @@ func TestBackupDatabase(t *testing.T) {
     }
 
     // Backup continues to work when there's an existing file.
-    err = backupDatabase(dbconn, backpath)
+    err = backupDatabase(backpath, dbconn, context.Background())
     if err != nil {
         t.Fatalf(err.Error())
     }
+
+    t.Run("canceled", func(t *testing.T) {
+        canceled, cancelfun := context.WithCancel(context.Background())
+        cancelfun()
+
+        err := backupDatabase(backpath, dbconn, canceled)
+        if err == nil || !errors.Is(err, context.Canceled) {
+            t.Error("failed to cancel backup request")
+        }
+    })
 }
 
 func TestQueryTokens(t *testing.T) {
@@ -1462,7 +1535,7 @@ func TestQueryTokens(t *testing.T) {
         t.Fatalf(err.Error())
     }
 
-    comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr, add_options)
+    comments, err := addNewDirectory(to_add, []string{ "metadata.json", "other.json" }, "myself", tokr, dbconn, context.Background(), add_options)
     if err != nil {
         t.Fatalf(err.Error())
     }
@@ -1480,7 +1553,7 @@ func TestQueryTokens(t *testing.T) {
     }
 
     t.Run("basic text", func(t *testing.T) {
-        res, err := queryTokens(dbconn, &searchClause{ Type: "text", Text: "lamb" }, newQueryOptions())
+        res, err := queryTokens(&searchClause{ Type: "text", Text: "lamb" }, dbconn, context.Background(), newQueryOptions())
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -1490,7 +1563,7 @@ func TestQueryTokens(t *testing.T) {
     })
 
     t.Run("text with field", func(t *testing.T) {
-        res, err := queryTokens(dbconn, &searchClause{ Type: "text", Text: "lamb", Field: "variants" }, newQueryOptions())
+        res, err := queryTokens(&searchClause{ Type: "text", Text: "lamb", Field: "variants" }, dbconn, context.Background(), newQueryOptions())
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -1500,7 +1573,7 @@ func TestQueryTokens(t *testing.T) {
     })
 
     t.Run("partial test", func(t *testing.T) {
-        res, err := queryTokens(dbconn, &searchClause{ Type: "text", Text: "*ar*", IsPattern: true }, newQueryOptions())
+        res, err := queryTokens(&searchClause{ Type: "text", Text: "*ar*", IsPattern: true }, dbconn, context.Background(), newQueryOptions())
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -1508,7 +1581,7 @@ func TestQueryTokens(t *testing.T) {
             t.Fatalf("search results are not as expected %v", res)
         }
 
-        res, err = queryTokens(dbconn, &searchClause{ Type: "text", Text: "l?mb", IsPattern: true }, newQueryOptions())
+        res, err = queryTokens(&searchClause{ Type: "text", Text: "l?mb", IsPattern: true }, dbconn, context.Background(), newQueryOptions())
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -1518,7 +1591,7 @@ func TestQueryTokens(t *testing.T) {
     })
 
     t.Run("search on numbers", func(t *testing.T) {
-        res, err := queryTokens(dbconn, &searchClause{ Type: "text", Text: "5", Field: "bar.cost" }, newQueryOptions())
+        res, err := queryTokens(&searchClause{ Type: "text", Text: "5", Field: "bar.cost" }, dbconn, context.Background(), newQueryOptions())
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -1526,7 +1599,7 @@ func TestQueryTokens(t *testing.T) {
             t.Fatalf("search results are not as expected %v", res)
         }
 
-        res, err = queryTokens(dbconn, &searchClause{ Type: "text", Text: "10495" }, newQueryOptions())
+        res, err = queryTokens(&searchClause{ Type: "text", Text: "10495" }, dbconn, context.Background(), newQueryOptions())
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -1536,7 +1609,7 @@ func TestQueryTokens(t *testing.T) {
     })
 
     t.Run("search on booleans", func(t *testing.T) {
-        res, err := queryTokens(dbconn, &searchClause{ Type: "text", Text: "false" }, newQueryOptions())
+        res, err := queryTokens(&searchClause{ Type: "text", Text: "false" }, dbconn, context.Background(), newQueryOptions())
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -1544,7 +1617,7 @@ func TestQueryTokens(t *testing.T) {
             t.Fatalf("search results are not as expected %v", res)
         }
 
-        res, err = queryTokens(dbconn, &searchClause{ Type: "text", Text: "true", Field: "category.iyashikei" }, newQueryOptions())
+        res, err = queryTokens(&searchClause{ Type: "text", Text: "true", Field: "category.iyashikei" }, dbconn, context.Background(), newQueryOptions())
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -1555,11 +1628,12 @@ func TestQueryTokens(t *testing.T) {
 
     t.Run("not (simple)", func(t *testing.T) {
         res, err := queryTokens(
-            dbconn, 
             &searchClause{ 
                 Type: "not", 
                 Child: &searchClause{ Type: "text", Text: "yuru" }, 
             }, 
+            dbconn,
+            context.Background(),
             newQueryOptions(),
         )
         if err != nil {
@@ -1572,7 +1646,6 @@ func TestQueryTokens(t *testing.T) {
 
     t.Run("not (complex)", func(t *testing.T) {
         res, err := queryTokens(
-            dbconn, 
             &searchClause{ 
                 Type: "not", 
                 Child: &searchClause{ 
@@ -1583,6 +1656,8 @@ func TestQueryTokens(t *testing.T) {
                     },
                 }, 
             }, 
+            dbconn,
+            context.Background(),
             newQueryOptions(),
         )
         if err != nil {
@@ -1595,11 +1670,12 @@ func TestQueryTokens(t *testing.T) {
 
     t.Run("not (partial)", func(t *testing.T) {
         res, err := queryTokens(
-            dbconn, 
             &searchClause{ 
                 Type: "not", 
                 Child: &searchClause{ Type: "text", Text: "*ar*", IsPattern: true },
             }, 
+            dbconn,
+            context.Background(),
             newQueryOptions(),
         )
         if err != nil {
@@ -1612,7 +1688,6 @@ func TestQueryTokens(t *testing.T) {
 
     t.Run("not (nested)", func(t *testing.T) {
         res, err := queryTokens(
-            dbconn, 
             &searchClause{ 
                 Type: "and",
                 Children: []*searchClause{ 
@@ -1623,6 +1698,8 @@ func TestQueryTokens(t *testing.T) {
                     }, 
                 },
             },
+            dbconn,
+            context.Background(),
             newQueryOptions(),
         )
         if err != nil {
@@ -1635,7 +1712,6 @@ func TestQueryTokens(t *testing.T) {
 
     t.Run("and (simple)", func(t *testing.T) {
         res, err := queryTokens(
-            dbconn, 
             &searchClause{ 
                 Type: "and", 
                 Children: []*searchClause{ 
@@ -1643,6 +1719,8 @@ func TestQueryTokens(t *testing.T) {
                     &searchClause{ Type: "text", Text: "non" },
                 },
             }, 
+            dbconn,
+            context.Background(),
             newQueryOptions(),
         )
         if err != nil {
@@ -1655,7 +1733,6 @@ func TestQueryTokens(t *testing.T) {
 
     t.Run("or (simple)", func(t *testing.T) {
         res, err := queryTokens(
-            dbconn, 
             &searchClause{ 
                 Type: "or", 
                 Children: []*searchClause{ 
@@ -1663,6 +1740,8 @@ func TestQueryTokens(t *testing.T) {
                     &searchClause{ Type: "text", Text: "lamb" },
                 },
             }, 
+            dbconn,
+            context.Background(),
             newQueryOptions(),
         )
         if err != nil {
@@ -1675,7 +1754,6 @@ func TestQueryTokens(t *testing.T) {
 
     t.Run("and (complex)", func(t *testing.T) {
         res, err := queryTokens(
-            dbconn, 
             &searchClause{ 
                 Type: "and", 
                 Children: []*searchClause{ 
@@ -1683,6 +1761,8 @@ func TestQueryTokens(t *testing.T) {
                     &searchClause{ Type: "or", Children: []*searchClause{ &searchClause{ Type: "text", Text: "lamb" }, &searchClause{ Type: "text", Text: "non" } } },
                 },
             }, 
+            dbconn,
+            context.Background(),
             newQueryOptions(),
         )
         if err != nil {
@@ -1695,7 +1775,6 @@ func TestQueryTokens(t *testing.T) {
 
     t.Run("or (complex)", func(t *testing.T) {
         res, err := queryTokens(
-            dbconn, 
             &searchClause{ 
                 Type: "or", 
                 Children: []*searchClause{ 
@@ -1703,6 +1782,8 @@ func TestQueryTokens(t *testing.T) {
                     &searchClause{ Type: "and", Children: []*searchClause{ &searchClause{ Type: "text", Text: "yuru" }, &searchClause{ Type: "text", Text: "non" } } },
                 },
             }, 
+            dbconn,
+            context.Background(),
             newQueryOptions(),
         )
         if err != nil {
@@ -1715,7 +1796,6 @@ func TestQueryTokens(t *testing.T) {
 
     t.Run("or (partial)", func(t *testing.T) {
         res, err := queryTokens(
-            dbconn, 
             &searchClause{ 
                 Type: "or", 
                 Children: []*searchClause{ 
@@ -1723,6 +1803,8 @@ func TestQueryTokens(t *testing.T) {
                     &searchClause{ Type: "text", Text: "ak*", IsPattern: true },
                 },
             }, 
+            dbconn,
+            context.Background(),
             newQueryOptions(),
         )
         if err != nil {
@@ -1735,7 +1817,6 @@ func TestQueryTokens(t *testing.T) {
 
     t.Run("or (field)", func(t *testing.T) {
         res, err := queryTokens(
-            dbconn, 
             &searchClause{ 
                 Type: "or", 
                 Children: []*searchClause{ 
@@ -1743,6 +1824,8 @@ func TestQueryTokens(t *testing.T) {
                     &searchClause{ Type: "text", Text: "yuru", Field: "anime" },
                 },
             }, 
+            dbconn,
+            context.Background(),
             newQueryOptions(),
         )
         if err != nil {
@@ -1759,7 +1842,7 @@ func TestQueryTokens(t *testing.T) {
             t.Fatalf(err.Error())
         }
 
-        res, err := queryTokens(dbconn, &searchClause{ Type: "user", User: self.Username }, newQueryOptions())
+        res, err := queryTokens(&searchClause{ Type: "user", User: self.Username }, dbconn, context.Background(), newQueryOptions())
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -1767,7 +1850,7 @@ func TestQueryTokens(t *testing.T) {
             t.Fatalf("search results are not as expected %v", res)
         }
 
-        res, err = queryTokens(dbconn, &searchClause{ Type: "user", User: self.Username + "2" }, newQueryOptions())
+        res, err = queryTokens(&searchClause{ Type: "user", User: self.Username + "2" }, dbconn, context.Background(), newQueryOptions())
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -1777,7 +1860,7 @@ func TestQueryTokens(t *testing.T) {
     })
 
     t.Run("path", func(t *testing.T) {
-        res, err := queryTokens(dbconn, &searchClause{ Type: "path", Path: "*stuff*" }, newQueryOptions())
+        res, err := queryTokens(&searchClause{ Type: "path", Path: "*stuff*" }, dbconn, context.Background(), newQueryOptions())
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -1786,7 +1869,7 @@ func TestQueryTokens(t *testing.T) {
         }
 
         // Try a more complex pattern.
-        res, err = queryTokens(dbconn, &searchClause{ Type: "path", Path: "*/metadata.*json" }, newQueryOptions())
+        res, err = queryTokens(&searchClause{ Type: "path", Path: "*/metadata.*json" }, dbconn, context.Background(), newQueryOptions())
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -1796,7 +1879,7 @@ func TestQueryTokens(t *testing.T) {
     })
 
     t.Run("time", func(t *testing.T) {
-        res, err := queryTokens(dbconn, &searchClause{ Type: "time", Time: 0 }, newQueryOptions())
+        res, err := queryTokens(&searchClause{ Type: "time", Time: 0 }, dbconn, context.Background(), newQueryOptions())
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -1804,7 +1887,7 @@ func TestQueryTokens(t *testing.T) {
             t.Fatalf("search results are not as expected %v", res)
         }
 
-        res, err = queryTokens(dbconn, &searchClause{ Type: "time", Time: time.Now().Unix() + 10 }, newQueryOptions())
+        res, err = queryTokens(&searchClause{ Type: "time", Time: time.Now().Unix() + 10 }, dbconn, context.Background(), newQueryOptions())
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -1812,7 +1895,7 @@ func TestQueryTokens(t *testing.T) {
             t.Fatalf("search results are not as expected %v", res)
         }
 
-        res, err = queryTokens(dbconn, &searchClause{ Type: "time", Time: time.Now().Unix() + 10, After: true }, newQueryOptions())
+        res, err = queryTokens(&searchClause{ Type: "time", Time: time.Now().Unix() + 10, After: true }, dbconn, context.Background(), newQueryOptions())
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -1827,13 +1910,15 @@ func TestQueryTokens(t *testing.T) {
             t.Errorf("unexpected defaults %v", opt.Order)
         }
 
+        ctx := context.Background()
+
         for _, ty := range []queryOrderType{ queryOrderTime, queryOrderPath } {
             for _, inc := range []bool{ false, true } {
                 opt := newQueryOptions()
                 opt.Order.Type = ty
                 opt.Order.Increasing = inc
 
-                res, err := queryTokens(dbconn, nil, opt)
+                res, err := queryTokens(nil, dbconn, ctx, opt)
                 if err != nil {
                     t.Fatal(err)
                 }
@@ -1874,13 +1959,14 @@ func TestQueryTokens(t *testing.T) {
         for _, mode := range []string { "-time", "path" } {
             options := newQueryOptions()
             options.PageLimit = 2
-
             if mode == "path" {
                 options.Order.Type = queryOrderPath
                 options.Order.Increasing = true
             }
 
-            res, err := queryTokens(dbconn, nil, options)
+            ctx := context.Background()
+
+            res, err := queryTokens(nil, dbconn, ctx, options)
             if err != nil {
                 t.Fatalf(err.Error())
             }
@@ -1901,7 +1987,7 @@ func TestQueryTokens(t *testing.T) {
             } else {
                 options.Scroll = &queryScroll{ Time: last_res.Time, Pid: last_res.Pid }
             }
-            res, err = queryTokens(dbconn, nil, options)
+            res, err = queryTokens(nil, dbconn, ctx, options)
             if err != nil {
                 t.Fatal(err)
             }
@@ -1936,7 +2022,8 @@ func TestQueryTokens(t *testing.T) {
             } else {
                 options.Scroll = &queryScroll{ Time: last_res.Time, Pid: last_res.Pid }
             }
-            res, err = queryTokens(dbconn, nil, options)
+
+            res, err = queryTokens(nil, dbconn, ctx, options)
             if err != nil {
                 t.Fatalf(err.Error())
             }
@@ -1950,7 +2037,7 @@ func TestQueryTokens(t *testing.T) {
         options := newQueryOptions()
 
         // First, running a control.
-        res, err := queryTokens(dbconn, nil, options)
+        res, err := queryTokens(nil, dbconn, context.Background(), options)
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -1965,7 +2052,7 @@ func TestQueryTokens(t *testing.T) {
 
         // Checking that metadata is skipped.
         options.IncludeMetadata = false
-        res, err = queryTokens(dbconn, nil, options)
+        res, err = queryTokens(nil, dbconn, context.Background(), options)
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -1976,6 +2063,16 @@ func TestQueryTokens(t *testing.T) {
             if x.Metadata != nil {
                 t.Error("expected nil metadata from default query")
             }
+        }
+    })
+
+    t.Run("canceled", func(t *testing.T) {
+        canceled, cancelfun := context.WithCancel(context.Background())
+        cancelfun()
+
+        _, err := queryTokens(nil, dbconn, canceled, newQueryOptions())
+        if err == nil || !errors.Is(err, context.Canceled) {
+            t.Error("failed to cancel query request")
         }
     })
 }
@@ -2008,7 +2105,7 @@ func TestRetrievePath(t *testing.T) {
         t.Fatalf(err.Error())
     }
 
-    comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr, add_options)
+    comments, err := addNewDirectory(to_add, []string{ "metadata.json", "other.json" }, "myself", tokr, dbconn, context.Background(), add_options)
     if err != nil {
         t.Fatalf(err.Error())
     }
@@ -2022,7 +2119,7 @@ func TestRetrievePath(t *testing.T) {
     }
 
     t.Run("ok with metadata", func(t *testing.T) {
-        res, err := retrievePath(dbconn, filepath.Join(to_add, "metadata.json"), true)
+        res, err := retrievePath(filepath.Join(to_add, "metadata.json"), true, dbconn, context.Background())
         if err != nil {
             t.Fatal(err)
         }
@@ -2039,7 +2136,7 @@ func TestRetrievePath(t *testing.T) {
     })
 
     t.Run("ok without metadata", func(t *testing.T) {
-        res, err := retrievePath(dbconn, filepath.Join(to_add, "metadata.json"), false)
+        res, err := retrievePath(filepath.Join(to_add, "metadata.json"), false, dbconn, context.Background())
         if err != nil {
             t.Fatal(err)
         }
@@ -2055,12 +2152,22 @@ func TestRetrievePath(t *testing.T) {
     })
 
     t.Run("missing", func(t *testing.T) {
-        res, err := retrievePath(dbconn, "missing.json", false)
+        res, err := retrievePath("missing.json", false, dbconn, context.Background())
         if err != nil {
             t.Fatal(err)
         }
         if res != nil {
             t.Fatal("should not have matched anything")
+        }
+    })
+
+    t.Run("canceled", func(t *testing.T) {
+        canceled, cancelfun := context.WithCancel(context.Background())
+        cancelfun()
+
+        _, err := retrievePath("foobar.json", false, dbconn, canceled)
+        if err == nil || !errors.Is(err, context.Canceled) {
+            t.Error("failed to cancel path retrieval request")
         }
     })
 }
@@ -2094,7 +2201,7 @@ func TestListRegisteredDirectories(t *testing.T) {
             t.Fatalf(err.Error())
         }
 
-        comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, name + "_user", tokr, add_options)
+        comments, err := addNewDirectory(to_add, []string{ "metadata.json", "other.json" }, name + "_user", tokr, dbconn, context.Background(), add_options)
         if err != nil {
             t.Fatalf(err.Error())
         }
@@ -2105,7 +2212,7 @@ func TestListRegisteredDirectories(t *testing.T) {
 
     t.Run("basic", func(t *testing.T) {
         options := listRegisteredDirectoriesOptions{}
-        out, err := listRegisteredDirectories(dbconn, options)
+        out, err := listRegisteredDirectories(dbconn, context.Background(), options)
         if err != nil {
             t.Fatal(err)
         }
@@ -2139,7 +2246,7 @@ func TestListRegisteredDirectories(t *testing.T) {
         options := listRegisteredDirectoriesOptions{}
         desired := "bar_user"
         options.User = &desired
-        out, err := listRegisteredDirectories(dbconn, options)
+        out, err := listRegisteredDirectories(dbconn, context.Background(), options)
         if err != nil {
             t.Fatal(err)
         }
@@ -2152,7 +2259,7 @@ func TestListRegisteredDirectories(t *testing.T) {
 
         desired = "bar_user2"
         options.User = &desired
-        out, err = listRegisteredDirectories(dbconn, options)
+        out, err = listRegisteredDirectories(dbconn, context.Background(), options)
         if err != nil {
             t.Fatal(err)
         }
@@ -2167,7 +2274,7 @@ func TestListRegisteredDirectories(t *testing.T) {
         desired := filepath.Join(tmp, "bar")
         options.ContainsPath = &desired
 
-        out, err := listRegisteredDirectories(dbconn, options)
+        out, err := listRegisteredDirectories(dbconn, context.Background(), options)
         if err != nil {
             t.Fatal(err)
         }
@@ -2180,7 +2287,7 @@ func TestListRegisteredDirectories(t *testing.T) {
 
         desired = filepath.Join(filepath.Dir(tmp))
         options.ContainsPath = &desired
-        out, err = listRegisteredDirectories(dbconn, options)
+        out, err = listRegisteredDirectories(dbconn, context.Background(), options)
         if err != nil {
             t.Fatal(err)
         }
@@ -2193,7 +2300,7 @@ func TestListRegisteredDirectories(t *testing.T) {
         options := listRegisteredDirectoriesOptions{}
         options.PathPrefix = &tmp
 
-        out, err := listRegisteredDirectories(dbconn, options)
+        out, err := listRegisteredDirectories(dbconn, context.Background(), options)
         if err != nil {
             t.Fatal(err)
         }
@@ -2203,7 +2310,7 @@ func TestListRegisteredDirectories(t *testing.T) {
 
         absent := tmp + "_asdasd"
         options.PathPrefix = &absent
-        out, err = listRegisteredDirectories(dbconn, options)
+        out, err = listRegisteredDirectories(dbconn, context.Background(), options)
         if err != nil {
             t.Fatal(err)
         }
@@ -2218,7 +2325,7 @@ func TestListRegisteredDirectories(t *testing.T) {
             options := listRegisteredDirectoriesOptions{}
             options.WithinPath = &tmp
 
-            out, err := listRegisteredDirectories(dbconn, options)
+            out, err := listRegisteredDirectories(dbconn, context.Background(), options)
             if err != nil {
                 t.Fatal(err)
             }
@@ -2228,7 +2335,7 @@ func TestListRegisteredDirectories(t *testing.T) {
 
             absent := tmp + "_asdasd"
             options.WithinPath = &absent
-            out, err = listRegisteredDirectories(dbconn, options)
+            out, err = listRegisteredDirectories(dbconn, context.Background(), options)
             if err != nil {
                 t.Fatal(err)
             }
@@ -2244,18 +2351,18 @@ func TestListRegisteredDirectories(t *testing.T) {
             if err != nil {
                 t.Fatalf(err.Error())
             }
-            comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "fo_user", tokr, add_options)
+            comments, err := addNewDirectory(to_add, []string{ "metadata.json", "other.json" }, "fo_user", tokr, dbconn, context.Background(), add_options)
             if err != nil {
                 t.Fatalf(err.Error())
             }
-            defer deleteDirectory(dbconn, to_add)
+            defer deleteDirectory(to_add, dbconn, context.Background())
             if len(comments) > 0 {
                 t.Fatalf("unexpected comments from the directory addition %v", comments)
             }
 
             options := listRegisteredDirectoriesOptions{}
             options.WithinPath = &to_add
-            out, err := listRegisteredDirectories(dbconn, options)
+            out, err := listRegisteredDirectories(dbconn, context.Background(), options)
             if err != nil {
                 t.Fatal(err)
             }
@@ -2266,7 +2373,7 @@ func TestListRegisteredDirectories(t *testing.T) {
             // Checking foo as a control.
             control := filepath.Join(tmp, "foo")
             options.WithinPath = &control
-            out, err = listRegisteredDirectories(dbconn, options)
+            out, err = listRegisteredDirectories(dbconn, context.Background(), options)
             if err != nil {
                 t.Fatal(err)
             }
@@ -2284,11 +2391,11 @@ func TestListRegisteredDirectories(t *testing.T) {
             if err != nil {
                 t.Fatalf(err.Error())
             }
-            comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr, add_options)
+            comments, err := addNewDirectory(to_add, []string{ "metadata.json", "other.json" }, "myself", tokr, dbconn, context.Background(), add_options)
             if err != nil {
                 t.Fatalf(err.Error())
             }
-            defer deleteDirectory(dbconn, to_add) // resetting the DB for subsequent subtests.
+            defer deleteDirectory(to_add, dbconn, context.Background()) // resetting the DB for subsequent subtests.
             if len(comments) > 0 {
                 t.Fatalf("unexpected comments from the directory addition %v", comments)
             }
@@ -2301,7 +2408,7 @@ func TestListRegisteredDirectories(t *testing.T) {
         exists := "true"
         options := listRegisteredDirectoriesOptions{}
         options.Exists = &exists
-        out, err := listRegisteredDirectories(dbconn, options)
+        out, err := listRegisteredDirectories(dbconn, context.Background(), options)
         if err != nil {
             t.Fatal(err)
         }
@@ -2311,7 +2418,7 @@ func TestListRegisteredDirectories(t *testing.T) {
 
         exists = "false"
         options.Exists = &exists
-        out, err = listRegisteredDirectories(dbconn, options)
+        out, err = listRegisteredDirectories(dbconn, context.Background(), options)
         if err != nil {
             t.Fatal(err)
         }
@@ -2325,7 +2432,7 @@ func TestListRegisteredDirectories(t *testing.T) {
         if err != nil {
             t.Fatal(err)
         }
-        out, err = listRegisteredDirectories(dbconn, options)
+        out, err = listRegisteredDirectories(dbconn, context.Background(), options)
         if err != nil {
             t.Fatal(err)
         }
@@ -2336,7 +2443,7 @@ func TestListRegisteredDirectories(t *testing.T) {
         // Checking that 'any' queries work as expected.
         exists = "any"
         options.Exists = &exists
-        out, err = listRegisteredDirectories(dbconn, options)
+        out, err = listRegisteredDirectories(dbconn, context.Background(), options)
         if err != nil {
             t.Fatal(err)
         }
@@ -2345,7 +2452,7 @@ func TestListRegisteredDirectories(t *testing.T) {
         }
 
         options.Exists = nil
-        out, err = listRegisteredDirectories(dbconn, options)
+        out, err = listRegisteredDirectories(dbconn, context.Background(), options)
         if err != nil {
             t.Fatal(err)
         }
@@ -2356,7 +2463,7 @@ func TestListRegisteredDirectories(t *testing.T) {
 
     t.Run("scroll", func(t *testing.T) {
         options := listRegisteredDirectoriesOptions{ PageLimit: 1 }
-        out, err := listRegisteredDirectories(dbconn, options)
+        out, err := listRegisteredDirectories(dbconn, context.Background(), options)
         if err != nil {
             t.Fatal(err)
         }
@@ -2365,7 +2472,7 @@ func TestListRegisteredDirectories(t *testing.T) {
         }
 
         options.Scroll = &listRegisteredDirectoriesScroll{ Did: out[0].Did, Time: out[0].Time }
-        out2, err := listRegisteredDirectories(dbconn, options)
+        out2, err := listRegisteredDirectories(dbconn, context.Background(), options)
         if err != nil {
             t.Fatal(err)
         }
@@ -2377,7 +2484,7 @@ func TestListRegisteredDirectories(t *testing.T) {
         }
 
         options.Scroll = &listRegisteredDirectoriesScroll{ Did: out2[0].Did, Time: out2[0].Time }
-        out3, err := listRegisteredDirectories(dbconn, options)
+        out3, err := listRegisteredDirectories(dbconn, context.Background(), options)
         if err != nil {
             t.Fatal(err)
         }
@@ -2386,6 +2493,15 @@ func TestListRegisteredDirectories(t *testing.T) {
         }
     })
 
+    t.Run("canceled", func(t *testing.T) {
+        canceled, cancelfun := context.WithCancel(context.Background())
+        cancelfun()
+
+        _, err := listRegisteredDirectories(dbconn, canceled, listRegisteredDirectoriesOptions{})
+        if err == nil || !errors.Is(err, context.Canceled) {
+            t.Error("failed to cancel path retrieval request")
+        }
+    })
 }
 
 func TestIsDirectoryRegistered(t *testing.T) {
@@ -2416,7 +2532,7 @@ func TestIsDirectoryRegistered(t *testing.T) {
         t.Fatalf(err.Error())
     }
 
-    comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr, add_options)
+    comments, err := addNewDirectory(to_add, []string{ "metadata.json", "other.json" }, "myself", tokr, dbconn, context.Background(), add_options)
     if err != nil {
         t.Fatalf(err.Error())
     }
@@ -2425,7 +2541,7 @@ func TestIsDirectoryRegistered(t *testing.T) {
     }
 
     t.Run("present", func(t *testing.T) {
-        found, err := isDirectoryRegistered(dbconn, to_add)
+        found, err := isDirectoryRegistered(to_add, dbconn, context.Background())
         if err != nil {
             t.Fatal(err)
         }
@@ -2433,7 +2549,7 @@ func TestIsDirectoryRegistered(t *testing.T) {
             t.Fatal("should have found one matching path")
         }
 
-        found, err = isDirectoryRegistered(dbconn, filepath.Join(to_add, "stuff"))
+        found, err = isDirectoryRegistered(filepath.Join(to_add, "stuff"), dbconn, context.Background())
         if err != nil {
             t.Fatal(err)
         }
@@ -2441,7 +2557,7 @@ func TestIsDirectoryRegistered(t *testing.T) {
             t.Fatal("should have found one matching path")
         }
 
-        found, err = isDirectoryRegistered(dbconn, to_add)
+        found, err = isDirectoryRegistered(to_add, dbconn, context.Background())
         if err != nil {
             t.Fatal(err)
         }
@@ -2451,12 +2567,22 @@ func TestIsDirectoryRegistered(t *testing.T) {
     })
 
     t.Run("absent", func(t *testing.T) {
-        found, err := isDirectoryRegistered(dbconn, tmp)
+        found, err := isDirectoryRegistered(tmp, dbconn, context.Background())
         if err != nil {
             t.Fatal(err)
         }
         if found {
             t.Fatal("should not have found a matching path")
+        }
+    })
+
+    t.Run("canceled", func(t *testing.T) {
+        canceled, cancelfun := context.WithCancel(context.Background())
+        cancelfun()
+
+        _, err := isDirectoryRegistered(tmp, dbconn, canceled)
+        if err == nil || !errors.Is(err, context.Canceled) {
+            t.Error("failed to cancel path retrieval request")
         }
     })
 }
@@ -2488,7 +2614,7 @@ func TestFetchRegisteredDirectoryNames(t *testing.T) {
         t.Fatalf(err.Error())
     }
 
-    comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "aaron", tokr, add_options)
+    comments, err := addNewDirectory(to_add, []string{ "metadata.json", "other.json" }, "aaron", tokr, dbconn, context.Background(), add_options)
     if err != nil {
         t.Fatalf(err.Error())
     }
@@ -2496,15 +2622,33 @@ func TestFetchRegisteredDirectoryNames(t *testing.T) {
         t.Fatalf("unexpected comments from the directory addition %v", comments)
     }
 
-    out, err := fetchRegisteredDirectoryNames(dbconn, to_add)
-    if len(out) != 2 || out[0] != "metadata.json" || out[1] != "other.json" {
-        t.Fatalf("unexpected names for the registered directory")
-    }
+    t.Run("basic", func(t *testing.T) {
+        out, err := fetchRegisteredDirectoryNames(to_add, dbconn, context.Background())
+        if err != nil {
+            t.Fatal(err)
+        }
+        if len(out) != 2 || out[0] != "metadata.json" || out[1] != "other.json" {
+            t.Fatalf("unexpected names for the registered directory")
+        }
 
-    out, err = fetchRegisteredDirectoryNames(dbconn, filepath.Join(tmp, "margarete"))
-    if len(out) != 0 {
-        t.Fatalf("unexpected names for a non-registered directory")
-    }
+        out, err = fetchRegisteredDirectoryNames(filepath.Join(tmp, "margarete"), dbconn, context.Background())
+        if err != nil {
+            t.Fatal(err)
+        }
+        if len(out) != 0 {
+            t.Fatalf("unexpected names for a non-registered directory")
+        }
+    })
+
+    t.Run("canceled", func(t *testing.T) {
+        canceled, cancelfun := context.WithCancel(context.Background())
+        cancelfun()
+
+        _, err := fetchRegisteredDirectoryNames(to_add, dbconn, canceled)
+        if err == nil || !errors.Is(err, context.Canceled) {
+            t.Error("failed to cancel directory names request")
+        }
+    })
 }
 
 func TestInitializeReadOnlyDatabase(t *testing.T) {
@@ -2542,13 +2686,13 @@ func TestInitializeReadOnlyDatabase(t *testing.T) {
     }
     defer ro_dbconn.Close()
 
-    _, err = addNewDirectory(ro_dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr, add_options)
+    _, err = addNewDirectory(to_add, []string{ "metadata.json", "other.json" }, "myself", tokr, ro_dbconn, context.Background(), add_options)
     if err == nil || strings.Index(err.Error(), "read-only") >= 0 {
         t.Error("expected a failure to modify the database through read-only connection")
     }
 
     // Adding it as a negative control.
-    comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr, add_options)
+    comments, err := addNewDirectory(to_add, []string{ "metadata.json", "other.json" }, "myself", tokr, dbconn, context.Background(), add_options)
     if err != nil {
         t.Fatal(err)
     }
@@ -2557,7 +2701,7 @@ func TestInitializeReadOnlyDatabase(t *testing.T) {
     }
 
     // Checking that we can still read from this.
-    found, err := isDirectoryRegistered(dbconn, to_add)
+    found, err := isDirectoryRegistered(to_add, ro_dbconn, context.Background())
     if err != nil {
         t.Fatal(err)
     }
@@ -2637,7 +2781,7 @@ WHERE tokens.token = ? AND fields.field = ?`,
 
         // Checking that path is not tokenized by default.
         cur_add_options := &addDirectoryContentsOptions{ Concurrency: 2 }
-        comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json" }, "myself", tokr, cur_add_options)
+        comments, err := addNewDirectory(to_add, []string{ "metadata.json" }, "myself", tokr, dbconn, context.Background(), cur_add_options)
         if err != nil {
             t.Fatal(err)
         }
@@ -2669,14 +2813,14 @@ WHERE tokens.token = ?`,
             t.Error("expected no search hits for tokenized path")
         }
 
-        err = deleteDirectory(dbconn, to_add) 
+        err = deleteDirectory(to_add, dbconn, context.Background()) 
         if err != nil {
             t.Fatal(err)
         }
 
         // Trying again with path tokenization enabled.
         cur_add_options.PathField = "__path__"
-        comments, err = addNewDirectory(dbconn, to_add, []string{ "metadata.json" }, "myself", tokr, cur_add_options)
+        comments, err = addNewDirectory(to_add, []string{ "metadata.json" }, "myself", tokr, dbconn, context.Background(), cur_add_options)
         if err != nil {
             t.Fatal(err)
         }
@@ -2703,7 +2847,7 @@ WHERE tokens.token = ?`,
         }
 
         cur_add_options := &addDirectoryContentsOptions{ Concurrency: 2, PathField: "__blah__" }
-        comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json" }, "myself", tokr, cur_add_options)
+        comments, err := addNewDirectory(to_add, []string{ "metadata.json" }, "myself", tokr, dbconn, context.Background(), cur_add_options)
         if err != nil {
             t.Fatal(err)
         }
@@ -2725,7 +2869,7 @@ WHERE tokens.token = ?`,
             t.Fatal(err)
         }
 
-        comments, err = updateDirectories(dbconn, tokr, cur_add_options)
+        comments, err = updateDirectories(tokr, dbconn, context.Background(), cur_add_options)
         if err != nil {
             t.Fatal(err)
         }
@@ -2764,7 +2908,7 @@ func TestListFields(t *testing.T) {
         t.Fatalf(err.Error())
     }
 
-    comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "aaron", tokr, add_options)
+    comments, err := addNewDirectory(to_add, []string{ "metadata.json", "other.json" }, "aaron", tokr, dbconn, context.Background(), add_options)
     if err != nil {
         t.Fatalf(err.Error())
     }
@@ -2774,7 +2918,7 @@ func TestListFields(t *testing.T) {
 
     t.Run("simple", func (t *testing.T) {
         options := listFieldsOptions{}
-        out, err := listFields(dbconn, options)
+        out, err := listFields(dbconn, context.Background(), options)
         if err != nil {
             t.Fatal(err)
         }
@@ -2805,7 +2949,7 @@ func TestListFields(t *testing.T) {
 
     t.Run("count", func (t *testing.T) {
         options := listFieldsOptions{ Count: true }
-        out, err := listFields(dbconn, options)
+        out, err := listFields(dbconn, context.Background(), options)
         if err != nil {
             t.Fatal(err)
         }
@@ -2839,7 +2983,7 @@ func TestListFields(t *testing.T) {
 
     t.Run("scroll", func (t *testing.T) {
         options := listFieldsOptions{ PageLimit: 2 }
-        out, err := listFields(dbconn, options)
+        out, err := listFields(dbconn, context.Background(), options)
         if err != nil {
             t.Fatal(err)
         }
@@ -2860,7 +3004,7 @@ func TestListFields(t *testing.T) {
 
         // Scroll picks up from where we were before.
         options.Scroll = &listFieldsScroll{ Field: out[len(out) - 1].Field }
-        out, err = listFields(dbconn, options)
+        out, err = listFields(dbconn, context.Background(), options)
         if err != nil {
             t.Fatal(err)
         }
@@ -2882,7 +3026,7 @@ func TestListFields(t *testing.T) {
         // Works okay with count=true.
         options.Count = true
         options.Scroll = &listFieldsScroll{ Field: out[len(out) - 1].Field }
-        out, err = listFields(dbconn, options)
+        out, err = listFields(dbconn, context.Background(), options)
         if err != nil {
             t.Fatal(err)
         }
@@ -2908,7 +3052,7 @@ func TestListFields(t *testing.T) {
     t.Run("pattern", func (t *testing.T) {
         pattern := "category.*"
         options := listFieldsOptions{ Pattern: &pattern }
-        out, err := listFields(dbconn, options)
+        out, err := listFields(dbconn, context.Background(), options)
         if err != nil {
             t.Fatal(err)
         }
@@ -2928,7 +3072,7 @@ func TestListFields(t *testing.T) {
 
         // Works in conjunction with count = true.
         options.Count = true
-        out, err = listFields(dbconn, options)
+        out, err = listFields(dbconn, context.Background(), options)
         expected = map[string]bool{ "category.iyashikei": false, "category.nsfw": false }
         for _, x := range out {
             _, ok := expected[x.Field]
@@ -2944,6 +3088,16 @@ func TestListFields(t *testing.T) {
             if !val {
                 t.Errorf("failed to find '%s' in the fields; %v", f, out)
             }
+        }
+    })
+
+    t.Run("canceled", func(t *testing.T) {
+        canceled, cancelfun := context.WithCancel(context.Background())
+        cancelfun()
+
+        _, err := listFields(dbconn, canceled, listFieldsOptions{})
+        if err == nil || !errors.Is(err, context.Canceled) {
+            t.Error("failed to cancel list fields request")
         }
     })
 }
@@ -2975,7 +3129,7 @@ func TestListTokens(t *testing.T) {
         t.Fatalf(err.Error())
     }
 
-    comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "aaron", tokr, add_options)
+    comments, err := addNewDirectory(to_add, []string{ "metadata.json", "other.json" }, "aaron", tokr, dbconn, context.Background(), add_options)
     if err != nil {
         t.Fatalf(err.Error())
     }
@@ -2985,18 +3139,19 @@ func TestListTokens(t *testing.T) {
 
     t.Run("simple", func (t *testing.T) {
         options := listTokensOptions{}
-        out, err := listTokens(dbconn, options)
+        out, err := listTokens(dbconn, context.Background(), options)
         if err != nil {
             t.Fatal(err)
         }
 
-        expected := map[string]bool{ "aaron": false, "hoshino": false, "biyori": false }
+        found := map[string]bool{}
         increasing := true
         last := ""
         for _, x := range out {
-            _, ok := expected[x.Token]
-            if ok {
-                expected[x.Token] = true
+            if _, ok := found[x.Token]; ok {
+                t.Errorf("duplicate token returned %s", x.Token)
+            } else {
+                found[x.Token] = true
             }
             if last != "" && x.Token <= last {
                 increasing = false
@@ -3004,9 +3159,9 @@ func TestListTokens(t *testing.T) {
             last = x.Token
         }
 
-        for f, val := range expected {
-            if !val {
-                t.Errorf("failed to find '%s' in the tokens; %v", f, out)
+        for _, expected := range []string{ "aaron", "hoshino", "biyori" } {
+            if _, ok := found[expected]; !ok {
+                t.Errorf("failed to find '%s' in the tokens; %v", expected, out)
             }
         }
         if !increasing {
@@ -3016,22 +3171,19 @@ func TestListTokens(t *testing.T) {
 
     t.Run("count", func (t *testing.T) {
         options := listTokensOptions{ Count: true }
-        out, err := listTokens(dbconn, options)
+        out, err := listTokens(dbconn, context.Background(), options)
         if err != nil {
             t.Fatal(err)
         }
 
-        expected := map[string]bool{ "akari": false, "yuru": false, "lamb": false }
-        expected_counts := map[string]int64{ "akari": 1, "yuru": 2, "lamb": 2 }
+        found := map[string]int64{}
         increasing := true
         last := ""
         for _, x := range out {
-            _, ok := expected[x.Token]
-            if ok {
-                if *(x.Count) != expected_counts[x.Token] {
-                    t.Errorf("expected a count of %d for %s, got %d instead", expected_counts[x.Token], x.Token, *(x.Count))
-                }
-                expected[x.Token] = true
+            if _, ok := found[x.Token]; ok {
+                t.Errorf("duplicate token %s", x.Token)
+            } else {
+                found[x.Token] = *(x.Count)
             }
             if last != "" && x.Token <= last {
                 increasing = false
@@ -3040,9 +3192,14 @@ func TestListTokens(t *testing.T) {
             last = x.Token
         }
 
-        for f, val := range expected {
-            if !val {
-                t.Errorf("failed to find '%s' in the tokens; %v", f, out)
+        expected := map[string]int64{ "akari": 1, "yuru": 2, "lamb": 2 }
+        for tok, val := range expected {
+            n, ok := found[tok]
+            if !ok {
+                t.Errorf("failed to find '%s' in the tokens; %v", tok, out)
+            }
+            if n != val {
+                t.Errorf("expected a count of %d for %s, got %d instead", val, tok, n)
             }
         }
         if !increasing {
@@ -3052,70 +3209,70 @@ func TestListTokens(t *testing.T) {
 
     t.Run("scroll", func (t *testing.T) {
         options := listTokensOptions{ PageLimit: 2 }
-        out, err := listTokens(dbconn, options)
+        out, err := listTokens(dbconn, context.Background(), options)
         if err != nil {
             t.Fatal(err)
         }
 
-        // Page limit works as expected.
-        expected := map[string]bool{}
+        // Page limit works as found.
+        found := map[string]bool{}
         if len(out) != 2 {
-            t.Error("expected exactly two tokens when limiting to 2")
+            t.Error("found exactly two tokens when limiting to 2")
         }
         for _, x := range out {
-            expected[x.Token] = true
+            found[x.Token] = true
         }
         for _, token := range []string{ "1", "10495" } {
-            if _, ok := expected[token]; !ok {
-                t.Errorf("expected the '%s' token; %v", token, expected)
+            if _, ok := found[token]; !ok {
+                t.Errorf("found the '%s' token; %v", token, found)
             }
         }
 
         // Scroll picks up from where we were before.
         options.Scroll = &listTokensScroll{ Token: out[len(out) - 1].Token }
-        out, err = listTokens(dbconn, options)
+        out, err = listTokens(dbconn, context.Background(), options)
         if err != nil {
             t.Fatal(err)
         }
         if len(out) != 2 {
-            t.Error("expected exactly two tokens when limiting to 2")
+            t.Error("found exactly two tokens when limiting to 2")
         }
         for _, x := range out {
-            _, ok := expected[x.Token]
+            _, ok := found[x.Token]
             if ok {
-                t.Error("unexpected duplicate token")
+                t.Error("unfound duplicate token")
             }
-            expected[x.Token] = true
+            found[x.Token] = true
         }
         for _, token := range []string{ "5", "a" } {
-            if _, ok := expected[token]; !ok {
-                t.Errorf("expected the '%s' token; %v", token, expected)
+            if _, ok := found[token]; !ok {
+                t.Errorf("found the '%s' token; %v", token, found)
             }
         }
 
         // Works okay with count=true.
         options.Count = true
         options.Scroll = &listTokensScroll{ Token: out[len(out) - 1].Token }
-        out, err = listTokens(dbconn, options)
+        out, err = listTokens(dbconn, context.Background(), options)
         if err != nil {
             t.Fatal(err)
         }
         if len(out) != 2 {
-            t.Error("expected exactly two tokens when limiting to 2")
+            t.Error("found exactly two tokens when limiting to 2")
         }
         for _, x := range out {
-            _, ok := expected[x.Token]
+            _, ok := found[x.Token]
             if ok {
-                t.Errorf("unexpected duplicate token; %v", x.Token)
+                t.Errorf("unfound duplicate token; %v", x.Token)
             }
             if *(x.Count) != 1 {
-                t.Errorf("expected a count of 1 for %s, got %d instead", x.Token, *(x.Count))
+                t.Errorf("found a count of 1 for %s, got %d instead", x.Token, *(x.Count))
             }
-            expected[x.Token] = true
+            found[x.Token] = true
         }
         for _, token := range []string{ "aaron", "akari" } {
-            if _, ok := expected[token]; !ok {
-                t.Errorf("expected the '%s' token; %v", token, expected)
+            if _, ok := found[token]; !ok {
+                t.Errorf("found the '%s' token; %v", token, found)
             }
         }
     })
@@ -3123,104 +3280,119 @@ func TestListTokens(t *testing.T) {
     t.Run("pattern", func (t *testing.T) {
         pattern := "a?*"
         options := listTokensOptions{ Pattern: &pattern }
-        out, err := listTokens(dbconn, options)
+        out, err := listTokens(dbconn, context.Background(), options)
         if err != nil {
             t.Fatal(err)
         }
 
-        expected := map[string]bool{ "aaron": false, "akari": false, "akaza": false }
-        for _, x := range out {
-            if _, ok := expected[x.Token]; !ok {
-                t.Errorf("unexpected field after pattern restriction %v", x.Token)
-            }
-            expected[x.Token] = true
+        expected := []string{ "aaron", "akari", "akaza" }
+        if len(out) != len(expected) {
+            t.Fatalf("unexpected length of output %v", out)
         }
-        for f, val := range expected {
-            if !val {
-                t.Errorf("failed to find '%s' in the tokens; %v", f, out)
+        for i, x := range out {
+            if x.Token != expected[i] {
+                t.Errorf("unexpected field after pattern restriction %v", x.Token)
             }
         }
 
         // Works in conjunction with count = true.
         options.Count = true
-        out, err = listTokens(dbconn, options)
-        expected = map[string]bool{ "aaron": false, "akari": false, "akaza": false }
-        for _, x := range out {
-            _, ok := expected[x.Token]
-            if !ok {
+        out, err = listTokens(dbconn, context.Background(), options)
+        for i, x := range out {
+            if x.Token != expected[i] {
                 t.Errorf("unexpected field after pattern restriction %v", x.Token)
             }
             if *(x.Count) != 1 {
                 t.Errorf("expected a count of 1 for %s, got %d instead", x.Token, *(x.Count))
-            }
-            expected[x.Token] = true
-        }
-        for f, val := range expected {
-            if !val {
-                t.Errorf("failed to find '%s' in the tokens; %v", f, out)
             }
         }
     })
 
     t.Run("field", func (t *testing.T) {
-        // Trying with a wildcard field.
-        field := "characters*"
-        options := listTokensOptions{ Field: &field }
-        out, err := listTokens(dbconn, options)
-        if err != nil {
-            t.Fatal(err)
-        }
-        expected := map[string]bool{ "akari": false, "akaza": false, "hoshino": false, "kyouko": false }
-        for _, x := range out {
-            if _, ok := expected[x.Token]; !ok {
-                t.Errorf("unexpected field after field restriction %v", x.Token)
+        t.Run("wildcard", func(t *testing.T) {
+            field := "characters*"
+            options := listTokensOptions{ Field: &field }
+            out, err := listTokens(dbconn, context.Background(), options)
+            if err != nil {
+                t.Fatal(err)
             }
-            expected[x.Token] = true
-        }
-        for f, val := range expected {
-            if !val {
-                t.Errorf("failed to find '%s' in the tokens; %v", f, out)
+            expected := []string{ "akari", "akaza", "hoshino", "kyouko" }
+            if len(out) != len(expected) {
+                t.Fatalf("unexpected length of output %v", out)
             }
-        }
+            for i, x := range out {
+                if x.Token != expected[i] {
+                    t.Errorf("unexpected field after pattern restriction %v", x.Token)
+                }
+            }
+        })
 
-        // Trying without a wildcard.
-        field = "characters.first"
-        options.Field = &field
-        out, err = listTokens(dbconn, options)
-        if err != nil {
-            t.Fatal(err)
-        }
-        expected = map[string]bool{ "akari": false, "hoshino": false }
-        for _, x := range out {
-            if _, ok := expected[x.Token]; !ok {
-                t.Errorf("unexpected field after field restriction %v", x.Token)
+        t.Run("no wildcard", func(t *testing.T) {
+            field := "characters.first"
+            options := listTokensOptions{ Field: &field }
+            out, err := listTokens(dbconn, context.Background(), options)
+            if err != nil {
+                t.Fatal(err)
             }
-            expected[x.Token] = true
-        }
-        for f, val := range expected {
-            if !val {
-                t.Errorf("failed to find '%s' in the tokens; %v", f, out)
+            expected := []string{ "akari", "hoshino" }
+            if len(out) != len(expected) {
+                t.Fatalf("unexpected length of output %v", out)
             }
-        }
+            for i, x := range out {
+                if x.Token != expected[i] {
+                    t.Errorf("unexpected field after pattern restriction %v", x.Token)
+                }
+            }
+        })
 
-        // Works in conjunction with count = true.
-        options.Count = true
-        out, err = listTokens(dbconn, options)
-        expected = map[string]bool{ "akari": false, "hoshino": false }
-        for _, x := range out {
-            _, ok := expected[x.Token]
-            if !ok {
-                t.Errorf("unexpected field after pattern restriction %v", x.Token)
+        t.Run("count", func(t *testing.T) {
+            field := "characters*"
+            options := listTokensOptions{ Field: &field, Count: true }
+            out, err := listTokens(dbconn, context.Background(), options)
+            if err != nil {
+                t.Fatal(err)
             }
-            if *(x.Count) != 1 {
-                t.Errorf("expected a count of 1 for %s, got %d instead", x.Token, *(x.Count))
+            expected := []string{ "akari", "akaza", "hoshino", "kyouko" }
+            if len(out) != len(expected) {
+                t.Fatalf("unexpected length of output %v", out)
             }
-            expected[x.Token] = true
-        }
-        for f, val := range expected {
-            if !val {
-                t.Errorf("failed to find '%s' in the tokens; %v", f, out)
+            for i, x := range out {
+                if x.Token != expected[i] {
+                    t.Errorf("unexpected field after pattern restriction %v", x.Token)
+                }
+                if *(x.Count) != 1 {
+                    t.Errorf("expected a count of 1 for %s, got %d instead", x.Token, *(x.Count))
+                }
             }
+        })
+
+        t.Run("multiple options", func(t *testing.T) {
+            field := "*a*i*e" // match 'anime' and 'favorites'
+            pattern := "yuru*" // match yuru only
+            options := listTokensOptions{ Field: &field, Pattern: &pattern } // multiple WHERE conditions being applied here.
+            out, err := listTokens(dbconn, context.Background(), options)
+            if err != nil {
+                t.Fatal(err)
+            }
+            expected := []string{ "yuru" } // check that 'yuru' only appears once, despite the inner join.
+            if len(out) != len(expected) {
+                t.Fatalf("unexpected length of output %v", out)
+            }
+            for i, x := range out {
+                if x.Token != expected[i] {
+                    t.Errorf("unexpected field after pattern restriction %v", x.Token)
+                }
+            }
+        })
+    })
+
+    t.Run("canceled", func(t *testing.T) {
+        canceled, cancelfun := context.WithCancel(context.Background())
+        cancelfun()
+
+        _, err := listTokens(dbconn, canceled, listTokensOptions{})
+        if err == nil || !errors.Is(err, context.Canceled) {
+            t.Error("failed to cancel list fields request")
         }
     })
 }

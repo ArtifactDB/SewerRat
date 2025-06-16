@@ -250,7 +250,7 @@ func newRegisterFinishHandler(db *sql.DB, verifier *verificationRegistry, tokeni
                 return
             }
         } else {
-            existing, err := fetchRegisteredDirectoryNames(db, output.Path)
+            existing, err := fetchRegisteredDirectoryNames(output.Path, db, r.Context())
             if err != nil {
                 dumpHttpErrorResponse(w, err)
                 return
@@ -274,7 +274,7 @@ func newRegisterFinishHandler(db *sql.DB, verifier *verificationRegistry, tokeni
         }
 
         if output.Block == nil || *(output.Block) {
-            failures, err := addNewDirectory(db, regpath, allowed, username, tokenizer, add_options)
+            failures, err := addNewDirectory(regpath, allowed, username, tokenizer, db, r.Context(), add_options)
             if err != nil {
                 dumpHttpErrorResponse(w, fmt.Errorf("failed to index directory; %w", err))
                 return
@@ -284,7 +284,7 @@ func newRegisterFinishHandler(db *sql.DB, verifier *verificationRegistry, tokeni
             }
         } else {
             go func() {
-                _, err := addNewDirectory(db, regpath, allowed, username, tokenizer, add_options)
+                _, err := addNewDirectory(regpath, allowed, username, tokenizer, db, r.Context(), add_options)
                 if err != nil {
                     log.Printf("failed to add directory %q; %v", regpath, err)
                 }
@@ -325,7 +325,7 @@ func newDeregisterStartHandler(db *sql.DB, verifier *verificationRegistry) func(
         // If the directory doesn't exist, then we don't need to attempt to create a verification code.
         if _, err := os.Lstat(regpath); errors.Is(err, os.ErrNotExist) {
             if output.Block == nil || *(output.Block) {
-                err := deleteDirectory(db, regpath)
+                err := deleteDirectory(regpath, db, r.Context())
                 if err != nil {
                     dumpHttpErrorResponse(w, fmt.Errorf("failed to deregister %q; %w", regpath, err))
                     return
@@ -335,7 +335,7 @@ func newDeregisterStartHandler(db *sql.DB, verifier *verificationRegistry) func(
                 }
             } else {
                 go func() {
-                    err := deleteDirectory(db, regpath)
+                    err := deleteDirectory(regpath, db, r.Context())
                     if err != nil {
                         log.Printf("failed to delete directory %q; %v", regpath, err)
                     }
@@ -387,7 +387,7 @@ func newDeregisterFinishHandler(db *sql.DB, verifier *verificationRegistry, time
         }
 
         if output.Block == nil || *(output.Block) {
-            err := deleteDirectory(db, regpath)
+            err := deleteDirectory(regpath, db, r.Context())
             if err != nil {
                 dumpHttpErrorResponse(w, fmt.Errorf("failed to deregister %q; %w", regpath, err))
                 return
@@ -397,7 +397,7 @@ func newDeregisterFinishHandler(db *sql.DB, verifier *verificationRegistry, time
             }
         } else {
             go func() {
-                err := deleteDirectory(db, regpath)
+                err := deleteDirectory(regpath, db, r.Context())
                 if err != nil {
                     log.Printf("failed to delete directory %q; %v", regpath, err)
                 }
@@ -435,11 +435,7 @@ func newQueryHandler(db *sql.DB, tokenizer *unicodeTokenizer, wild_tokenizer *un
         if params.Has("scroll") {
             val := params.Get("scroll")
             if options.Order.Type == queryOrderPath {
-                valpath, err := url.QueryUnescape(val)
-                if err != nil {
-                    dumpJsonResponse(w, http.StatusBadRequest, map[string]string{ "status": "ERROR", "reason": "'scroll' should contain a URL-encoded path" })
-                }
-                options.Scroll = &queryScroll{ Path: valpath }
+                options.Scroll = &queryScroll{ Path: val }
             } else {
                 i := strings.Index(val, ",")
                 if i < 0 {
@@ -505,7 +501,7 @@ func newQueryHandler(db *sql.DB, tokenizer *unicodeTokenizer, wild_tokenizer *un
             return
         }
 
-        res, err := queryTokens(db, san, options)
+        res, err := queryTokens(san, db, r.Context(), options)
         if err != nil {
             dumpJsonResponse(w, http.StatusInternalServerError, map[string]string{ "status": "ERROR", "reason": fmt.Sprintf("failed to query tokens; %v", err) })
             return
@@ -516,11 +512,11 @@ func newQueryHandler(db *sql.DB, tokenizer *unicodeTokenizer, wild_tokenizer *un
             last := &(res[options.PageLimit - 1])
             var scroll string
             if options.Order.Type == queryOrderPath {
-                scroll = url.QueryEscape(last.Path)
+                scroll = last.Path
             } else {
                 scroll = strconv.FormatInt(last.Time, 10) + "," + strconv.FormatInt(last.Pid, 10)
             }
-            respbody["next"] = endpoint + "?" + encodeNextParameters("scroll", scroll, params, []string{ "order", "limit", "metadata", "translate" })
+            respbody["next"] = endpoint + "?" + encodeNextParameters("scroll", scroll, params, []string{ "order", "metadata", "translate" })
         }
 
         dumpJsonResponse(w, http.StatusOK, respbody)
@@ -560,7 +556,7 @@ func newRetrieveMetadataHandler(db *sql.DB) func(http.ResponseWriter, *http.Requ
             use_metadata = (strings.ToLower(params.Get("metadata")) != "false")
         }
 
-        res, err := retrievePath(db, path, use_metadata)
+        res, err := retrievePath(path, use_metadata, db, r.Context())
         if err != nil {
             dumpHttpErrorResponse(w, fmt.Errorf("failed to retrieve path; %w", err))
             return
@@ -593,7 +589,7 @@ func newRetrieveFileHandler(db *sql.DB) func(http.ResponseWriter, *http.Request)
             return
         }
 
-        okay, err := isDirectoryRegistered(db, filepath.Dir(path))
+        okay, err := isDirectoryRegistered(filepath.Dir(path), db, r.Context())
         if err != nil {
             dumpHttpErrorResponse(w, fmt.Errorf("failed to check directory registration; %w", err))
             return
@@ -663,7 +659,7 @@ func newListFilesHandler(db *sql.DB, whitelist linkWhitelist) func(http.Response
             return
         }
 
-        okay, err := isDirectoryRegistered(db, path)
+        okay, err := isDirectoryRegistered(path, db, r.Context())
         if err != nil {
             dumpHttpErrorResponse(w, fmt.Errorf("failed to check path registration; %w", err))
             return
@@ -679,7 +675,7 @@ func newListFilesHandler(db *sql.DB, whitelist linkWhitelist) func(http.Response
             return
         }
 
-        listing, err := listFiles(path, recursive, whitelist)
+        listing, err := listFiles(path, recursive, whitelist, r.Context())
         if err != nil {
             dumpHttpErrorResponse(w, fmt.Errorf("failed to obtain a directory listing; %w", err))
             return
@@ -761,7 +757,7 @@ func newListRegisteredDirectoriesHandler(db *sql.DB, endpoint string) func(http.
             options.Scroll = &listRegisteredDirectoriesScroll{ Time: time, Did: did }
         }
 
-        output, err := listRegisteredDirectories(db, options)
+        output, err := listRegisteredDirectories(db, r.Context(), options)
         if err != nil {
             dumpHttpErrorResponse(w, fmt.Errorf("failed to check registered directories; %w", err))
             return
@@ -774,7 +770,7 @@ func newListRegisteredDirectoriesHandler(db *sql.DB, endpoint string) func(http.
                 "scroll",
                 strconv.FormatInt(last.Time, 10) + "," + strconv.FormatInt(last.Did, 10),
                 params, 
-                []string { "user", "path_prefix", "within_path", "contains_path", "exists", "limit" },
+                []string { "user", "path_prefix", "within_path", "contains_path", "exists" },
             )
         }
 
@@ -809,7 +805,7 @@ func newListFieldsHandler(db *sql.DB, endpoint string) func(http.ResponseWriter,
             options.Scroll = &listFieldsScroll{ Field: params.Get("scroll") }
         }
 
-        output, err := listFields(db, options)
+        output, err := listFields(db, r.Context(), options)
         if err != nil {
             dumpHttpErrorResponse(w, fmt.Errorf("failed to list available fields; %w", err))
             return
@@ -821,7 +817,7 @@ func newListFieldsHandler(db *sql.DB, endpoint string) func(http.ResponseWriter,
                 "scroll",
                 output[options.PageLimit - 1].Field,
                 params,
-                []string { "pattern", "count", "limit" },
+                []string { "pattern", "count" },
             )
         }
 
@@ -859,7 +855,7 @@ func newListTokensHandler(db *sql.DB, endpoint string) func(http.ResponseWriter,
             options.Scroll = &listTokensScroll{ Token: params.Get("scroll") }
         }
 
-        output, err := listTokens(db, options)
+        output, err := listTokens(db, r.Context(), options)
         if err != nil {
             dumpHttpErrorResponse(w, fmt.Errorf("failed to list available tokens; %w", err))
             return
@@ -871,7 +867,7 @@ func newListTokensHandler(db *sql.DB, endpoint string) func(http.ResponseWriter,
                 "scroll",
                 output[options.PageLimit - 1].Token,
                 params,
-                []string { "pattern", "field", "count", "limit" },
+                []string { "pattern", "field", "count" },
             )
         }
 

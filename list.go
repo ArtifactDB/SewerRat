@@ -7,6 +7,7 @@ import (
     "path/filepath"
     "strings"
     "errors"
+    "context"
 )
 
 func readSymlink(path string) (string, error) {
@@ -20,7 +21,7 @@ func readSymlink(path string) (string, error) {
     return target, nil
 }
 
-func listFiles(dir string, recursive bool, whitelist linkWhitelist) ([]string, error) {
+func listFiles(dir string, recursive bool, whitelist linkWhitelist, ctx context.Context) ([]string, error) {
     // It is assumed that 'dir' is a directory or a symlink to a directory;
     // check with verifyDirectory() before calling this function.
 
@@ -28,6 +29,9 @@ func listFiles(dir string, recursive bool, whitelist linkWhitelist) ([]string, e
     err := filepath.WalkDir(dir, func(path string, info fs.DirEntry, err error) error {
         if err != nil {
             return err
+        }
+        if err := ctx.Err(); err != nil {
+            return fmt.Errorf("file listing request canceled; %w", err)
         }
 
         is_dir := info.IsDir()
@@ -58,7 +62,7 @@ func listFiles(dir string, recursive bool, whitelist linkWhitelist) ([]string, e
                         if !recursive {
                             to_report = append(to_report, rel + "/")
                         } else {
-                            target_list, err := listFiles(target, recursive, whitelist)
+                            target_list, err := listFiles(target, recursive, whitelist, ctx)
                             if err != nil {
                                 return err
                             }
@@ -89,7 +93,7 @@ func listFiles(dir string, recursive bool, whitelist linkWhitelist) ([]string, e
  * doesn't exist or is invalid, we simply return an empty list of metadata
  * files, and report the failure.
  */
-func listMetadata(dir string, base_names []string, whitelist linkWhitelist) (map[string]fs.FileInfo, []string) {
+func listMetadata(dir string, base_names []string, whitelist linkWhitelist, ctx context.Context) (map[string]fs.FileInfo, []string) {
     curcontents := map[string]fs.FileInfo{}
     curfailures := []string{}
     curnames := map[string]bool{}
@@ -113,6 +117,9 @@ func listMetadata(dir string, base_names []string, whitelist linkWhitelist) (map
         if err != nil {
             curfailures = append(curfailures, fmt.Sprintf("failed to walk %q; %v", path, err))
             return nil
+        }
+        if err := ctx.Err(); err != nil {
+            return fmt.Errorf("metadata listing request canceled; %w", err)
         }
 
         if d.IsDir() {
@@ -174,7 +181,7 @@ func listMetadata(dir string, base_names []string, whitelist linkWhitelist) (map
             return nil
         }
 
-        target_list, target_fails := listMetadata(target_path, base_names, whitelist)
+        target_list, target_fails := listMetadata(target_path, base_names, whitelist, ctx)
         for k, v := range target_list {
             rel, err := filepath.Rel(target_path, k)
             if err == nil {

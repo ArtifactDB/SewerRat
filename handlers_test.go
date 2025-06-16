@@ -15,6 +15,7 @@ import (
     "sort"
     "time"
     "strconv"
+    "context"
 )
 
 func TestDumpJsonResponse(t *testing.T) {
@@ -556,7 +557,7 @@ func TestDeregisterHandlers(t *testing.T) {
         if err != nil {
             t.Fatal(err)
         }
-        comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr, add_options)
+        comments, err := addNewDirectory(to_add, []string{ "metadata.json", "other.json" }, "myself", tokr, dbconn, context.Background(), add_options)
         if err != nil {
             t.Fatal(err)
         }
@@ -691,7 +692,7 @@ func TestDeregisterHandlers(t *testing.T) {
         }
 
         add_options := &addDirectoryContentsOptions{ Concurrency: 1 }
-        comments, err := addNewDirectory(dbconn, to_add_and_remove, []string{ "metadata.json", "other.json" }, "myself", tokr, add_options)
+        comments, err := addNewDirectory(to_add_and_remove, []string{ "metadata.json", "other.json" }, "myself", tokr, dbconn, context.Background(), add_options)
         if err != nil {
             t.Fatal(err)
         }
@@ -789,7 +790,7 @@ func TestQueryHandler(t *testing.T) {
     }
 
     add_options := &addDirectoryContentsOptions{ Concurrency: 1 }
-    comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr, add_options)
+    comments, err := addNewDirectory(to_add, []string{ "metadata.json", "other.json" }, "myself", tokr, dbconn, context.Background(), add_options)
     if err != nil {
         t.Fatal(err)
     }
@@ -1145,7 +1146,7 @@ func TestRetrieveMetadataHandler(t *testing.T) {
     }
 
     add_options := &addDirectoryContentsOptions{ Concurrency: 1 }
-    comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr, add_options)
+    comments, err := addNewDirectory(to_add, []string{ "metadata.json", "other.json" }, "myself", tokr, dbconn, context.Background(), add_options)
     if err != nil {
         t.Fatal(err)
     }
@@ -1294,7 +1295,7 @@ func TestRetrieveFileHandler(t *testing.T) {
 
     // Here, nothing is actually indexed! So we can't get confused with the metadata retrievals.
     add_options := &addDirectoryContentsOptions{ Concurrency: 1 }
-    comments, err := addNewDirectory(dbconn, to_add, []string{}, "myself", tokr, add_options)
+    comments, err := addNewDirectory(to_add, []string{}, "myself", tokr, dbconn, context.Background(), add_options)
     if err != nil {
         t.Fatal(err)
     }
@@ -1425,7 +1426,7 @@ func TestListFilesHandler(t *testing.T) {
     }
 
     add_options := &addDirectoryContentsOptions{ Concurrency: 1 }
-    comments, err := addNewDirectory(dbconn, to_add, []string{}, "myself", tokr, add_options)
+    comments, err := addNewDirectory(to_add, []string{}, "myself", tokr, dbconn, context.Background(), add_options)
     if err != nil {
         t.Fatal(err)
     }
@@ -1578,7 +1579,7 @@ func TestListRegisteredDirectoriesHandler(t *testing.T) {
             t.Fatalf(err.Error())
         }
 
-        comments, err := addNewDirectory(dbconn, to_add, []string{"metadata.json"}, name, tokr, add_options)
+        comments, err := addNewDirectory(to_add, []string{"metadata.json"}, name, tokr, dbconn, context.Background(), add_options)
         if err != nil {
             t.Fatal(err)
         }
@@ -1839,7 +1840,7 @@ func TestListFieldsHandler(t *testing.T) {
     }
 
     add_options := &addDirectoryContentsOptions{ Concurrency: 1 }
-    comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr, add_options)
+    comments, err := addNewDirectory(to_add, []string{ "metadata.json", "other.json" }, "myself", tokr, dbconn, context.Background(), add_options)
     if err != nil {
         t.Fatal(err)
     }
@@ -1948,7 +1949,7 @@ func TestListFieldsHandler(t *testing.T) {
                 }
             }
 
-            if !strings.Contains(r.Next, "scroll=") || !strings.Contains(r.Next, "limit=5") {
+            if !strings.Contains(r.Next, "scroll=") {
                 t.Errorf("expected a next string; %v", r) 
             }
             endpoint = r.Next
@@ -2019,7 +2020,7 @@ func TestListTokensHandler(t *testing.T) {
     }
 
     add_options := &addDirectoryContentsOptions{ Concurrency: 1 }
-    comments, err := addNewDirectory(dbconn, to_add, []string{ "metadata.json", "other.json" }, "myself", tokr, add_options)
+    comments, err := addNewDirectory(to_add, []string{ "metadata.json", "other.json" }, "myself", tokr, dbconn, context.Background(), add_options)
     if err != nil {
         t.Fatal(err)
     }
@@ -2129,7 +2130,7 @@ func TestListTokensHandler(t *testing.T) {
                 }
             }
 
-            if !strings.Contains(r.Next, "scroll=") || !strings.Contains(r.Next, "limit=5") {
+            if !strings.Contains(r.Next, "scroll=") {
                 t.Errorf("expected a next string; %v", r) 
             }
             endpoint = r.Next

@@ -6,6 +6,8 @@ import (
     "path/filepath"
     "sort"
     "strings"
+    "context"
+    "errors"
 )
 
 func TestListFiles(t *testing.T) {
@@ -34,7 +36,7 @@ func TestListFiles(t *testing.T) {
 
     // Checking that we pull out all the files.
     t.Run("basic", func(t *testing.T) {
-        all, err := listFiles(dir, true, nil)
+        all, err := listFiles(dir, true, nil, context.Background())
         if (err != nil) {
             t.Fatal(err)
         }
@@ -47,7 +49,7 @@ func TestListFiles(t *testing.T) {
 
     // Checking that the directories are properly listed.
     t.Run("non-recursive", func(t *testing.T) {
-        all, err := listFiles(dir, false, nil)
+        all, err := listFiles(dir, false, nil, context.Background())
         if (err != nil) {
             t.Fatal(err)
         }
@@ -80,7 +82,7 @@ func TestListFiles(t *testing.T) {
     }
 
     t.Run("skip symbolic nested", func(t *testing.T) {
-        all, err := listFiles(more_symdir, true, nil)
+        all, err := listFiles(more_symdir, true, nil, context.Background())
         if err != nil {
             t.Fatal(err)
         }
@@ -88,7 +90,7 @@ func TestListFiles(t *testing.T) {
             t.Fatalf("should not recurse into symbolic links; %v", all)
         }
 
-        all, err = listFiles(more_symdir, false, nil)
+        all, err = listFiles(more_symdir, false, nil, context.Background())
         if err != nil {
             t.Fatal(err)
         }
@@ -99,7 +101,7 @@ func TestListFiles(t *testing.T) {
 
     // Unless they've been whitelisted.
     t.Run("whitelisted symbolic", func(t *testing.T) {
-        all, err := listFiles(more_symdir, true, linkWhitelist{ dir: nil })
+        all, err := listFiles(more_symdir, true, linkWhitelist{ dir: nil }, context.Background())
         if err != nil {
             t.Fatal(err)
         }
@@ -107,7 +109,7 @@ func TestListFiles(t *testing.T) {
             t.Fatalf("should recurse into whitelisted symbolic links; %v", all)
         }
 
-        all, err = listFiles(more_symdir, false, linkWhitelist{ dir: nil })
+        all, err = listFiles(more_symdir, false, linkWhitelist{ dir: nil }, context.Background())
         if err != nil {
             t.Fatal(err)
         }
@@ -128,16 +130,26 @@ func TestListFiles(t *testing.T) {
             t.Fatal(err)
         }
 
-        all, err := listFiles(host, false, nil)
+        all, err := listFiles(host, false, nil, context.Background())
         if len(all) != 0 {
             t.Errorf("unexpected results from listing via an un-whitelisted symlink (%q)", all)
         }
 
         // But if it is in the whitelist, it will be entered.
-        all, err = listFiles(more_symdir, false, linkWhitelist{ dir: nil })
+        all, err = listFiles(more_symdir, false, linkWhitelist{ dir: nil }, context.Background())
         sort.Strings(all)
         if len(all) != 3 || all[0] != "A" || all[1] != "extra" || all[2] != "sub/" {
             t.Errorf("unexpected results from listing via a whitelisted symlink (%q)", all)
+        }
+    })
+
+    t.Run("canceled", func(t *testing.T) {
+        canceled, cancelfun := context.WithCancel(context.Background())
+        cancelfun()
+
+        _, err := listFiles(dir, false, nil, canceled)
+        if err == nil || !errors.Is(err, context.Canceled) {
+            t.Error("expected list files job to be canceled")
         }
     })
 }
@@ -173,7 +185,7 @@ func TestListMetadata(t *testing.T) {
     }
 
     t.Run("simple", func(t *testing.T) {
-        found, fails := listMetadata(dir, []string{ "A.json" }, nil)
+        found, fails := listMetadata(dir, []string{ "A.json" }, nil, context.Background())
         if len(fails) > 0 {
             t.Fatal("unexpected failures")
         }
@@ -192,7 +204,7 @@ func TestListMetadata(t *testing.T) {
     })
 
     t.Run("multiple", func(t *testing.T) {
-        found, fails := listMetadata(dir, []string{ "A.json", "B.json" }, nil)
+        found, fails := listMetadata(dir, []string{ "A.json", "B.json" }, nil, context.Background())
         if len(fails) > 0 {
             t.Fatal("unexpected failures")
         }
@@ -211,15 +223,25 @@ func TestListMetadata(t *testing.T) {
     })
 
     t.Run("invalid directories", func(t *testing.T) {
-        _, fails := listMetadata("missing", []string{ "A.json", "B.json" }, nil)
+        _, fails := listMetadata("missing", []string{ "A.json", "B.json" }, nil, context.Background())
         if len(fails) != 1 || !strings.Contains(fails[0], "no such file") {
             t.Fatalf("should report a failure when directory is missing")
         }
 
         // Providing a file instead of a directory.
-        _, fails = listMetadata(filepath.Join(dir, "A.json"), []string{ "A.json", "B.json" }, nil)
+        _, fails = listMetadata(filepath.Join(dir, "A.json"), []string{ "A.json", "B.json" }, nil, context.Background())
         if len(fails) != 1 || !strings.Contains(fails[0], "not a directory") {
             t.Fatalf("should report a failure when supplied path is not a directory")
+        }
+    })
+
+    t.Run("canceled", func(t *testing.T) {
+        canceled, cancelfun := context.WithCancel(context.Background())
+        cancelfun()
+
+        _, fails := listMetadata(dir, nil, nil, canceled)
+        if len(fails) == 0 || !strings.Contains(fails[0], "canceled") {
+            t.Error("expected list metadata job to be canceled")
         }
     })
 }
@@ -255,7 +277,7 @@ func TestListMetadataSymlink(t *testing.T) {
     }
 
     t.Run("symlink", func(t *testing.T) {
-        found, fails := listMetadata(dir, []string{ "foo.json", "B.json" }, nil)
+        found, fails := listMetadata(dir, []string{ "foo.json", "B.json" }, nil, context.Background())
         if len(fails) > 0 {
             t.Fatal("unexpected failures")
         }
@@ -274,7 +296,7 @@ func TestListMetadataSymlink(t *testing.T) {
         }
 
         // Checking that the basename of the link is correctly verified.
-        found, fails = listMetadata(dir, []string{ "B.json" }, nil)
+        found, fails = listMetadata(dir, []string{ "B.json" }, nil, context.Background())
         if len(fails) > 0 {
             t.Fatal("unexpected failures")
         }
@@ -284,7 +306,7 @@ func TestListMetadataSymlink(t *testing.T) {
     })
 
     t.Run("whitelisted", func(t *testing.T) {
-        found, fails := listMetadata(dir, []string{ "foo.json", "B.json" }, linkWhitelist{ hostdir: nil })
+        found, fails := listMetadata(dir, []string{ "foo.json", "B.json" }, linkWhitelist{ hostdir: nil }, context.Background())
         if len(fails) > 0 {
             t.Fatal("unexpected failures")
         }
@@ -312,7 +334,7 @@ func TestListMetadataSymlink(t *testing.T) {
             t.Fatal(err)
         }
 
-        found, fails := listMetadata(host, []string{ "A.json" }, nil)
+        found, fails := listMetadata(host, []string{ "A.json" }, nil, context.Background())
         if len(fails) > 0 {
             t.Fatalf("unexpected failures; %v", fails)
         }
@@ -321,7 +343,7 @@ func TestListMetadataSymlink(t *testing.T) {
         }
 
         // But if it is in the whitelist, it will be entered.
-        found, fails = listMetadata(host, []string{ "A.json" }, linkWhitelist{ dir: nil })
+        found, fails = listMetadata(host, []string{ "A.json" }, linkWhitelist{ dir: nil }, context.Background())
         if len(fails) > 0 {
             t.Fatalf("unexpected failures; %v", fails)
         }
@@ -361,7 +383,7 @@ func TestListMetadataDot(t *testing.T) {
     }
 
     t.Run("dot", func(t *testing.T) {
-        found, fails := listMetadata(dir, []string{ "A.json" }, nil)
+        found, fails := listMetadata(dir, []string{ "A.json" }, nil, context.Background())
         if len(fails) > 0 {
             t.Fatal("unexpected failures")
         }
@@ -403,7 +425,7 @@ func TestListMetadataIgnored(t *testing.T) {
     }
 
     t.Run("control", func(t *testing.T) {
-        found, fails := listMetadata(dir, []string{ "A.json" }, nil)
+        found, fails := listMetadata(dir, []string{ "A.json" }, nil, context.Background())
         if len(fails) > 0 {
             t.Fatal("unexpected failures")
         }
@@ -418,7 +440,7 @@ func TestListMetadataIgnored(t *testing.T) {
     }
 
     t.Run("ignored", func(t *testing.T) {
-        found, fails := listMetadata(dir, []string{ "A.json" }, nil)
+        found, fails := listMetadata(dir, []string{ "A.json" }, nil, context.Background())
         if len(fails) > 0 {
             t.Fatal("unexpected failures")
         }
