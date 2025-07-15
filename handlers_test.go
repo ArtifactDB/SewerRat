@@ -952,6 +952,17 @@ func TestQueryHandler(t *testing.T) {
         if !equalPathArrays(all_paths, []string{ "metadata.json", "stuff/other.json" }, to_add) {
             t.Fatalf("unexpected paths %v", all_paths)
         }
+
+        // Should fail without a closing brace.
+        req, err = http.NewRequest("POST", "/query?translate=true", strings.NewReader(`{ "type": "text", "text": "lamb OR (chicken" }`))
+        if err != nil {
+            t.Fatal(err)
+        }
+        rr = httptest.NewRecorder()
+        handler.ServeHTTP(rr, req)
+        if rr.Code != http.StatusBadRequest {
+            t.Fatalf("should have failed with a bad request")
+        }
     })
 
     t.Run("wildcards", func (t *testing.T) {
