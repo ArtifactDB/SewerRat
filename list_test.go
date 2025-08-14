@@ -3,6 +3,7 @@ package main
 import (
     "testing"
     "os"
+    "os/user"
     "path/filepath"
     "sort"
     "strings"
@@ -81,27 +82,33 @@ func TestListFiles(t *testing.T) {
         t.Fatal(err)
     }
 
+    self_user, err := user.Current()
+    if err != nil {
+        t.Fatal(err)
+    }
+    self_name := self_user.Username
+
     t.Run("skip symbolic nested", func(t *testing.T) {
-        all, err := listFiles(more_symdir, true, nil, context.Background())
+        all, err := listFiles(more_symdir, true, linkWhitelist{}, context.Background())
         if err != nil {
             t.Fatal(err)
         }
-        if !equalStringArrays(all, []string{ "A", "extra", "sub" }) {
+        if !equalStringArrays(all, []string{ "extra" }) {
             t.Fatalf("should not recurse into symbolic links; %v", all)
         }
 
-        all, err = listFiles(more_symdir, false, nil, context.Background())
+        all, err = listFiles(more_symdir, false, linkWhitelist{}, context.Background())
         if err != nil {
             t.Fatal(err)
         }
-        if !equalStringArrays(all, []string{ "A", "extra", "sub" }) {
+        if !equalStringArrays(all, []string{ "extra" }) {
             t.Fatalf("should not treat symbolic links as directories; %v", all)
         }
     })
 
     // Unless they've been whitelisted.
     t.Run("whitelisted symbolic", func(t *testing.T) {
-        all, err := listFiles(more_symdir, true, linkWhitelist{ dir: nil }, context.Background())
+        all, err := listFiles(more_symdir, true, linkWhitelist{ self_name: true }, context.Background())
         if err != nil {
             t.Fatal(err)
         }
@@ -109,7 +116,7 @@ func TestListFiles(t *testing.T) {
             t.Fatalf("should recurse into whitelisted symbolic links; %v", all)
         }
 
-        all, err = listFiles(more_symdir, false, linkWhitelist{ dir: nil }, context.Background())
+        all, err = listFiles(more_symdir, false, linkWhitelist{ self_name: true }, context.Background())
         if err != nil {
             t.Fatal(err)
         }
@@ -130,13 +137,13 @@ func TestListFiles(t *testing.T) {
             t.Fatal(err)
         }
 
-        all, err := listFiles(host, false, nil, context.Background())
+        all, err := listFiles(host, false, linkWhitelist{}, context.Background())
         if len(all) != 0 {
             t.Errorf("unexpected results from listing via an un-whitelisted symlink (%q)", all)
         }
 
         // But if it is in the whitelist, it will be entered.
-        all, err = listFiles(more_symdir, false, linkWhitelist{ dir: nil }, context.Background())
+        all, err = listFiles(more_symdir, false, linkWhitelist{ self_name: true }, context.Background())
         sort.Strings(all)
         if len(all) != 3 || all[0] != "A" || all[1] != "extra" || all[2] != "sub/" {
             t.Errorf("unexpected results from listing via a whitelisted symlink (%q)", all)
@@ -276,48 +283,53 @@ func TestListMetadataSymlink(t *testing.T) {
         t.Fatal(err)
     }
 
-    t.Run("symlink", func(t *testing.T) {
-        found, fails := listMetadata(dir, []string{ "foo.json", "B.json" }, nil, context.Background())
+    self_user, err := user.Current()
+    if err != nil {
+        t.Fatal(err)
+    }
+    self_name := self_user.Username
+
+    t.Run("no whitelist", func(t *testing.T) {
+        found, fails := listMetadata(dir, []string{ "foo.json", "B.json" }, linkWhitelist{}, context.Background())
+        if len(fails) > 0 {
+            t.Fatal("unexpected failures")
+        }
+        if len(found) != 0 {
+            t.Fatalf("expected no files, got %v", found)
+        }
+    })
+
+    t.Run("whitelisted", func(t *testing.T) {
+        found, fails := listMetadata(dir, []string{ "foo.json", "B.json" }, linkWhitelist{ self_name: true }, context.Background())
         if len(fails) > 0 {
             t.Fatal("unexpected failures")
         }
 
-        // B.json in the linked directory should be ignored as we don't recurse into them.
-        if len(found) != 1 {
-            t.Fatal("expected exactly one file")
+        if len(found) != 2 {
+            t.Fatalf("expected two files; %v", found)
         }
 
         info, ok := found[filepath.Join(dir, "foo.json")]
         if !ok {
             t.Fatal("missing file")
         }
-        if info.Mode() & os.ModeSymlink != 0 { // uses information from the link.
+        if info.Mode() & os.ModeSymlink != 0 { // uses information from the link target.
             t.Fatal("expected file info from link target")
         }
 
-        // Checking that the basename of the link is correctly verified.
-        found, fails = listMetadata(dir, []string{ "B.json" }, nil, context.Background())
+        if _, ok := found[filepath.Join(dir, "symlinked/B.json")]; !ok { // goes through the symlink to get to the targeted directory's contents.
+            t.Fatal("missing file")
+        }
+
+        // Checking that the basename of the link is correctly verified, not the name of the target.
+        found, fails = listMetadata(dir, []string{ "B.json" }, linkWhitelist{ self_name: true }, context.Background())
         if len(fails) > 0 {
             t.Fatal("unexpected failures")
         }
-        if len(found) != 0 { // foo.json isn't considered anymore, and B.json can't be reached through the symlink.
+        if len(found) != 1 { // foo.json isn't considered anymore, and B.json can't be reached through the symlink.
             t.Fatal("expected no files")
         }
-    })
-
-    t.Run("whitelisted", func(t *testing.T) {
-        found, fails := listMetadata(dir, []string{ "foo.json", "B.json" }, linkWhitelist{ hostdir: nil }, context.Background())
-        if len(fails) > 0 {
-            t.Fatal("unexpected failures")
-        }
-
-        // B.json in the linked directory should now be detected.
-        if len(found) != 2 {
-            t.Fatalf("expected two files; %v", found)
-        }
-
-        _, ok := found[filepath.Join(dir, "symlinked/B.json")]
-        if !ok {
+        if _, ok := found[filepath.Join(dir, "symlinked/B.json")]; !ok {
             t.Fatal("missing file")
         }
     })
@@ -343,7 +355,7 @@ func TestListMetadataSymlink(t *testing.T) {
         }
 
         // But if it is in the whitelist, it will be entered.
-        found, fails = listMetadata(host, []string{ "A.json" }, linkWhitelist{ dir: nil }, context.Background())
+        found, fails = listMetadata(host, []string{ "A.json" }, linkWhitelist{ self_name: true }, context.Background())
         if len(fails) > 0 {
             t.Fatalf("unexpected failures; %v", fails)
         }

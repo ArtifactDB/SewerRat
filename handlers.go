@@ -41,18 +41,16 @@ func dumpJsonResponse(w http.ResponseWriter, status int, v interface{}) {
     }
 }
 
-func validatePath(path string) (string, error) { 
+// This function is strictly lexical; we just check and clean the path, we don't consult the filesystem at this point.
+// In particular, we don't evaluate the symbolic links as the "real" path may not be consistent across the shared filesystem (e.g., due to mounts onto different compute centers). 
+// Verification of the safety of whitelisted symlinks will be done elsewhere, by the verifySymlink function. 
+func cleanPath(path string) (string, error) { 
     if path == "" {
         return "", errors.New("'path' should be present as a non-empty string")
     }
     if !filepath.IsAbs(path) {
         return "", errors.New("'path' should be an absolute path")
     }
-
-    // We limit ourselves to cleaning the path and no further normalization.
-    // In particular, we don't try to evaluate the symbolic links as the "real"
-    // path may not be consistent across the shared filesystem (e.g., due to
-    // mounts onto different compute centers). 
     return filepath.Clean(path), nil
 }
 
@@ -146,7 +144,7 @@ func checkVerificationCode(path string, verifier *verificationRegistry, timeout 
     return code_info, nil
 }
 
-func verifySymlinks(path string, whitelist linkWhitelist) error {
+func checkPotentialSymlinks(path string, whitelist linkWhitelist) error {
     for {
         info, err := os.Lstat(path)
         if errors.Is(err, os.ErrNotExist) {
@@ -173,7 +171,7 @@ func verifySymlinks(path string, whitelist linkWhitelist) error {
 }
 
 func verifyDirectory(dir string, whitelist linkWhitelist) error {
-    err := verifySymlinks(dir, whitelist)
+    err := checkPotentialSymlinks(dir, whitelist)
     if err != nil {
         return err
     }
@@ -209,7 +207,7 @@ func newRegisterStartHandler(verifier *verificationRegistry, whitelist linkWhite
             return
         }
 
-        regpath, err := validatePath(output.Path)
+        regpath, err := cleanPath(output.Path)
         if err != nil {
             dumpErrorResponse(w, http.StatusBadRequest, err.Error())
             return
@@ -251,7 +249,7 @@ func newRegisterFinishHandler(db *sql.DB, verifier *verificationRegistry, tokeni
             return
         }
 
-        regpath, err := validatePath(output.Path)
+        regpath, err := cleanPath(output.Path)
         if err != nil {
             dumpErrorResponse(w, http.StatusBadRequest, err.Error())
             return
@@ -342,7 +340,7 @@ func newDeregisterStartHandler(db *sql.DB, verifier *verificationRegistry) func(
             return
         }
 
-        regpath, err := validatePath(output.Path)
+        regpath, err := cleanPath(output.Path)
         if err != nil {
             dumpErrorResponse(w, http.StatusBadRequest, err.Error())
             return
@@ -401,7 +399,7 @@ func newDeregisterFinishHandler(db *sql.DB, verifier *verificationRegistry, time
             return
         }
 
-        regpath, err := validatePath(output.Path)
+        regpath, err := cleanPath(output.Path)
         if err != nil {
             dumpErrorResponse(w, http.StatusBadRequest, err.Error())
             return
@@ -611,14 +609,9 @@ func newRetrieveFileHandler(db *sql.DB, whitelist linkWhitelist) func(http.Respo
             return
         }
 
-        path, err = validatePath(path)
+        path, err = cleanPath(path)
         if err != nil {
             dumpErrorResponse(w, http.StatusBadRequest, fmt.Sprintf("invalid path; %v", err))
-            return
-        }
-        err = verifySymlinks(path, whitelist)
-        if err != nil {
-            dumpHttpErrorResponse(w, err)
             return
         }
 
@@ -632,9 +625,17 @@ func newRetrieveFileHandler(db *sql.DB, whitelist linkWhitelist) func(http.Respo
             return
         }
 
+        err = checkPotentialSymlinks(path, whitelist)
+        if err != nil {
+            dumpHttpErrorResponse(w, err)
+            return
+        }
+
         // We use Stat() to resolve any symlink to a file, given that all the symlinks are whitelisted.
         info, err := os.Stat(path)
         if err != nil {
+            fmt.Println("YAY")
+            fmt.Println(err)
             if errors.Is(err, os.ErrNotExist) {
                 err = newHttpError(http.StatusNotFound, errors.New("path does not exist"))
             } else {

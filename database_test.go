@@ -523,8 +523,31 @@ func TestAddNewDirectory(t *testing.T) {
         }
 
         // All symlink paths to directories/files are ignored.
-        if !equalStringArrays(all_paths, []string{ "symlink/metadata.json", "symlink/other.json" }) {
+        if !equalStringArrays(all_paths, []string{ "symlink/other.json" }) {
             t.Fatalf("unexpected paths %v", all_paths)
+        }
+
+        // Unless we explicitly whitelist it.
+        self_user, err := user.Current()
+        if err != nil {
+            t.Fatal(err)
+        }
+        add_options_wl := &addDirectoryContentsOptions{ Concurrency: 1, LinkWhitelist: linkWhitelist{ self_user.Username: true } }
+
+        comments, err = addNewDirectory(symdir, []string{ "metadata.json", "other.json" }, "myself", tokr, dbconn, context.Background(), add_options_wl)
+        if err != nil {
+            t.Fatal(err)
+        }
+        if len(comments) != 0 {
+            t.Fatalf("unexpected comments from the directory addition %v", comments)
+        }
+
+        all_paths, err = listPaths(dbconn, tmp)
+        if err != nil {
+            t.Fatal(err)
+        }
+        if !equalStringArrays(all_paths, []string{ "symlink/metadata.json", "symlink/other.json", "symlink/stuff/metadata.json", "symlink/stuff/other.json" }) {
+            t.Fatalf("unexpected paths in the index %v", all_paths)
         }
     })
 
