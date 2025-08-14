@@ -26,7 +26,7 @@ func listFiles(dir string, recursive bool, whitelist linkWhitelist, ctx context.
     // check with verifyDirectory() before calling this function.
 
     to_report := []string{}
-    err := filepath.WalkDir(dir, func(path string, info fs.DirEntry, err error) error {
+    err := filepath.WalkDir(dir, func(path string, dentry fs.DirEntry, err error) error {
         if err != nil {
             return err
         }
@@ -34,7 +34,7 @@ func listFiles(dir string, recursive bool, whitelist linkWhitelist, ctx context.
             return fmt.Errorf("file listing request canceled; %w", err)
         }
 
-        is_dir := info.IsDir()
+        is_dir := dentry.IsDir()
         if is_dir {
             if recursive || dir == path {
                 return nil
@@ -53,26 +53,34 @@ func listFiles(dir string, recursive bool, whitelist linkWhitelist, ctx context.
 
         // If it's a symlink that refers to a subdirectory of a whitelisted
         // directory, we treat it as a directory; otherwise we treat it as a file.
-        if info.Type() & os.ModeSymlink != 0 {
-            if len(whitelist) > 0 {
-                target, err := readSymlink(path)
-                if err == nil && isLinkWhitelisted(path, target, whitelist) {
-                    target_details, err := os.Stat(target)
-                    if err == nil && target_details.IsDir() {
-                        if !recursive {
-                            to_report = append(to_report, rel + "/")
-                        } else {
-                            target_list, err := listFiles(target, recursive, whitelist, ctx)
-                            if err != nil {
-                                return err
-                            }
-                            for _, tpath := range target_list {
-                                to_report = append(to_report, filepath.Join(rel, tpath))
-                            }
-                        }
-                        return nil
+        if dentry.Type() & os.ModeSymlink != 0 {
+            info, err := dentry.Info()
+            if err != nil {
+                return err
+            }
+            if !isLinkWhitelisted(info, whitelist) {
+                return nil
+            }
+
+            target, err := readSymlink(path)
+            if err != nil {
+                return nil
+            }
+
+            target_details, err := os.Stat(target)
+            if err == nil && target_details.IsDir() {
+                if !recursive {
+                    to_report = append(to_report, rel + "/")
+                } else {
+                    target_list, err := listFiles(target, recursive, whitelist, ctx)
+                    if err != nil {
+                        return err
+                    }
+                    for _, tpath := range target_list {
+                        to_report = append(to_report, filepath.Join(rel, tpath))
                     }
                 }
+                return nil
             }
 
             // Avoiding addition of '.' in the case that 'dir' itself is a symlink.
@@ -112,8 +120,7 @@ func listMetadata(dir string, base_names []string, whitelist linkWhitelist, ctx 
         return curcontents, curfailures
     }
 
-    // Just skip any subdirectories that we can't access, no need to check the error.
-    err = filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+    err = filepath.WalkDir(dir, func(path string, dentry fs.DirEntry, err error) error {
         if err != nil {
             curfailures = append(curfailures, fmt.Sprintf("failed to walk %q; %v", path, err))
             return nil
@@ -122,7 +129,7 @@ func listMetadata(dir string, base_names []string, whitelist linkWhitelist, ctx 
             return fmt.Errorf("metadata listing request canceled; %w", err)
         }
 
-        if d.IsDir() {
+        if dentry.IsDir() {
             base := filepath.Base(path)
             if strings.HasPrefix(base, ".") {
                 return fs.SkipDir
@@ -136,16 +143,25 @@ func listMetadata(dir string, base_names []string, whitelist linkWhitelist, ctx 
             }
         }
 
-        if d.Type() & os.ModeSymlink == 0 {
+        if dentry.Type() & os.ModeSymlink == 0 {
             if _, ok := curnames[filepath.Base(path)]; !ok {
                 return nil
             }
-            info, err := d.Info()
+            info, err := dentry.Info()
             if err != nil {
                 curfailures = append(curfailures, fmt.Sprintf("failed to stat %q; %v", path, err))
             } else {
                 curcontents[path] = info
             }
+            return nil
+        }
+
+        info, err := dentry.Info()
+        if err != nil {
+            curfailures = append(curfailures, fmt.Sprintf("failed to stat %q; %v", path, err))
+            return nil
+        }
+        if !isLinkWhitelisted(info, whitelist) {
             return nil
         }
 
@@ -159,7 +175,7 @@ func listMetadata(dir string, base_names []string, whitelist linkWhitelist, ctx 
             return nil
         }
 
-        info, err := os.Stat(target_path)
+        info, err = os.Stat(target_path)
         if err != nil {
             curfailures = append(curfailures, fmt.Sprintf("failed to stat %q; %v", target_path, err))
             return nil
@@ -173,14 +189,7 @@ func listMetadata(dir string, base_names []string, whitelist linkWhitelist, ctx 
             return nil
         }
 
-        // We only recurse into symlinked directories if they're whitelisted. 
-        if len(whitelist) == 0 {
-            return nil
-        }
-        if !isLinkWhitelisted(path, target_path, whitelist) {
-            return nil
-        }
-
+        // Recursing into symbolic links to directories.
         target_list, target_fails := listMetadata(target_path, base_names, whitelist, ctx)
         for k, v := range target_list {
             rel, err := filepath.Rel(target_path, k)

@@ -52,9 +52,7 @@ func validatePath(path string) (string, error) {
     // We limit ourselves to cleaning the path and no further normalization.
     // In particular, we don't try to evaluate the symbolic links as the "real"
     // path may not be consistent across the shared filesystem (e.g., due to
-    // mounts onto different compute centers). So the symbolic links in the path
-    // to the registered directory may be important (though once we're inside
-    // a registered directory, any symbolic links are forbidden).
+    // mounts onto different compute centers). 
     return filepath.Clean(path), nil
 }
 
@@ -148,13 +146,43 @@ func checkVerificationCode(path string, verifier *verificationRegistry, timeout 
     return code_info, nil
 }
 
-func verifyDirectory(dir string) error {
-    // We're willing to accept symlinks to directories, hence the use of Stat().
-    info, err := os.Stat(dir)
-    if errors.Is(err, os.ErrNotExist) {
-        return newHttpError(http.StatusNotFound, fmt.Errorf("path %q does not exist", dir))
+func verifySymlinks(path string, whitelist linkWhitelist) error {
+    for {
+        info, err := os.Lstat(path)
+        if errors.Is(err, os.ErrNotExist) {
+            return newHttpError(http.StatusNotFound, fmt.Errorf("path %q does not exist", path))
+        }
+        if err != nil {
+            return fmt.Errorf("failed to check %q; %w", path, err)
+        }
+
+        if info.Mode() & os.ModeSymlink != 0 {
+            if !isLinkWhitelisted(info, whitelist) {
+                return newHttpError(http.StatusForbidden, fmt.Errorf("%q is not a whitelisted symlink", path))
+            }
+        }
+
+        parent := filepath.Dir(path)
+        if parent == path {
+            break
+        }
+        path = parent
     }
 
+    return nil
+}
+
+func verifyDirectory(dir string, whitelist linkWhitelist) error {
+    err := verifySymlinks(dir, whitelist)
+    if err != nil {
+        return err
+    }
+
+    // Now that we're sure that all links are safe, we can use Stat() directly.
+    info, err := os.Stat(dir)
+    if errors.Is(err, os.ErrNotExist) {
+        return newHttpError(http.StatusNotFound, fmt.Errorf("directory %q does not exist", dir))
+    }
     if err != nil {
         return fmt.Errorf("failed to check %q; %w", dir, err)
     }
@@ -162,13 +190,12 @@ func verifyDirectory(dir string) error {
     if !info.IsDir() {
         return newHttpError(http.StatusBadRequest, fmt.Errorf("%q is not a directory", dir))
     }
-
     return nil
 }
 
 /**********************************************************************/
 
-func newRegisterStartHandler(verifier *verificationRegistry) func(http.ResponseWriter, *http.Request) {
+func newRegisterStartHandler(verifier *verificationRegistry, whitelist linkWhitelist) func(http.ResponseWriter, *http.Request) {
     return func(w http.ResponseWriter, r *http.Request) {
         if r.Body == nil {
             dumpErrorResponse(w, http.StatusBadRequest, "expected a non-empty request body")
@@ -188,7 +215,7 @@ func newRegisterStartHandler(verifier *verificationRegistry) func(http.ResponseW
             return
         }
 
-        err = verifyDirectory(regpath)
+        err = verifyDirectory(regpath, whitelist)
         if err != nil {
             dumpErrorResponse(w, http.StatusBadRequest, err.Error())
             return
@@ -230,7 +257,7 @@ func newRegisterFinishHandler(db *sql.DB, verifier *verificationRegistry, tokeni
             return
         }
 
-        err = verifyDirectory(regpath)
+        err = verifyDirectory(regpath, add_options.LinkWhitelist)
         if err != nil {
             dumpHttpErrorResponse(w, err)
             return
@@ -575,7 +602,7 @@ func newRetrieveMetadataHandler(db *sql.DB) func(http.ResponseWriter, *http.Requ
 
 /**********************************************************************/
 
-func newRetrieveFileHandler(db *sql.DB) func(http.ResponseWriter, *http.Request) {
+func newRetrieveFileHandler(db *sql.DB, whitelist linkWhitelist) func(http.ResponseWriter, *http.Request) {
     return func(w http.ResponseWriter, r *http.Request) {
         params := r.URL.Query()
         path, err := getRetrievePath(params)
@@ -589,6 +616,11 @@ func newRetrieveFileHandler(db *sql.DB) func(http.ResponseWriter, *http.Request)
             dumpErrorResponse(w, http.StatusBadRequest, fmt.Sprintf("invalid path; %v", err))
             return
         }
+        err = verifySymlinks(path, whitelist)
+        if err != nil {
+            dumpHttpErrorResponse(w, err)
+            return
+        }
 
         okay, err := isDirectoryRegistered(filepath.Dir(path), db, r.Context())
         if err != nil {
@@ -600,7 +632,7 @@ func newRetrieveFileHandler(db *sql.DB) func(http.ResponseWriter, *http.Request)
             return
         }
 
-        // We use Stat() to resolve any symlink to a file.
+        // We use Stat() to resolve any symlink to a file, given that all the symlinks are whitelisted.
         info, err := os.Stat(path)
         if err != nil {
             if errors.Is(err, os.ErrNotExist) {
@@ -670,7 +702,7 @@ func newListFilesHandler(db *sql.DB, whitelist linkWhitelist) func(http.Response
             return
         }
 
-        err = verifyDirectory(path)
+        err = verifyDirectory(path, whitelist)
         if err != nil {
             dumpHttpErrorResponse(w, err)
             return
