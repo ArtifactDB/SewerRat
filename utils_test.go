@@ -2,6 +2,7 @@ package main
 
 import (
     "os"
+    "os/user"
     "fmt"
     "path/filepath"
     "database/sql"
@@ -151,4 +152,35 @@ func listDirs(dbconn *sql.DB) (map[string][]string, error) {
     }
 
     return output, nil
+}
+
+func createSelfLinkWhitelist() (linkWhitelist, error) {
+    self_user, err := user.Current() 
+    if err != nil {
+        return nil, err
+    }
+    self_name := self_user.Username
+    out := linkWhitelist{ self_name: true }
+
+    // Also adding all the owners of the temporary directory, 
+    // to avoid failures when we operate within that temporary directory.
+    tmp := os.TempDir()
+    for {
+        info, err := os.Lstat(tmp)
+        if err != nil {
+            return nil, err
+        }
+        user, err := identifyUser(info)
+        if err != nil {
+            return nil, err
+        }
+        out[user] = true
+        parent := filepath.Dir(tmp)
+        if parent == tmp {
+            break
+        }
+        tmp = parent
+    }
+
+    return out, nil
 }

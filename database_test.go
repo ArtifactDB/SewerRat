@@ -14,6 +14,14 @@ import (
     "context"
 )
 
+func createAddOptionsForDatabaseTests(concurrency int) (*addDirectoryContentsOptions, error) {
+    lw, err := createSelfLinkWhitelist() 
+    if err != nil {
+        return nil, err
+    }
+    return &addDirectoryContentsOptions{ Concurrency: concurrency, LinkWhitelist: lw }, nil
+}
+
 func TestInitializeDatabase(t *testing.T) {
     tmp, err := os.MkdirTemp("", "")
     if err != nil {
@@ -207,7 +215,10 @@ func TestAddNewDirectory(t *testing.T) {
         t.Fatalf(err.Error())
     }
 
-    add_options := &addDirectoryContentsOptions{ Concurrency: 2 }
+    add_options, err := createAddOptionsForDatabaseTests(2)
+    if err != nil {
+        t.Fatal(err)
+    }
 
     self, err := user.Current()
     if err != nil {
@@ -509,23 +520,44 @@ func TestAddNewDirectory(t *testing.T) {
         defer dbconn.Close()
         defer os.Remove(dbpath)
 
-        comments, err := addNewDirectory(symdir, []string{ "metadata.json", "other.json" }, "myself", tokr, dbconn, context.Background(), add_options)
-        if err != nil {
-            t.Fatal(err)
-        }
-        if len(comments) != 0 {
-            t.Fatalf("unexpected comments from the directory addition %v", comments)
-        }
+        t.Run("with whitelist", func(t *testing.T) {
+            comments, err := addNewDirectory(symdir, []string{ "metadata.json", "other.json" }, "myself", tokr, dbconn, context.Background(), add_options)
+            if err != nil {
+                t.Fatal(err)
+            }
+            if len(comments) != 0 {
+                t.Fatalf("unexpected comments from the directory addition %v", comments)
+            }
 
-        all_paths, err := listPaths(dbconn, tmp)
-        if err != nil {
-            t.Fatal(err)
-        }
+            all_paths, err := listPaths(dbconn, tmp)
+            if err != nil {
+                t.Fatal(err)
+            }
+            if !equalStringArrays(all_paths, []string{ "symlink/metadata.json", "symlink/other.json", "symlink/stuff/metadata.json", "symlink/stuff/other.json" }) {
+                t.Fatalf("unexpected paths in the index %v", all_paths)
+            }
+        })
 
-        // All symlink paths to directories/files are ignored.
-        if !equalStringArrays(all_paths, []string{ "symlink/metadata.json", "symlink/other.json" }) {
-            t.Fatalf("unexpected paths %v", all_paths)
-        }
+        t.Run("no whitelist", func(t *testing.T) {
+            add_options_nowl := &addDirectoryContentsOptions{ Concurrency: 2 }
+            comments, err := addNewDirectory(symdir, []string{ "metadata.json", "other.json" }, "myself", tokr, dbconn, context.Background(), add_options_nowl)
+            if err != nil {
+                t.Fatal(err)
+            }
+            if len(comments) != 0 {
+                t.Fatalf("unexpected comments from the directory addition %v", comments)
+            }
+
+            all_paths, err := listPaths(dbconn, tmp)
+            if err != nil {
+                t.Fatal(err)
+            }
+
+            // All symlink paths to directories/files are ignored.
+            if !equalStringArrays(all_paths, []string{ "symlink/other.json" }) {
+                t.Fatalf("unexpected paths %v", all_paths)
+            }
+        })
     })
 
     t.Run("canceled", func(t *testing.T) {
@@ -578,7 +610,10 @@ func TestDeleteDirectory(t *testing.T) {
         t.Fatalf(err.Error())
     }
 
-    add_options := &addDirectoryContentsOptions{ Concurrency: 2 }
+    add_options, err := createAddOptionsForDatabaseTests(2)
+    if err != nil {
+        t.Fatal(err)
+    }
 
     comments, err := addNewDirectory(to_add, []string{ "metadata.json", "other.json" }, "myself", tokr, dbconn, context.Background(), add_options)
     if err != nil {
@@ -698,7 +733,10 @@ func TestUpdateDirectories(t *testing.T) {
         t.Fatalf(err.Error())
     }
 
-    add_options := &addDirectoryContentsOptions{ Concurrency: 2 }
+    add_options, err := createAddOptionsForDatabaseTests(2)
+    if err != nil {
+        t.Fatal(err)
+    }
 
     getTime := func(dbconn *sql.DB, path string) int64 {
         var val int64
@@ -1315,7 +1353,10 @@ func TestCleanDatabase(t *testing.T) {
         t.Fatalf(err.Error())
     }
 
-    add_options := &addDirectoryContentsOptions{ Concurrency: 2 }
+    add_options, err := createAddOptionsForDatabaseTests(2)
+    if err != nil {
+        t.Fatal(err)
+    }
 
     // Mocking up some contents.
     for i := 0; i < 2; i++ {
@@ -1445,7 +1486,10 @@ func TestBackupDatabase(t *testing.T) {
         t.Fatalf(err.Error())
     }
 
-    add_options := &addDirectoryContentsOptions{ Concurrency: 2 }
+    add_options, err := createAddOptionsForDatabaseTests(2)
+    if err != nil {
+        t.Fatal(err)
+    }
 
     // Mocking up some contents.
     to_add := filepath.Join(tmp, "to_add")
@@ -1526,7 +1570,10 @@ func TestQueryTokens(t *testing.T) {
         t.Fatalf(err.Error())
     }
 
-    add_options := &addDirectoryContentsOptions{ Concurrency: 2 }
+    add_options, err := createAddOptionsForDatabaseTests(2)
+    if err != nil {
+        t.Fatal(err)
+    }
 
     // Mocking up some contents.
     to_add := filepath.Join(tmp, "to_add")
@@ -2096,7 +2143,10 @@ func TestRetrievePath(t *testing.T) {
         t.Fatalf(err.Error())
     }
 
-    add_options := &addDirectoryContentsOptions{ Concurrency: 2 }
+    add_options, err := createAddOptionsForDatabaseTests(2)
+    if err != nil {
+        t.Fatal(err)
+    }
 
     // Mocking up some contents.
     to_add := filepath.Join(tmp, "to_add")
@@ -2191,7 +2241,10 @@ func TestListRegisteredDirectories(t *testing.T) {
         t.Fatalf(err.Error())
     }
 
-    add_options := &addDirectoryContentsOptions{ Concurrency: 2 }
+    add_options, err := createAddOptionsForDatabaseTests(2)
+    if err != nil {
+        t.Fatal(err)
+    }
 
     // Mocking up some contents.
     for _, name := range []string{ "foo", "bar" } {
@@ -2523,7 +2576,10 @@ func TestIsDirectoryRegistered(t *testing.T) {
         t.Fatalf(err.Error())
     }
 
-    add_options := &addDirectoryContentsOptions{ Concurrency: 2 }
+    add_options, err := createAddOptionsForDatabaseTests(2)
+    if err != nil {
+        t.Fatal(err)
+    }
 
     // Mocking up some contents.
     to_add := filepath.Join(tmp, "to_add")
@@ -2606,7 +2662,10 @@ func TestFetchRegisteredDirectoryNames(t *testing.T) {
         t.Fatalf(err.Error())
     }
 
-    add_options := &addDirectoryContentsOptions{ Concurrency: 10 }
+    add_options, err := createAddOptionsForDatabaseTests(10)
+    if err != nil {
+        t.Fatal(err)
+    }
 
     to_add := filepath.Join(tmp, "liella")
     err = mockDirectory(to_add)
@@ -2670,7 +2729,10 @@ func TestInitializeReadOnlyDatabase(t *testing.T) {
         t.Fatal(err)
     }
 
-    add_options := &addDirectoryContentsOptions{ Concurrency: 10 }
+    add_options, err := createAddOptionsForDatabaseTests(10)
+    if err != nil {
+        t.Fatal(err)
+    }
 
     // Mocking up some contents.
     to_add := filepath.Join(tmp, "to_add")
@@ -2779,8 +2841,12 @@ WHERE tokens.token = ? AND fields.field = ?`,
             t.Fatal(err)
         }
 
+        cur_add_options, err := createAddOptionsForDatabaseTests(2)
+        if err != nil {
+            t.Fatal(err)
+        }
+
         // Checking that path is not tokenized by default.
-        cur_add_options := &addDirectoryContentsOptions{ Concurrency: 2 }
         comments, err := addNewDirectory(to_add, []string{ "metadata.json" }, "myself", tokr, dbconn, context.Background(), cur_add_options)
         if err != nil {
             t.Fatal(err)
@@ -2846,7 +2912,11 @@ WHERE tokens.token = ?`,
             t.Fatal(err)
         }
 
-        cur_add_options := &addDirectoryContentsOptions{ Concurrency: 2, PathField: "__blah__" }
+        cur_add_options, err := createAddOptionsForDatabaseTests(2)
+        if err != nil {
+            t.Fatal(err)
+        }
+
         comments, err := addNewDirectory(to_add, []string{ "metadata.json" }, "myself", tokr, dbconn, context.Background(), cur_add_options)
         if err != nil {
             t.Fatal(err)
@@ -2869,6 +2939,7 @@ WHERE tokens.token = ?`,
             t.Fatal(err)
         }
 
+        cur_add_options.PathField = "__blah__"
         comments, err = updateDirectories(tokr, dbconn, context.Background(), cur_add_options)
         if err != nil {
             t.Fatal(err)
@@ -2900,7 +2971,10 @@ func TestListFields(t *testing.T) {
         t.Fatalf(err.Error())
     }
 
-    add_options := &addDirectoryContentsOptions{ Concurrency: 10 }
+    add_options, err := createAddOptionsForDatabaseTests(10)
+    if err != nil {
+        t.Fatal(err)
+    }
 
     to_add := filepath.Join(tmp, "liella")
     err = mockDirectory(to_add)
@@ -3121,7 +3195,10 @@ func TestListTokens(t *testing.T) {
         t.Fatalf(err.Error())
     }
 
-    add_options := &addDirectoryContentsOptions{ Concurrency: 10 }
+    add_options, err := createAddOptionsForDatabaseTests(10)
+    if err != nil {
+        t.Fatal(err)
+    }
 
     to_add := filepath.Join(tmp, "liella")
     err = mockDirectory(to_add)

@@ -18,6 +18,14 @@ import (
     "context"
 )
 
+func createAddOptionsForHandlerTests() (*addDirectoryContentsOptions, error) {
+    lw, err := createSelfLinkWhitelist() 
+    if err != nil {
+        return nil, err
+    }
+    return &addDirectoryContentsOptions{ Concurrency: 1, LinkWhitelist: lw }, nil
+}
+
 func TestDumpJsonResponse(t *testing.T) {
     rr := httptest.NewRecorder()
     dumpJsonResponse(rr, http.StatusBadRequest, map[string]string{ "foo": "bar" })
@@ -39,18 +47,18 @@ func TestDumpJsonResponse(t *testing.T) {
     }
 }
 
-func TestValidatePath(t *testing.T) {
-    _, err := validatePath("")
+func TestCleanPath(t *testing.T) {
+    _, err := cleanPath("")
     if err == nil || !strings.Contains(err.Error(), "empty string") {
         t.Fatalf("expected an empty string error")
     }
 
-    _, err = validatePath("foobar")
+    _, err = cleanPath("foobar")
     if err == nil || !strings.Contains(err.Error(), "absolute path") {
         t.Fatalf("expected an absolute path error")
     }
 
-    path, err := validatePath("/whee/foobar/")
+    path, err := cleanPath("/whee/foobar/")
     if err != nil {
         t.Fatal(err)
     }
@@ -58,7 +66,7 @@ func TestValidatePath(t *testing.T) {
         t.Fatalf("expected elimination of trailing slashes, got %q instead", path)
     }
 
-    path, err = validatePath("/whee/a/../foobar/")
+    path, err = cleanPath("/whee/a/../foobar/")
     if err != nil {
         t.Fatal(err)
     }
@@ -153,18 +161,82 @@ func TestCheckVerificationCode(t *testing.T) {
     })
 }
 
+func TestCheckPotentialSymlinks(t *testing.T) {
+    dir, err := os.MkdirTemp("", "")
+    if err != nil {
+        t.Fatal(err)
+    }
+
+    err = os.MkdirAll(filepath.Join(dir, "FOO", "BAR"), 755)
+    if err != nil {
+        t.Fatal(err)
+    }
+
+    err = os.Mkdir(filepath.Join(dir, "whee"), 0755)
+    if err != nil {
+        t.Fatal(err)
+    }
+    err = os.Symlink(filepath.Join("..", "FOO", "BAR"), filepath.Join(dir, "whee", "stuff"))
+    if err != nil {
+        t.Fatal(err)
+    }
+
+    err = os.Symlink("FOO", filepath.Join(dir, "yay"))
+    if err != nil {
+        t.Fatal(err)
+    }
+
+    wl, err := createSelfLinkWhitelist()
+    if err != nil {
+        t.Fatal(err)
+    }
+
+    err = checkPotentialSymlinks(filepath.Join(dir, "FOO", "BAR"), wl) // Works okay without any symlinks involved.
+    if err != nil{
+        t.Error(err)
+    }
+    err = checkPotentialSymlinks(filepath.Join(dir, "not", "present"), wl)
+    if err == nil || !strings.Contains(err.Error(), "does not exist") {
+        t.Error(err)
+    }
+
+    err = checkPotentialSymlinks(filepath.Join(dir, "whee", "stuff"), wl) // Works okay with symlink at the end.
+    if err != nil{
+        t.Error(err)
+    }
+    err = checkPotentialSymlinks(filepath.Join(dir, "whee", "stuff"), linkWhitelist{})
+    if err == nil || !strings.Contains(err.Error(), "whitelisted") {
+        t.Error(err)
+    }
+
+    err = checkPotentialSymlinks(filepath.Join(dir, "yay", "BAR"), wl) // Works okay with symlink in the middle.
+    if err != nil{
+        t.Error(err)
+    }
+    err = checkPotentialSymlinks(filepath.Join(dir, "yay", "BAR"), linkWhitelist{})
+    if err == nil || !strings.Contains(err.Error(), "whitelisted") {
+        t.Error(err)
+    }
+}
+
 func TestVerifyDirectory(t *testing.T) {
     dir, err := os.MkdirTemp("", "")
     if err != nil {
         t.Fatal(err)
     }
-    err = verifyDirectory(dir)
+
+    wl, err := createSelfLinkWhitelist()
+    if err != nil {
+        t.Fatal(err)
+    }
+
+    err = verifyDirectory(dir, wl)
     if err != nil {
         t.Error(err)
     }
 
     // Fails if it doesn't exist.
-    err = verifyDirectory(filepath.Join(dir, "BAR"))
+    err = verifyDirectory(filepath.Join(dir, "BAR"), wl)
     if err == nil || !strings.Contains(err.Error(), "does not exist") {
         t.Error(err)
     }
@@ -174,12 +246,12 @@ func TestVerifyDirectory(t *testing.T) {
     if err != nil {
         t.Fatal(err)
     }
-    err = verifyDirectory(filepath.Join(dir, "FOO"))
+    err = verifyDirectory(filepath.Join(dir, "FOO"), wl)
     if err == nil || !strings.Contains(err.Error(), "not a directory") {
         t.Error(err)
     }
 
-    // Okay if it's a symlink.
+    // Fails if it's a symlink.
     staging, err := os.MkdirTemp("", "")
     if err != nil {
         t.Fatal(err)
@@ -189,7 +261,13 @@ func TestVerifyDirectory(t *testing.T) {
     if err != nil {
         t.Fatal(err)
     }
-    err = verifyDirectory(new_path)
+    err = verifyDirectory(new_path, linkWhitelist{})
+    if err == nil || !strings.Contains(err.Error(), "whitelisted") {
+        t.Error(err)
+    }
+
+    // Unless it was whitelisted.
+    err = verifyDirectory(new_path, wl)
     if err != nil {
         t.Error(err)
     }
@@ -233,8 +311,13 @@ func TestRegisterHandlers(t *testing.T) {
     }
     defer dbconn.Close()
 
+    wl, err := createSelfLinkWhitelist()
+    if err != nil {
+        t.Fatal(err)
+    }
+
     verifier := newVerificationRegistry(time.Minute)
-    start_handler := http.HandlerFunc(newRegisterStartHandler(verifier))
+    start_handler := http.HandlerFunc(newRegisterStartHandler(verifier, wl))
 
     t.Run("register start failed not absolute", func(t *testing.T) {
         req := createJsonRequest("POST", "/register/start", map[string]interface{}{ "path": "foo" }, t)
@@ -317,7 +400,11 @@ func TestRegisterHandlers(t *testing.T) {
         t.Fatal(err)
     }
 
-    add_options := &addDirectoryContentsOptions{ Concurrency: 1 }
+    add_options, err := createAddOptionsForHandlerTests()
+    if err != nil {
+        t.Fatal(err)
+    }
+
     duration := time.Duration(1)
     finish_handler := http.HandlerFunc(newRegisterFinishHandler(dbconn, verifier, tokr, add_options, duration))
 
@@ -550,7 +637,11 @@ func TestDeregisterHandlers(t *testing.T) {
     if err != nil {
         t.Fatal(err)
     }
-    add_options := &addDirectoryContentsOptions{ Concurrency: 1 }
+
+    add_options, err := createAddOptionsForHandlerTests()
+    if err != nil {
+        t.Fatal(err)
+    }
 
     quickReadd := func() string {
         to_add, err := os.MkdirTemp("", "")
@@ -691,7 +782,6 @@ func TestDeregisterHandlers(t *testing.T) {
             t.Fatal(err)
         }
 
-        add_options := &addDirectoryContentsOptions{ Concurrency: 1 }
         comments, err := addNewDirectory(to_add_and_remove, []string{ "metadata.json", "other.json" }, "myself", tokr, dbconn, context.Background(), add_options)
         if err != nil {
             t.Fatal(err)
@@ -789,7 +879,11 @@ func TestQueryHandler(t *testing.T) {
         t.Fatalf(err.Error())
     }
 
-    add_options := &addDirectoryContentsOptions{ Concurrency: 1 }
+    add_options, err := createAddOptionsForHandlerTests()
+    if err != nil {
+        t.Fatal(err)
+    }
+
     comments, err := addNewDirectory(to_add, []string{ "metadata.json", "other.json" }, "myself", tokr, dbconn, context.Background(), add_options)
     if err != nil {
         t.Fatal(err)
@@ -1156,7 +1250,11 @@ func TestRetrieveMetadataHandler(t *testing.T) {
         t.Fatalf(err.Error())
     }
 
-    add_options := &addDirectoryContentsOptions{ Concurrency: 1 }
+    add_options, err := createAddOptionsForHandlerTests()
+    if err != nil {
+        t.Fatal(err)
+    }
+
     comments, err := addNewDirectory(to_add, []string{ "metadata.json", "other.json" }, "myself", tokr, dbconn, context.Background(), add_options)
     if err != nil {
         t.Fatal(err)
@@ -1304,8 +1402,12 @@ func TestRetrieveFileHandler(t *testing.T) {
         t.Fatalf(err.Error())
     }
 
+    add_options, err := createAddOptionsForHandlerTests()
+    if err != nil {
+        t.Fatal(err)
+    }
+
     // Here, nothing is actually indexed! So we can't get confused with the metadata retrievals.
-    add_options := &addDirectoryContentsOptions{ Concurrency: 1 }
     comments, err := addNewDirectory(to_add, []string{}, "myself", tokr, dbconn, context.Background(), add_options)
     if err != nil {
         t.Fatal(err)
@@ -1314,7 +1416,7 @@ func TestRetrieveFileHandler(t *testing.T) {
         t.Fatal("no comments should be present")
     }
 
-    handler := http.HandlerFunc(newRetrieveFileHandler(dbconn))
+    handler := http.HandlerFunc(newRetrieveFileHandler(dbconn, add_options.LinkWhitelist))
 
     t.Run("success", func (t *testing.T) {
         req, err := http.NewRequest("GET", "/retrieve/file?path=" + url.QueryEscape(filepath.Join(to_add, "metadata.json")), nil)
@@ -1393,7 +1495,7 @@ func TestRetrieveFileHandler(t *testing.T) {
         rr := httptest.NewRecorder()
         handler.ServeHTTP(rr, req)
         if rr.Code != http.StatusForbidden {
-            t.Fatalf("should have failed with a 403")
+            t.Fatalf("should have failed with a 403; got %v instead", rr.Code)
         }
     })
 
@@ -1408,6 +1510,70 @@ func TestRetrieveFileHandler(t *testing.T) {
         if rr.Code != http.StatusBadRequest {
             t.Fatalf("should have failed with a 400")
         }
+    })
+
+    err = os.Symlink(filepath.Join(to_add, "metadata.json"), filepath.Join(to_add, "FOO"))
+    if err != nil {
+        t.Fatal(err)
+    }
+
+    err = os.Symlink(filepath.Join(to_add, "stuff"), filepath.Join(to_add, "BAR"))
+    if err != nil {
+        t.Fatal(err)
+    }
+
+    t.Run("symlinks", func(t *testing.T) {
+        t.Run("ok", func(t *testing.T) {
+            // Testing both symlinks to individual files as well as files inside symlinked directories.
+            for _, target := range []string{ "FOO", filepath.Join("BAR", "metadata.json") } {
+                req, err := http.NewRequest("GET", "/retrieve/file?path=" + url.QueryEscape(filepath.Join(to_add, target)), nil)
+                if err != nil {
+                    t.Fatal(err)
+                }
+
+                rr := httptest.NewRecorder()
+                handler.ServeHTTP(rr, req)
+                if rr.Code != http.StatusOK {
+                    t.Fatalf("retrieving %q should have succeeded, got %v instead", target, rr.Code)
+                }
+
+                r := map[string]interface{}{}
+                dec := json.NewDecoder(rr.Body)
+                err = dec.Decode(&r)
+                if err != nil {
+                    t.Fatal(err)
+                }
+
+                if target == "FOO" {
+                    foo, ok := r["foo"]
+                    if !ok || foo != "Aaron had a little lamb" {
+                        t.Fatal("unexpected result from file retrieval")
+                    }
+                } else {
+                    anime, ok := r["anime"]
+                    if !ok || anime != "Yuri Yuru" {
+                        t.Fatal("unexpected result from file retrieval")
+                    }
+                }
+            }
+        })
+
+        t.Run("blocked", func(t *testing.T) {
+            handler := http.HandlerFunc(newRetrieveFileHandler(dbconn, linkWhitelist{}))
+
+            for _, target := range []string{ "FOO", filepath.Join("BAR", "metadata.json") } {
+                req, err := http.NewRequest("GET", "/retrieve/file?path=" + url.QueryEscape(filepath.Join(to_add, target)), nil)
+                if err != nil {
+                    t.Fatal(err)
+                }
+
+                rr := httptest.NewRecorder()
+                handler.ServeHTTP(rr, req)
+                if rr.Code != http.StatusForbidden {
+                    t.Fatalf("should have failed with non-whitelisted symlinks")
+                }
+            }
+        })
     })
 }
 
@@ -1436,7 +1602,11 @@ func TestListFilesHandler(t *testing.T) {
         t.Fatalf(err.Error())
     }
 
-    add_options := &addDirectoryContentsOptions{ Concurrency: 1 }
+    add_options, err := createAddOptionsForHandlerTests()
+    if err != nil {
+        t.Fatal(err)
+    }
+
     comments, err := addNewDirectory(to_add, []string{}, "myself", tokr, dbconn, context.Background(), add_options)
     if err != nil {
         t.Fatal(err)
@@ -1560,6 +1730,8 @@ func TestListFilesHandler(t *testing.T) {
             t.Fatalf("should have failed with a 400 (got %d instead)", rr.Code)
         }
     })
+
+    // Note, symlink testing is handled in listFiles().
 }
 
 func TestListRegisteredDirectoriesHandler(t *testing.T) {
@@ -1581,7 +1753,10 @@ func TestListRegisteredDirectoriesHandler(t *testing.T) {
         t.Fatalf(err.Error())
     }
 
-    add_options := &addDirectoryContentsOptions{ Concurrency: 1 }
+    add_options, err := createAddOptionsForHandlerTests()
+    if err != nil {
+        t.Fatal(err)
+    }
 
     for _, name := range []string{ "akari", "ai", "alice" } {
         to_add := filepath.Join(tmp, "to_add_" + name)
@@ -1850,7 +2025,11 @@ func TestListFieldsHandler(t *testing.T) {
         t.Fatalf(err.Error())
     }
 
-    add_options := &addDirectoryContentsOptions{ Concurrency: 1 }
+    add_options, err := createAddOptionsForHandlerTests()
+    if err != nil {
+        t.Fatal(err)
+    }
+
     comments, err := addNewDirectory(to_add, []string{ "metadata.json", "other.json" }, "myself", tokr, dbconn, context.Background(), add_options)
     if err != nil {
         t.Fatal(err)
@@ -2030,7 +2209,11 @@ func TestListTokensHandler(t *testing.T) {
         t.Fatalf(err.Error())
     }
 
-    add_options := &addDirectoryContentsOptions{ Concurrency: 1 }
+    add_options, err := createAddOptionsForHandlerTests()
+    if err != nil {
+        t.Fatal(err)
+    }
+
     comments, err := addNewDirectory(to_add, []string{ "metadata.json", "other.json" }, "myself", tokr, dbconn, context.Background(), add_options)
     if err != nil {
         t.Fatal(err)
