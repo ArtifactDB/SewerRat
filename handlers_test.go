@@ -161,6 +161,64 @@ func TestCheckVerificationCode(t *testing.T) {
     })
 }
 
+func TestCheckPotentialSymlinks(t *testing.T) {
+    dir, err := os.MkdirTemp("", "")
+    if err != nil {
+        t.Fatal(err)
+    }
+
+    err = os.MkdirAll(filepath.Join(dir, "FOO", "BAR"), 755)
+    if err != nil {
+        t.Fatal(err)
+    }
+
+    err = os.Mkdir(filepath.Join(dir, "whee"), 0755)
+    if err != nil {
+        t.Fatal(err)
+    }
+    err = os.Symlink(filepath.Join("..", "FOO", "BAR"), filepath.Join(dir, "whee", "stuff"))
+    if err != nil {
+        t.Fatal(err)
+    }
+
+    err = os.Symlink("FOO", filepath.Join(dir, "yay"))
+    if err != nil {
+        t.Fatal(err)
+    }
+
+    wl, err := createSelfLinkWhitelist()
+    if err != nil {
+        t.Fatal(err)
+    }
+
+    err = checkPotentialSymlinks(filepath.Join(dir, "FOO", "BAR"), wl) // Works okay without any symlinks involved.
+    if err != nil{
+        t.Error(err)
+    }
+    err = checkPotentialSymlinks(filepath.Join(dir, "not", "present"), wl)
+    if err == nil || !strings.Contains(err.Error(), "does not exist") {
+        t.Error(err)
+    }
+
+    err = checkPotentialSymlinks(filepath.Join(dir, "whee", "stuff"), wl) // Works okay with symlink at the end.
+    if err != nil{
+        t.Error(err)
+    }
+    err = checkPotentialSymlinks(filepath.Join(dir, "whee", "stuff"), linkWhitelist{})
+    if err == nil || !strings.Contains(err.Error(), "whitelisted") {
+        t.Error(err)
+    }
+
+    err = checkPotentialSymlinks(filepath.Join(dir, "yay", "BAR"), wl) // Works okay with symlink in the middle.
+    if err != nil{
+        t.Error(err)
+    }
+    err = checkPotentialSymlinks(filepath.Join(dir, "yay", "BAR"), linkWhitelist{})
+    if err == nil || !strings.Contains(err.Error(), "whitelisted") {
+        t.Error(err)
+    }
+}
+
 func TestVerifyDirectory(t *testing.T) {
     dir, err := os.MkdirTemp("", "")
     if err != nil {

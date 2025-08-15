@@ -162,7 +162,8 @@ func createSelfLinkWhitelist() (linkWhitelist, error) {
     self_name := self_user.Username
     out := linkWhitelist{ self_name: true }
 
-    // Also adding all the owners of the temporary directory.
+    // Also adding all the owners of the temporary directory, 
+    // to avoid failures when we operate within that temporary directory.
     tmp := os.TempDir()
     for {
         info, err := os.Lstat(tmp)
