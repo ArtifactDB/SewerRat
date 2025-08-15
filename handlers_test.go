@@ -283,6 +283,14 @@ func decodeStringyResponse(input io.Reader, t *testing.T) map[string]string {
     return output
 }
 
+func getField(obj map[string]string, field string, t *testing.T) string {
+    val, ok := obj[field]
+    if !ok {
+        t.Fatal("failed to extract '" + field + "'")
+    }
+    return val
+}
+
 func createJsonRequest(method, endpoint string, body map[string]interface{}, t *testing.T) *http.Request {
     contents, err := json.Marshal(body)
     if err != nil {
@@ -328,7 +336,7 @@ func TestRegisterHandlers(t *testing.T) {
         }
 
         output := decodeStringyResponse(rr.Body, t)
-        if output["status"] != "ERROR" || !strings.Contains(output["reason"], "absolute") {
+        if getField(output, "status", t) != "ERROR" || !strings.Contains(getField(output, "reason", t), "absolute") {
             t.Fatalf("unexpected body; %v", output)
         }
     })
@@ -355,7 +363,7 @@ func TestRegisterHandlers(t *testing.T) {
         }
 
         output := decodeStringyResponse(rr.Body, t)
-        code := output["code"]
+        code := getField(output, "code", t)
         if output["status"] != "PENDING" || !strings.HasPrefix(code, ".sewer_") {
             t.Fatalf("unexpected body; %v", output)
         }
@@ -392,7 +400,7 @@ func TestRegisterHandlers(t *testing.T) {
         }
 
         output := decodeStringyResponse(rr.Body, t)
-        return output["code"]
+        return getField(output, "code", t)
     }
 
     tokr, err := newUnicodeTokenizer(false)
@@ -672,8 +680,7 @@ func TestDeregisterHandlers(t *testing.T) {
         }
 
         output := decodeStringyResponse(rr.Body, t)
-        code := output["code"]
-        if output["status"] != "PENDING" || !strings.HasPrefix(code, ".sewer_") {
+        if getField(output, "status", t) != "PENDING" || !strings.HasPrefix(getField(output, "code", t), ".sewer_") {
             t.Fatalf("unexpected body; %v", output)
         }
     })
@@ -686,7 +693,7 @@ func TestDeregisterHandlers(t *testing.T) {
             t.Fatalf("should have succeeded; %v", rr.Code)
         }
         output := decodeStringyResponse(rr.Body, t)
-        return output["code"]
+        return getField(output, "code", t)
     }
 
     duration := time.Second
@@ -727,7 +734,7 @@ func TestDeregisterHandlers(t *testing.T) {
         }
 
         output := decodeStringyResponse(rr.Body, t)
-        if output["status"] != "SUCCESS" {
+        if getField(output, "status", t) != "SUCCESS" {
             t.Fatalf("unexpected body; %v", output)
         }
 
@@ -808,7 +815,7 @@ func TestDeregisterHandlers(t *testing.T) {
         }
 
         output := decodeStringyResponse(rr.Body, t)
-        if output["status"] != "SUCCESS" {
+        if getField(output, "status", t) != "SUCCESS" {
             t.Fatalf("unexpected body")
         }
 
