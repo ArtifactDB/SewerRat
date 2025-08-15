@@ -15,6 +15,7 @@ import (
     "mime"
 
     "time"
+    "context"
 
     "encoding/json"
     "errors"
@@ -309,7 +310,7 @@ func newRegisterFinishHandler(db *sql.DB, verifier *verificationRegistry, tokeni
             }
         } else {
             go func() {
-                _, err := addNewDirectory(regpath, allowed, username, tokenizer, db, r.Context(), add_options)
+                _, err := addNewDirectory(regpath, allowed, username, tokenizer, db, context.Background(), add_options)
                 if err != nil {
                     log.Printf("failed to add directory %q; %v", regpath, err)
                 }
@@ -360,7 +361,7 @@ func newDeregisterStartHandler(db *sql.DB, verifier *verificationRegistry) func(
                 }
             } else {
                 go func() {
-                    err := deleteDirectory(regpath, db, r.Context())
+                    err := deleteDirectory(regpath, db, context.Background())
                     if err != nil {
                         log.Printf("failed to delete directory %q; %v", regpath, err)
                     }
@@ -422,7 +423,7 @@ func newDeregisterFinishHandler(db *sql.DB, verifier *verificationRegistry, time
             }
         } else {
             go func() {
-                err := deleteDirectory(regpath, db, r.Context())
+                err := deleteDirectory(regpath, db, context.Background())
                 if err != nil {
                     log.Printf("failed to delete directory %q; %v", regpath, err)
                 }
