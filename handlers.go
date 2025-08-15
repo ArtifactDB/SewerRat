@@ -635,8 +635,6 @@ func newRetrieveFileHandler(db *sql.DB, whitelist linkWhitelist) func(http.Respo
         // We use Stat() to resolve any symlink to a file, given that all the symlinks are whitelisted.
         info, err := os.Stat(path)
         if err != nil {
-            fmt.Println("YAY")
-            fmt.Println(err)
             if errors.Is(err, os.ErrNotExist) {
                 err = newHttpError(http.StatusNotFound, errors.New("path does not exist"))
             } else {
